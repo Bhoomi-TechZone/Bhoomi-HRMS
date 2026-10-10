@@ -401,6 +401,40 @@ router.post('/upload-generated-docx', auth, checkPermission(['documents', 'lette
   }
 });
 
+// Preview PDF (return PDF as base64 or stream for frontend preview)
+router.get('/:id/preview', auth, async (req, res) => {
+  try {
+    const document = await GeneratedDocument.findById(req.params.id);
+    if (!document) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    // Check if PDF exists
+    if (document.pdfPath && fsSync.existsSync(document.pdfPath)) {
+      const pdfBuffer = await fs.readFile(document.pdfPath);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline');
+      return res.send(pdfBuffer);
+    }
+
+    // Check alternative path
+    if (document.pdfUrl) {
+      const altPath = path.join(__dirname, '..', document.pdfUrl);
+      if (fsSync.existsSync(altPath)) {
+        const pdfBuffer = await fs.readFile(altPath);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'inline');
+        return res.send(pdfBuffer);
+      }
+    }
+
+    return res.status(404).json({ message: 'PDF file not found' });
+  } catch (error) {
+    console.error('Preview handler error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Download PDF
 router.get('/:id/download', auth, async (req, res) => {
   try {
@@ -539,6 +573,103 @@ router.delete('/:id', auth, checkPermission(['documents', 'letters'], 'delete'),
     await document.deleteOne();
     res.json({ message: 'Document deleted successfully' });
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Generate Offer Letter by filling original PDF template
+router.post('/generate-offer-letter', auth, checkPermission(['documents', 'letters'], 'create'), async (req, res) => {
+  try {
+    const {
+      selectedEmployeeId,
+      name,
+      designation,
+      department,
+      dateOfJoining,
+      employmentType,
+      officeLocation,
+      annualCTC,
+      monthlySalary,
+      monthlyTarget,
+      workingDays,
+      workingHours,
+      officeTiming,
+      observationPeriod,
+      probationPeriod,
+      noticePeriod,
+      reportingManager,
+      coreResponsibilities,
+      performanceExpectations,
+    } = req.body;
+
+    console.log('=== GENERATING OFFER LETTER WITH PUPPETEER ===');
+    console.log('Data:', { name, designation, department, dateOfJoining });
+
+    const { generateOfferLetterHTML } = require('../utils/offerLetterTemplate');
+    const finalHtml = generateOfferLetterHTML({
+      name,
+      designation,
+      department,
+      dateOfJoining,
+      employmentType,
+      officeLocation,
+      annualCTC,
+      monthlySalary,
+      monthlyTarget,
+      workingDays,
+      workingHours,
+      officeTiming,
+      observationPeriod,
+      probationPeriod,
+      noticePeriod,
+      reportingManager,
+      coreResponsibilities,
+      performanceExpectations,
+    });
+
+    const pdfFileName = `offer-letter-${Date.now()}.pdf`;
+    const pdfPath = await generatePDF(finalHtml, pdfFileName);
+
+    console.log('PDF generated with Puppeteer:', pdfPath);
+
+    // Create document record
+    const document = new GeneratedDocument({
+      template: null,
+      employee: selectedEmployeeId || null,
+      title: `Offer Letter - ${name || 'Candidate'}`,
+      placeholderData: new Map(Object.entries({
+        name, designation, department, dateOfJoining, employmentType,
+        officeLocation, annualCTC, monthlySalary, monthlyTarget,
+        workingDays, workingHours, officeTiming, observationPeriod,
+        probationPeriod, noticePeriod, reportingManager,
+        coreResponsibilities, performanceExpectations,
+      })),
+      finalHtml: finalHtml,
+      generatedBy: req.user.id,
+      metadata: {
+        templateName: 'Offer Letter BTPL10',
+        candidateName: name,
+        clientName: name,
+        designation, department,
+      }
+    });
+
+    await document.save();
+
+    document.pdfPath = pdfPath;
+    document.pdfUrl = `/uploads/documents/generated/${pdfFileName}`;
+    document.status = 'generated';
+    await document.save();
+
+    const populatedDoc = await GeneratedDocument.findById(document._id)
+      .populate('template', 'name type')
+      .populate('employee', 'firstName lastName email')
+      .populate('generatedBy', 'firstName lastName');
+
+    console.log('=== COMPLETED ===');
+    res.status(201).json(populatedDoc);
+  } catch (error) {
+    console.error('ERROR:', error);
     res.status(500).json({ message: error.message });
   }
 });

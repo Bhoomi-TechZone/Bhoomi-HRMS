@@ -29,6 +29,7 @@
     "node-cron": "^4.2.1",
     "node-imap": "^0.9.6",
     "nodemailer": "^7.0.12",
+    "pdf-lib": "^1.17.1",
     "pdfkit": "^0.17.2",
     "puppeteer": "^24.40.0",
     "simple-parser": "^0.0.0",

@@ -84,6 +84,7 @@ function Letters() {
   const [showExperienceLetterModal, setShowExperienceLetterModal] = useState(false);
   const [showExitLetterModal, setShowExitLetterModal] = useState(false);
   const [showNDAModal, setShowNDAModal] = useState(false);
+  const [showBTPLOfferLetterModal, setShowBTPLOfferLetterModal] = useState(false);
   const [ndaForm, setNdaForm] = useState({
     salutation: 'Mr.',
     employeeName: '',
@@ -175,6 +176,44 @@ function Letters() {
     dateOfJoining: '',
     dateOfRelieving: '',
   });
+
+  const [btplOfferLetterForm, setBtplOfferLetterForm] = useState({
+    // Employee selection
+    selectedEmployeeId: '',
+    
+    // Basic Details
+    name: '',
+    designation: '',
+    department: '',
+    dateOfJoining: '',
+    employmentType: 'Full-Time',
+    officeLocation: '2nd Floor A-43, Sector 63 Noida 201301',
+    
+    // Compensation
+    annualCTC: '',
+    monthlySalary: '',
+    monthlyTarget: '',
+    
+    // Work Schedule
+    workingDays: '06 Days',
+    workingHours: '09 Hours',
+    officeTiming: '11:00 Am – 08:00 Pm',
+    
+    // Policies
+    observationPeriod: '01 Day (Unpaid)',
+    probationPeriod: '03 months',
+    noticePeriod: '45 Days',
+    
+    // Reporting
+    reportingManager: 'Mr. Aman Dwivedi (Managing Director)',
+    
+    // Role & Responsibilities (optional - can be left empty)
+    coreResponsibilities: '',
+    performanceExpectations: '',
+  });
+
+  const [btplEmpSearch, setBtplEmpSearch] = useState('');
+  const [btplEmpDropdownOpen, setBtplEmpDropdownOpen] = useState(false);
 
   const hasAccess = hasPermission?.('letters', 'read');
   const isAdmin = user?.role?.name === 'Admin';
@@ -407,7 +446,31 @@ function Letters() {
 
   const handleLetterSelection = (letterType, department) => {
     setGenDropdownOpen(false);
-    if (letterType === 'Joining' && department === 'Sales') {
+    if (letterType === 'Offer' && department === 'BTPL') {
+      setBtplOfferLetterForm({
+        selectedEmployeeId: '',
+        name: '',
+        designation: '',
+        department: '',
+        dateOfJoining: '',
+        employmentType: 'Full-Time',
+        officeLocation: '2nd Floor A-43, Sector 63 Noida 201301',
+        annualCTC: '',
+        monthlySalary: '',
+        monthlyTarget: '',
+        workingDays: '06 Days',
+        workingHours: '09 Hours',
+        officeTiming: '11:00 Am – 08:00 Pm',
+        observationPeriod: '01 Day (Unpaid)',
+        probationPeriod: '03 months',
+        noticePeriod: '45 Days',
+        reportingManager: 'Mr. Aman Dwivedi (Managing Director)',
+        coreResponsibilities: '',
+        performanceExpectations: '',
+      });
+      setBtplEmpSearch('');
+      setShowBTPLOfferLetterModal(true);
+    } else if (letterType === 'Joining' && department === 'Sales') {
       handleOpenJoiningLetter();
     } else if (letterType === 'Joining' && department === 'IT') {
       setItJoiningLetterForm({
@@ -1847,6 +1910,42 @@ function Letters() {
     }
   };
 
+  const handleGenerateBTPLOfferLetter = async (form) => {
+    setGenerating(true);
+    try {
+      // Call backend API to generate offer letter from template
+      await api.post('/document-generator/generate-offer-letter', {
+        selectedEmployeeId: form.selectedEmployeeId,
+        name: form.name,
+        designation: form.designation,
+        department: form.department,
+        dateOfJoining: form.dateOfJoining,
+        employmentType: form.employmentType,
+        officeLocation: form.officeLocation,
+        annualCTC: form.annualCTC,
+        monthlySalary: form.monthlySalary,
+        monthlyTarget: form.monthlyTarget,
+        workingDays: form.workingDays,
+        workingHours: form.workingHours,
+        officeTiming: form.officeTiming,
+        observationPeriod: form.observationPeriod,
+        probationPeriod: form.probationPeriod,
+        noticePeriod: form.noticePeriod,
+        reportingManager: form.reportingManager,
+        coreResponsibilities: form.coreResponsibilities,
+        performanceExpectations: form.performanceExpectations,
+      });
+
+      alert('Offer Letter generated successfully!');
+      fetchDocuments();
+      setShowBTPLOfferLetterModal(false);
+    } catch (e) {
+      alert('Error generating offer letter: ' + (e.response?.data?.message || e.message));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const handleGenerateNDA = async () => {
     setGenerating(true);
     try {
@@ -2136,55 +2235,13 @@ function Letters() {
           {genDropdownOpen && (
             <div className="gen-letter-dropdown">
               <div className="gld-section" onClick={e => e.stopPropagation()}>
-                {/* Sales Section */}
-                <div
-                  className={`gld-expand-item ${expandedLetterSection === 'sales' ? 'active' : ''}`}
-                  onClick={() => setExpandedLetterSection(expandedLetterSection === 'sales' ? null : 'sales')}
-                >
+                {/* Offer Letter - Single Item */}
+                <button className="gld-item" onClick={() => handleLetterSelection('Offer', 'BTPL')}>
                   <div className="gld-item-details">
-                    <div className="gld-item-title">Sales</div>
-                    <div className="gld-item-desc">Offer & Joining Letters</div>
+                    <div className="gld-item-title">Offer Letter</div>
+                    <div className="gld-item-desc">Generate offer letter from template</div>
                   </div>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                    style={{ marginLeft: 'auto', transition: 'transform 0.2s', transform: expandedLetterSection === 'sales' ? 'rotate(180deg)' : 'none' }}>
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </div>
-                {expandedLetterSection === 'sales' && (
-                  <div className="gld-inline-submenu">
-                    <button className="gld-submenu-item" onClick={() => handleLetterSelection('Offer', 'Sales')}>
-                      Offer Letter
-                    </button>
-                    <button className="gld-submenu-item" onClick={() => handleLetterSelection('Joining', 'Sales')}>
-                      Joining Letter
-                    </button>
-                  </div>
-                )}
-
-                {/* Tech Section */}
-                <div
-                  className={`gld-expand-item ${expandedLetterSection === 'tech' ? 'active' : ''}`}
-                  onClick={() => setExpandedLetterSection(expandedLetterSection === 'tech' ? null : 'tech')}
-                >
-                  <div className="gld-item-details">
-                    <div className="gld-item-title">Tech</div>
-                    <div className="gld-item-desc">Offer & Joining Letters</div>
-                  </div>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                    style={{ marginLeft: 'auto', transition: 'transform 0.2s', transform: expandedLetterSection === 'tech' ? 'rotate(180deg)' : 'none' }}>
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </div>
-                {expandedLetterSection === 'tech' && (
-                  <div className="gld-inline-submenu">
-                    <button className="gld-submenu-item" onClick={() => handleLetterSelection('Offer', 'IT')}>
-                      Offer Letter
-                    </button>
-                    <button className="gld-submenu-item" onClick={() => handleLetterSelection('Joining', 'IT')}>
-                      Joining Letter
-                    </button>
-                  </div>
-                )}
+                </button>
 
                 {/* Compliance Section */}
                 <div
@@ -3662,14 +3719,44 @@ function Letters() {
         >
           <button
             className="letters-kebab-item"
-            onClick={() => {
+            onClick={async () => {
               setOpenMenuId(null);
               const doc = paginatedDocs.find(d => d._id === openMenuId);
               if (doc) {
-                const win = window.open('', '_blank', 'width=900,height=1150');
-                if (win) {
-                  win.document.write(doc.finalHtml || '<p>No content available</p>');
-                  win.document.close();
+                // For PDF-based documents (like Offer Letter BTPL10), open PDF directly
+                if (doc.pdfPath || doc.pdfUrl) {
+                  try {
+                    // Fetch PDF and open in new tab
+                    const res = await api.get(`/document-generator/${doc._id}/preview`, { 
+                      responseType: 'blob' 
+                    });
+                    
+                    if (res.data) {
+                      const pdfBlob = new Blob([res.data], { type: 'application/pdf' });
+                      const pdfUrl = window.URL.createObjectURL(pdfBlob);
+                      const win = window.open(pdfUrl, '_blank');
+                      if (!win) {
+                        alert('Please allow popups to preview the document');
+                      }
+                      // Clean up after a delay
+                      setTimeout(() => window.URL.revokeObjectURL(pdfUrl), 10000);
+                    }
+                  } catch (err) {
+                    console.error('Preview error:', err);
+                    // Fallback to HTML preview
+                    const win = window.open('', '_blank', 'width=900,height=1150');
+                    if (win) {
+                      win.document.write(doc.finalHtml || '<p>No content available</p>');
+                      win.document.close();
+                    }
+                  }
+                } else {
+                  // For HTML-based documents, use existing preview
+                  const win = window.open('', '_blank', 'width=900,height=1150');
+                  if (win) {
+                    win.document.write(doc.finalHtml || '<p>No content available</p>');
+                    win.document.close();
+                  }
                 }
               }
             }}
@@ -3836,6 +3923,520 @@ function Letters() {
                 dangerouslySetInnerHTML={{ __html: editingHtml }}
               />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── BTPL Offer Letter Modal ── */}
+      {showBTPLOfferLetterModal && (
+        <div className="letters-modal-overlay" onClick={() => setShowBTPLOfferLetterModal(false)}>
+          <div className="jl-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '1400px', maxHeight: '90vh', overflowY: 'auto', display: 'flex', gap: 20 }}>
+
+            {/* Left Side - Form */}
+            <div style={{ flex: '0 0 500px', display: 'flex', flexDirection: 'column' }}>
+              <div className="letters-modal-header">
+                <div>
+                  <div className="letters-modal-title">Offer Letter</div>
+                  <div className="letters-modal-sub">Fill in the details - preview updates live</div>
+                </div>
+                <button className="letters-modal-close" onClick={() => setShowBTPLOfferLetterModal(false)}>×</button>
+              </div>
+
+              <div className="jl-modal-body" style={{ flex: 1, overflowY: 'auto', paddingRight: 10 }}>
+
+              {/* Employee Selector - Commented Out
+              <div className="jl-field jl-full" style={{ marginBottom: 20, position: 'relative' }}>
+                <label className="jl-label">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2" style={{ marginRight: 6, verticalAlign: 'middle' }}>
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                  Select Employee (Optional - for autofill)
+                </label>
+                <input
+                  type="text"
+                  className="jl-input"
+                  placeholder="Type employee name to autofill details..."
+                  value={btplEmpSearch}
+                  onChange={e => {
+                    setBtplEmpSearch(e.target.value);
+                    setBtplEmpDropdownOpen(true);
+                  }}
+                  onFocus={() => setBtplEmpDropdownOpen(true)}
+                />
+                {btplEmpDropdownOpen && btplEmpSearch && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    background: '#fff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    marginTop: 4,
+                    maxHeight: 200,
+                    overflowY: 'auto',
+                    zIndex: 1000,
+                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+                  }}>
+                    {employees
+                      .filter(e => `${e.firstName} ${e.lastName}`.toLowerCase().includes(btplEmpSearch.toLowerCase()))
+                      .slice(0, 5)
+                      .map(emp => (
+                        <div
+                          key={emp._id}
+                          onClick={() => {
+                            const fullName = `${emp.firstName} ${emp.lastName}`;
+                            setBtplEmpSearch(fullName);
+                            setBtplEmpDropdownOpen(false);
+                            setBtplOfferLetterForm(f => ({
+                              ...f,
+                              selectedEmployeeId: emp._id,
+                              name: fullName,
+                              designation: emp.designation || f.designation,
+                              department: emp.department || f.department,
+                              dateOfJoining: emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : f.dateOfJoining,
+                            }));
+                          }}
+                          style={{
+                            padding: '10px 12px',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid #f1f5f9',
+                            transition: 'background 0.15s'
+                          }}
+                          onMouseEnter={e => e.target.style.background = '#f8fafc'}
+                          onMouseLeave={e => e.target.style.background = '#fff'}
+                        >
+                          <div style={{ fontWeight: 500, fontSize: 13, color: '#0f172a' }}>
+                            {emp.firstName} {emp.lastName}
+                          </div>
+                          <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 2 }}>
+                            {emp.designation || 'No designation'} • {emp.department || 'No department'}
+                          </div>
+                        </div>
+                      ))
+                    }
+                    {employees.filter(e => `${e.firstName} ${e.lastName}`.toLowerCase().includes(btplEmpSearch.toLowerCase())).length === 0 && (
+                      <div style={{ padding: 12, fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+                        No employees found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, marginBottom: 20 }}>
+                <div style={{ fontSize: 12, color: '#166534', fontWeight: 500 }}>💡 Tip: Select an employee to autofill Name, Designation, Department, and Date of Joining. All fields remain editable.</div>
+              </div>
+              */}
+
+              <div className="jl-form-grid">
+
+                {/* Basic Information */}
+                <div className="jl-field jl-full" style={{ gridColumn: '1 / -1', marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    📋 Basic Information
+                  </div>
+                </div>
+
+                <div className="jl-field jl-full">
+                  <label className="jl-label">Candidate Name <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. Hitakshi Sharma"
+                    value={btplOfferLetterForm.name}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, name: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Designation <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. DevOps Engineer"
+                    value={btplOfferLetterForm.designation}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, designation: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Department <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. Development"
+                    value={btplOfferLetterForm.department}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, department: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Date Of Joining <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. 28th September 2026"
+                    value={btplOfferLetterForm.dateOfJoining}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, dateOfJoining: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Employment Type <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. Full-Time"
+                    value={btplOfferLetterForm.employmentType}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, employmentType: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field jl-full">
+                  <label className="jl-label">Office Location <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. 2nd Floor A-43, Sector 63 Noida 201301"
+                    value={btplOfferLetterForm.officeLocation}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, officeLocation: e.target.value }))} required />
+                </div>
+
+                {/* Compensation Details */}
+                <div className="jl-field jl-full" style={{ gridColumn: '1 / -1', marginTop: 16, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    💰 Compensation Details
+                  </div>
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Annual CTC</label>
+                  <input type="text" className="jl-input" placeholder="e.g. Rs. 3,60,000/-"
+                    value={btplOfferLetterForm.annualCTC}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, annualCTC: e.target.value }))} />
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Monthly Salary <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. Per Month or Rs. 30,000"
+                    value={btplOfferLetterForm.monthlySalary}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, monthlySalary: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field jl-full">
+                  <label className="jl-label">Monthly Target</label>
+                  <input type="text" className="jl-input" placeholder="Leave empty if not applicable"
+                    value={btplOfferLetterForm.monthlyTarget}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, monthlyTarget: e.target.value }))} />
+                </div>
+
+                {/* Work Schedule */}
+                <div className="jl-field jl-full" style={{ gridColumn: '1 / -1', marginTop: 16, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    ⏰ Work Schedule
+                  </div>
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Working Days <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. 06 Days"
+                    value={btplOfferLetterForm.workingDays}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, workingDays: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Working Hours <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. 09 Hours"
+                    value={btplOfferLetterForm.workingHours}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, workingHours: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field jl-full">
+                  <label className="jl-label">Office Timing <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. 11:00 Am – 08:00 Pm"
+                    value={btplOfferLetterForm.officeTiming}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, officeTiming: e.target.value }))} required />
+                </div>
+
+                {/* Policies */}
+                <div className="jl-field jl-full" style={{ gridColumn: '1 / -1', marginTop: 16, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    📜 Company Policies
+                  </div>
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Daily Observation Period <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. 01 Day (Unpaid)"
+                    value={btplOfferLetterForm.observationPeriod}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, observationPeriod: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Probation Period <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. 03 months"
+                    value={btplOfferLetterForm.probationPeriod}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, probationPeriod: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field">
+                  <label className="jl-label">Notice Period <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. 45 Days"
+                    value={btplOfferLetterForm.noticePeriod}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, noticePeriod: e.target.value }))} required />
+                </div>
+
+                <div className="jl-field jl-full">
+                  <label className="jl-label">Reporting Manager <span className="jl-req">*</span></label>
+                  <input type="text" className="jl-input" placeholder="e.g. Mr. Aman Dwivedi (Managing Director)"
+                    value={btplOfferLetterForm.reportingManager}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, reportingManager: e.target.value }))} required />
+                </div>
+
+                {/* Optional Fields */}
+                <div className="jl-field jl-full" style={{ gridColumn: '1 / -1', marginTop: 16, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    📝 Additional Details (Optional)
+                  </div>
+                </div>
+
+                <div className="jl-field jl-full">
+                  <label className="jl-label">Core Responsibilities <span style={{ fontWeight: 'normal', color: '#64748b' }}>(Optional)</span></label>
+                  <textarea 
+                    className="jl-input" 
+                    rows="3"
+                    placeholder="Describe core responsibilities if needed..."
+                    value={btplOfferLetterForm.coreResponsibilities}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, coreResponsibilities: e.target.value }))}
+                    style={{ resize: 'vertical', minHeight: 80 }}
+                  />
+                </div>
+
+                <div className="jl-field jl-full">
+                  <label className="jl-label">Performance Expectations <span style={{ fontWeight: 'normal', color: '#64748b' }}>(Optional)</span></label>
+                  <textarea 
+                    className="jl-input" 
+                    rows="3"
+                    placeholder="Describe performance expectations if needed..."
+                    value={btplOfferLetterForm.performanceExpectations}
+                    onChange={e => setBtplOfferLetterForm(f => ({ ...f, performanceExpectations: e.target.value }))}
+                    style={{ resize: 'vertical', minHeight: 80 }}
+                  />
+                </div>
+
+              </div>
+              </div>
+
+              <div className="jl-modal-footer">
+                <button className="jl-btn-cancel" onClick={() => setShowBTPLOfferLetterModal(false)}>Cancel</button>
+                <button
+                  className="jl-btn-generate"
+                  onClick={() => {
+                    if (!btplOfferLetterForm.name || !btplOfferLetterForm.designation || !btplOfferLetterForm.department || !btplOfferLetterForm.dateOfJoining) {
+                      alert('Please fill in all required fields (Name, Designation, Department, Date of Joining)');
+                      return;
+                    }
+                    handleGenerateBTPLOfferLetter(btplOfferLetterForm);
+                  }}
+                  disabled={generating}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  {generating ? 'Generating…' : 'Generate PDF'}
+                </button>
+              </div>
+            </div>
+
+            {/* Right Side - Live Preview */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#f8fafc', borderRadius: 12, padding: 16, minWidth: 0 }}>
+              <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Live Preview</span>
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b' }}>Updates as you type</div>
+              </div>
+              
+              <div style={{ 
+                flex: 1, 
+                background: '#fff', 
+                borderRadius: 8, 
+                overflow: 'auto', 
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                padding: '40px 30px',
+                fontSize: 11,
+                lineHeight: 1.6,
+                color: '#000',
+                fontFamily: 'Calibri, Arial, sans-serif'
+              }}>
+                <div style={{ textAlign: 'center', marginBottom: 30 }}>
+                  <div style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10, color: '#166534' }}>BHOOMI TECHZONE PRIVATE LIMITED</div>
+                  <div style={{ fontSize: 10, color: '#64748b' }}>Offer Letter</div>
+                </div>
+
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ marginBottom: 5 }}>To,</div>
+                  <div style={{ fontWeight: 'bold', color: btplOfferLetterForm.name ? '#000' : '#e11d48' }}>
+                    Dear {btplOfferLetterForm.name || '[Name]'},
+                  </div>
+                </div>
+
+                <p style={{ marginBottom: 15, textAlign: 'justify' }}>
+                  We are pleased to offer you {btplOfferLetterForm.employmentType ? btplOfferLetterForm.employmentType.toLowerCase() : 'full-time'} employment 
+                  with <strong>Bhoomi Techzone Pvt. Ltd.</strong> for the position of{' '}
+                  <strong style={{ color: btplOfferLetterForm.designation ? '#000' : '#e11d48' }}>
+                    {btplOfferLetterForm.designation || '[Designation]'}
+                  </strong>, subject to the terms and conditions mentioned in this letter.
+                </p>
+
+                <div style={{ marginTop: 20, marginBottom: 20 }}>
+                  <div style={{ 
+                    fontSize: 13, 
+                    fontWeight: 'bold', 
+                    marginBottom: 10, 
+                    color: '#166534',
+                    borderBottom: '2px solid #166534',
+                    paddingBottom: 5
+                  }}>
+                    JOINING DETAILS
+                  </div>
+                  
+                  <table style={{ 
+                    width: '100%', 
+                    borderCollapse: 'collapse',
+                    fontSize: 11,
+                    marginTop: 10
+                  }}>
+                    <tbody>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', width: '40%', background: '#f9fafb' }}>Name</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', color: btplOfferLetterForm.name ? '#000' : '#e11d48' }}>
+                          {btplOfferLetterForm.name || '[Name]'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Designation</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', color: btplOfferLetterForm.designation ? '#000' : '#e11d48' }}>
+                          {btplOfferLetterForm.designation || '[Designation]'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Department</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', color: btplOfferLetterForm.department ? '#000' : '#e11d48' }}>
+                          {btplOfferLetterForm.department || '[Department]'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Date Of Joining</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', color: btplOfferLetterForm.dateOfJoining ? '#000' : '#e11d48' }}>
+                          {btplOfferLetterForm.dateOfJoining || '[Date Of Joining]'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Employment Type</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px' }}>{btplOfferLetterForm.employmentType || '[Employment Type]'}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Office Location</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px' }}>{btplOfferLetterForm.officeLocation || '[Office Location]'}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Monthly Salary</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', color: btplOfferLetterForm.monthlySalary ? '#000' : '#e11d48' }}>
+                          {btplOfferLetterForm.monthlySalary || '[Monthly Salary]'}
+                        </td>
+                      </tr>
+                      {btplOfferLetterForm.monthlyTarget && (
+                        <tr>
+                          <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Monthly Target</td>
+                          <td style={{ border: '1px solid #d1d5db', padding: '8px 10px' }}>{btplOfferLetterForm.monthlyTarget}</td>
+                        </tr>
+                      )}
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Working Days</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px' }}>{btplOfferLetterForm.workingDays || '[Working Days]'}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Working Hours</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px' }}>{btplOfferLetterForm.workingHours || '[Working Hours]'}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Office Timing</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px' }}>{btplOfferLetterForm.officeTiming || '[Office Timing]'}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Observation Period</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px' }}>{btplOfferLetterForm.observationPeriod || '[Observation Period]'}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Notice Period</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px' }}>{btplOfferLetterForm.noticePeriod || '[Notice Period]'}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px', fontWeight: 'bold', background: '#f9fafb' }}>Reporting Manager</td>
+                        <td style={{ border: '1px solid #d1d5db', padding: '8px 10px' }}>{btplOfferLetterForm.reportingManager || '[Reporting Manager]'}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={{ marginTop: 25 }}>
+                  <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: '#166534' }}>1. Position and Joining:</div>
+                  <p style={{ marginBottom: 10, textAlign: 'justify' }}>
+                    You will be appointed as{' '}
+                    <strong style={{ color: btplOfferLetterForm.designation ? '#000' : '#e11d48' }}>
+                      {btplOfferLetterForm.designation || '[Designation]'}
+                    </strong>{' '}
+                    with effect from{' '}
+                    <strong style={{ color: btplOfferLetterForm.dateOfJoining ? '#000' : '#e11d48' }}>
+                      {btplOfferLetterForm.dateOfJoining || '[Date]'}
+                    </strong>.
+                    You will report to{' '}
+                    <strong>{btplOfferLetterForm.reportingManager || '[Reporting Manager]'}</strong>{' '}
+                    and will be based on{' '}
+                    <strong>{btplOfferLetterForm.officeLocation || '[Office Location]'}</strong>.
+                  </p>
+                  <p style={{ textAlign: 'justify' }}>
+                    Your employment will be on a {btplOfferLetterForm.employmentType ? btplOfferLetterForm.employmentType.toLowerCase() : 'full-time'} basis, 
+                    and you are expected to devote your professional time, attention, and skills to the Company's business and assigned responsibilities.
+                  </p>
+                </div>
+
+                <div style={{ marginTop: 25 }}>
+                  <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: '#166534' }}>2. Role & Responsibilities:</div>
+                  <p style={{ marginBottom: 10, textAlign: 'justify' }}>
+                    As{' '}
+                    <strong style={{ color: btplOfferLetterForm.designation ? '#000' : '#e11d48' }}>
+                      {btplOfferLetterForm.designation || '[Designation]'}
+                    </strong>{' '}
+                    your primary responsibilities will include, but will not be limited to:
+                  </p>
+                  {btplOfferLetterForm.coreResponsibilities && (
+                    <div style={{ marginLeft: 20, marginBottom: 10, whiteSpace: 'pre-wrap' }}>
+                      {btplOfferLetterForm.coreResponsibilities}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 25 }}>
+                  <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: '#166534' }}>3. Compensation:</div>
+                  <p style={{ textAlign: 'justify' }}>
+                    Your annual Cost to Company (CTC) will be{' '}
+                    <strong>{btplOfferLetterForm.annualCTC || '[Annual CTC]'}</strong>{' '}
+                    payable according to the Company's payroll policies and subject to applicable statutory deductions.
+                  </p>
+                </div>
+
+                <div style={{ marginTop: 25 }}>
+                  <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: '#166534' }}>4. Probation:</div>
+                  <p style={{ textAlign: 'justify' }}>
+                    You will be on probation for{' '}
+                    <strong>{btplOfferLetterForm.probationPeriod || '03 months'}</strong>{' '}
+                    from your date of joining. Your confirmation will be subject to satisfactory performance, conduct, and completion of the probation requirements.
+                  </p>
+                </div>
+
+                <div style={{ marginTop: 25 }}>
+                  <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: '#166534' }}>5. Working Hours and Attendance:</div>
+                  <p style={{ textAlign: 'justify' }}>
+                    Your normal working hours will be{' '}
+                    <strong>{btplOfferLetterForm.workingHours || '[Working Hours]'}</strong>, 
+                    from <strong>{btplOfferLetterForm.workingDays || '[Working Days]'}</strong>, 
+                    subject to the Company's requirements and applicable law. 
+                    You are expected to maintain regular attendance and comply with the Company's leave and attendance policies.
+                  </p>
+                </div>
+
+                <div style={{ marginTop: 30, paddingTop: 20, borderTop: '1px solid #e5e7eb', fontSize: 10, color: '#64748b', textAlign: 'center' }}>
+                  <em>This is a live preview. The actual PDF will include all sections and company letterhead.</em>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       )}
