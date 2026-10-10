@@ -1,0 +1,1163 @@
+/* ============================================================
+   AdminDashboard — Premium redesign matching reference UI
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* ── Page wrapper ────────────────────────────────────────── */
+.admin-dashboard {
+  font-family: 'Inter', sans-serif;
+  padding: 0;
+  min-height: 100%;
+  background: transparent;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+.admin-dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.admin-dashboard-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.admin-dashboard-title h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.admin-refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #14532d 0%, #166534 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(20, 83, 45, 0.28);
+  letter-spacing: 0.2px;
+}
+.admin-refresh-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.admin-refresh-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(20, 83, 45, 0.35);
+}
+
+/* ── Error ──────────────────────────────────────────────── */
+.admin-error {
+  padding: 11px 15px;
+  background: #fee2e2;
+  color: #dc2626;
+  border-radius: 10px;
+  margin-bottom: 16px;
+  border: 1px solid #fca5a5;
+  font-size: 13px;
+}
+
+/* ── Outer 2-col layout: left (cards+chart) | right panel ─ */
+.admin-outer-layout {
+  display: grid;
+  grid-template-columns: 1fr 235px;
+  grid-template-areas:
+    "stats    project"
+    "chart    leads"
+    "tasks    activity";
+  gap: 16px;
+  align-items: stretch;
+}
+
+.admin-left-col {
+  min-width: 0;
+}
+
+@media (max-width: 1150px) {
+  .admin-outer-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "stats"
+      "project"
+      "chart"
+      "leads"
+      "tasks"
+      "activity";
+  }
+}
+
+/* Grid area assignments */
+.admin-stats-section   { grid-area: stats; }
+.admin-chart-section   { grid-area: chart; }
+.admin-project-status  { grid-area: project; }
+.admin-leads-section   { grid-area: leads; }
+.admin-left-bottom     { grid-area: tasks; }
+.admin-right-bottom    { grid-area: activity; }
+
+/* When sidebar is collapsed: right column stacks project → leads → activity
+   from the top; left column stacks stats → chart → tasks independently. */
+body:not(.sidebar-expanded) .admin-outer-layout {
+  grid-template-areas:
+    "stats    project"
+    "chart    leads"
+    "tasks    activity";
+}
+
+/* When sidebar is collapsed: compact the Project Status card */
+body:not(.sidebar-expanded) .admin-project-status {
+  padding: 10px 12px 12px;
+  align-self: start;
+}
+/* Scale down the donut chart (140px → ~98px) and reclaim layout space
+   with negative margins so the card stays tight */
+body:not(.sidebar-expanded) .admin-project-status .admin-pie-chart-wrap > div {
+  transform: scale(0.7);
+  transform-origin: center;
+  margin-top: -21px;
+  margin-bottom: -21px;
+}
+
+/* Row 1 left: stat cards */
+.admin-stats-section {
+  min-width: 0;
+}
+
+/* Row 2 left: chart — fills its row naturally */
+.admin-chart-section {
+  min-width: 0;
+}
+
+/* ── Stats Grid: 4 compact columns inside left column ── */
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  margin-bottom: 24px;
+}
+
+/* When sidebar is expanded, show 2 columns */
+body.sidebar-expanded .admin-stats-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+@media (max-width: 900px) {
+  .admin-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 580px) {
+  .admin-stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+}
+
+/* ── Stat Card Base (compact) ────────────────────────────── */
+.admin-stat-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.07), 0 3px 12px rgba(0, 0, 0, 0.04);
+  border: 1.5px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+  min-height: 115px;
+  box-sizing: border-box;
+  isolation: isolate;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* ── Bubble float keyframes ──────────────────────────── */
+@keyframes bubble-float-large {
+  0%   { transform: translate(0px, 0px) scale(1); }
+  30%  { transform: translate(-5px, -7px) scale(1.04); }
+  60%  { transform: translate(4px, -4px) scale(0.97); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+@keyframes bubble-float-small {
+  0%   { transform: translate(0px, 0px) scale(1); }
+  35%  { transform: translate(6px, -9px) scale(1.06); }
+  65%  { transform: translate(-4px, -3px) scale(0.95); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+/* ── Sparkline bar animation ─────────────────────────── */
+@keyframes sparkBarGrow {
+  0%   { transform: scaleY(0); opacity: 0; }
+  100% { transform: scaleY(1); opacity: 1; }
+}
+@keyframes sparkBarBounce {
+  0%   { transform: scaleY(1); }
+  50%  { transform: scaleY(1.15); }
+  100% { transform: scaleY(1); }
+}
+
+.spark-bar {
+  transition: opacity 0.2s ease;
+  animation: sparkBarGrow 0.6s ease-out var(--spark-delay, 0s) both;
+}
+
+.spark-bar:hover {
+  opacity: 1 !important;
+  animation: sparkBarBounce 0.4s ease-out !important;
+}
+/* ── Watermark bubbles — white cards ─────────────────── */
+.admin-stat-card::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: var(--bubble-color, #14532d);
+  opacity: 0.07;
+  right: -26px;
+  bottom: -26px;
+  pointer-events: none;
+  animation: bubble-float-large 5.5s ease-in-out infinite;
+}
+.admin-stat-card::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--bubble-color, #14532d);
+  opacity: 0.05;
+  right: 36px;
+  bottom: -20px;
+  pointer-events: none;
+  animation: bubble-float-small 4.2s ease-in-out infinite;
+}
+
+.admin-stat-card:hover {
+  transform: scale(1.03);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+  z-index: 2;
+}
+
+/* ── Featured Card (Present) ─────────────────────────── */
+.admin-stat-card--featured {
+  background: linear-gradient(135deg, #14532d 0%, #166534 100%);
+  border: none;
+  box-shadow: 0 4px 16px rgba(20, 83, 45, 0.28);
+  min-height: 115px;
+}
+.admin-stat-card--featured:hover {
+  transform: scale(1.03);
+  box-shadow: 0 8px 24px rgba(20, 83, 45, 0.38);
+  z-index: 2;
+}
+
+/* ── Watermark bubbles — featured card (green gradient style) ── */
+.admin-stat-card--featured::before {
+  background: rgba(168, 230, 61, 1);
+  opacity: 0.15;
+  width: 90px;
+  height: 90px;
+  right: -26px;
+  bottom: -26px;
+  animation: bubble-float-large 5.5s ease-in-out infinite;
+}
+.admin-stat-card--featured::after {
+  background: rgba(168, 230, 61, 1);
+  opacity: 0.10;
+  width: 54px;
+  height: 54px;
+  right: 36px;
+  bottom: -20px;
+  animation: bubble-float-small 4.2s ease-in-out infinite;
+}
+
+/* ── Top row: label + icon ────────────────────────────────── */
+.admin-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.admin-card-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+  letter-spacing: 0.1px;
+}
+.admin-stat-card--featured .admin-card-label {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* ── Icon circle ────────────────────────────────────────── */
+.admin-card-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #a8e63d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(168, 230, 61, 0.30);
+}
+.admin-card-icon--featured {
+  background: #a8e63d;
+  box-shadow: 0 2px 8px rgba(168, 230, 61, 0.35);
+  border: none;
+}
+
+/* ── Value (compact) ──────────────────────────────────────── */
+.admin-card-value {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  margin: 0;
+  letter-spacing: -0.6px;
+}
+
+.admin-card-loading {
+  display: flex;
+  align-items: center;
+  height: 28px;
+}
+
+/* ── Skeleton shimmer ─────────────────────────────────────── */
+@keyframes admin-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.admin-skeleton {
+  border-radius: 6px;
+  background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+  background-size: 800px 100%;
+  animation: admin-shimmer 1.4s ease-in-out infinite;
+}
+.admin-stat-card--featured .admin-skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.10) 25%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.10) 75%);
+  background-size: 800px 100%;
+  animation: admin-shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Trend / sub-label row ─────────────────────────────────── */
+.admin-card-trend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+/* Featured card: pill badge style (like "+15% from last month") */
+.admin-card-trend--pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(168, 230, 61, 0.20);
+  border: 1px solid rgba(168, 230, 61, 0.50);
+  padding: 2px 7px;
+  border-radius: 20px;
+  width: fit-content;
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+/* Gray suffix text " from last month" style */
+.admin-card-trend-suffix {
+  color: #9ca3af;
+  font-weight: 500;
+  margin-left: 1px;
+}
+
+.admin-stat-card--featured .admin-card-trend span {
+  color: #a8e63d !important;
+}
+
+/* ── Featured: bottom badge pill ────────────────────────── */
+.admin-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(255, 255, 255, 0.18);
+  padding: 3px 8px;
+  border-radius: 20px;
+  width: fit-content;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: white;
+}
+
+/* ── Bottom gradient accent bar (normal cards) ──────────── */
+.admin-card-bottom-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 0 0 16px 16px;
+}
+
+/* ── (admin-main-layout removed — now using admin-outer-layout) ─ */
+
+/* ── Chart card (left column) ───────────────────────────── */
+.admin-chart-card {
+  background: #f9fafb;
+  border-radius: 18px;
+  padding: 22px 24px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04), 0 4px 18px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  margin-bottom: 24px;
+}
+
+.admin-chart-card--expanded {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-chart-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 2px;
+}
+
+.admin-chart-subtitle {
+  font-size: 12px;
+  color: #9ca3af;
+  margin: 0;
+}
+
+.admin-chart-summary {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #6b7280;
+  align-items: center;
+}
+.admin-chart-summary b { color: #111827; }
+
+.admin-chart-wrapper {
+  position: relative;
+  width: 100%;
+  height: 240px;
+}
+.admin-chart-wrapper--expanded { height: 320px; }
+
+.admin-chart-wrapper canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.admin-chart-loading,
+.admin-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 260px;
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+/* ── Right Panel ─────────────────────────────────────────── */
+.admin-right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+}
+
+.admin-right-card--grow {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 320px;
+}
+
+.admin-right-card--grow .admin-activity-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ── Right Panel Card ────────────────────────────────────── */
+.admin-right-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 8px 13px 10px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.admin-right-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.admin-right-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.admin-right-card-dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  cursor: pointer;
+  padding: 4px;
+}
+.admin-right-card-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #9ca3af;
+  display: block;
+}
+
+/* Hide scrollbar but keep scrollable */
+.no-scrollbar {
+  scrollbar-width: none;       /* Firefox */
+  -ms-overflow-style: none;   /* IE/Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;               /* Chrome/Safari/Opera */
+}
+
+/* ── Donut Chart (Project Status) ────────────────────────── */
+.admin-pie-chart-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0px;
+}
+
+/* ── Donut Legend ────────────────────────────────────────── */
+.admin-donut-legend {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.admin-donut-legend-row {
+  display: flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: #374151;
+  padding: 0 2px;
+}
+.admin-donut-legend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 8px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.admin-donut-legend-label {
+  flex: 1;
+  font-size: 10px;
+  color: #4b5563;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RESPONSIVE — Mobile & Tablet
+   ═══════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .admin-dashboard {
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
+  }
+
+  .admin-dashboard-header {
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+
+  .admin-dashboard-title h2 {
+    font-size: 16px;
+  }
+
+  .admin-outer-layout {
+    grid-template-columns: 1fr !important;
+    grid-template-areas:
+      "stats"
+      "chart"
+      "project"
+      "leads"
+      "tasks"
+      "activity" !important;
+    gap: 12px;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .admin-stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px;
+    max-width: 100% !important;
+  }
+
+  .admin-stat-card {
+    padding: 10px 12px;
+    min-height: 90px;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  .admin-stat-card:hover {
+    transform: none;
+  }
+
+  .admin-refresh-btn {
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+
+  /* Right panel cards — full width on mobile */
+  .admin-right-panel {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  .admin-right-card {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    width: 100% !important;
+  }
+
+  .admin-left-col {
+    min-width: 0;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  /* Chart card */
+  .admin-chart-card {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  .admin-chart-wrapper,
+  .admin-chart-wrapper--expanded {
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 200px;
+  }
+
+  .admin-chart-header {
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start !important;
+  }
+
+  /* Project status donut */
+  .admin-project-status .admin-pie-chart-wrap > div {
+    transform: scale(0.85);
+    transform-origin: center;
+  }
+
+  .admin-pie-chart-wrap {
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  /* Donut legend */
+  .admin-donut-legend {
+    max-width: 100% !important;
+  }
+
+  /* Tables in dashboard */
+  .admin-leads-section,
+  .admin-left-bottom {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+  }
+
+  .admin-leads-section table,
+  .admin-left-bottom table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 12px;
+  }
+
+  .admin-leads-section th,
+  .admin-leads-section td,
+  .admin-left-bottom th,
+  .admin-left-bottom td {
+    padding: 8px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* Activity card */
+  .admin-activity-scroll {
+    max-width: 100% !important;
+  }
+
+  /* Generic card inside admin dashboard */
+  .admin-dashboard .card {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-stats-grid {
+    grid-template-columns: 1fr !important;
+    gap: 6px;
+  }
+
+  .admin-stat-card {
+    padding: 8px 10px;
+    min-height: 80px;
+  }
+
+  .admin-dashboard-title h2 {
+    font-size: 14px;
+  }
+
+  .admin-donut-legend-row {
+    font-size: 9px;
+  }
+
+  .admin-right-card {
+    padding: 8px 10px !important;
+  }
+
+  .admin-chart-header {
+    gap: 6px;
+  }
+}
+.admin-donut-legend-value {
+  font-weight: 700;
+  font-size: 10.5px;
+  color: #111827;
+}
+
+/* ── Attendance Summary Card (right panel) ───────────────── */
+.admin-attendance-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-attendance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+}
+
+.admin-attendance-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #4b5563;
+  font-weight: 500;
+}
+
+.admin-attendance-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.admin-attendance-bar-wrap {
+  flex: 1;
+  margin: 0 12px;
+  height: 6px;
+  background: #f3f4f6;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.admin-attendance-bar {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.4s ease;
+}
+
+.admin-attendance-pct {
+  font-weight: 700;
+  color: #111827;
+  font-size: 10px;
+  min-width: 28px;
+  text-align: right;
+}
+
+/* ── Spin animation ─────────────────────────────────────── */
+.spin { animation: adminSpin 1s linear infinite; }
+
+@keyframes adminSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   HR DASHBOARD — Check-in/out button classes
+   ═══════════════════════════════════════════════════════════ */
+.hr-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hr-btn-checkin {
+  cursor: pointer;
+  border: 1.5px solid #a8e63d;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #a8e63d;
+  color: #14532d;
+  box-shadow: 0 2px 8px rgba(168, 230, 61, 0.3);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  min-height: 38px;
+}
+.hr-btn-checkin:hover {
+  background: white;
+  color: #a8e63d;
+  border-color: #a8e63d;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(168, 230, 61, 0.4);
+}
+.hr-btn-checkin:active {
+  transform: translateY(0);
+}
+
+.hr-checkout-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hr-btn-checkout {
+  cursor: pointer;
+  border: 1.5px solid #ef4444;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ef4444;
+  color: white;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  min-height: 38px;
+}
+.hr-btn-checkout:hover {
+  background: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+.hr-btn-checkout:active {
+  transform: translateY(0);
+}
+
+.hr-timer {
+  font-weight: 600;
+  color: #14532d;
+  font-size: 13px;
+  background: white;
+  border-radius: 8px;
+  padding: 6px 12px;
+  border: 1px solid #e5e7eb;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
+/* ── Page wrapper class (replaces inline style) ─────────── */
+.hr-page-wrapper {
+  padding: 20px 24px;
+  background: #f4f7f0;
+  min-height: 100vh;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+/* ── Tasks card class ───────────────────────────────────── */
+.hr-tasks-card {
+  padding: 20px;
+  margin-bottom: 20px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+.hr-tasks-card h2 {
+  margin-bottom: 14px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hr-tasks-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.hr-tasks-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 500px;
+}
+
+.hr-tasks-table thead {
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.hr-tasks-table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #6b7280;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.hr-tasks-table td {
+  padding: 10px 12px;
+  color: #374151;
+}
+
+.hr-tasks-table tbody tr {
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.hr-tasks-table tbody tr:nth-child(even) {
+  background: #fafbfc;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ENHANCED MOBILE RESPONSIVE
+   ═══════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .hr-page-wrapper {
+    padding: 16px 12px;
+    padding-top: calc(76px + env(safe-area-inset-top, 0px));
+    padding-left: calc(12px + env(safe-area-inset-left, 0px));
+    padding-right: calc(12px + env(safe-area-inset-right, 0px));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .hr-header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .hr-btn-checkin,
+  .hr-btn-checkout {
+    flex: 1;
+    justify-content: center;
+    min-width: 0;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .hr-checkout-group {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .hr-timer {
+    font-size: 12px;
+    padding: 5px 8px;
+  }
+
+  .admin-refresh-btn {
+    flex-shrink: 0;
+  }
+
+  /* Chart month picker */
+  .admin-chart-header {
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start !important;
+  }
+
+  /* Tasks card */
+  .hr-tasks-card {
+    padding: 14px;
+  }
+
+  .hr-tasks-card h2 {
+    font-size: 14px;
+  }
+
+  .hr-tasks-table {
+    font-size: 12px;
+    min-width: 440px;
+  }
+
+  .hr-tasks-table th,
+  .hr-tasks-table td {
+    padding: 8px 8px;
+  }
+
+  /* Activity items */
+  .admin-activity-scroll {
+    max-height: 280px !important;
+  }
+
+  /* Donut chart scale */
+  .admin-project-status .admin-pie-chart-wrap > div {
+    transform: scale(0.9) !important;
+    margin: 0 !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .hr-page-wrapper {
+    padding: 10px 8px;
+    padding-top: calc(70px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .admin-dashboard-header {
+    gap: 8px;
+  }
+
+  .hr-header-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hr-btn-checkin,
+  .hr-btn-checkout {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hr-checkout-group {
+    width: 100%;
+    flex-direction: row;
+  }
+
+  .admin-refresh-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hr-tasks-card {
+    padding: 10px;
+  }
+
+  .hr-tasks-table {
+    min-width: 380px;
+    font-size: 11px;
+  }
+
+  .hr-tasks-table th,
+  .hr-tasks-table td {
+    padding: 6px 6px;
+    font-size: 11px;
+  }
+
+  .admin-card-value {
+    font-size: 18px !important;
+  }
+
+  .admin-chart-card {
+    padding: 14px 10px !important;
+    border-radius: 12px !important;
+  }
+
+  .admin-chart-wrapper,
+  .admin-chart-wrapper--expanded {
+    min-height: 180px;
+  }
+}
+
+@media (max-width: 360px) {
+  .hr-page-wrapper {
+    padding: 8px 6px;
+    padding-top: calc(68px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .admin-stats-grid {
+    gap: 6px !important;
+  }
+
+  .admin-stat-card {
+    padding: 8px 8px;
+    min-height: 72px;
+  }
+
+  .admin-dashboard-title h2 {
+    font-size: 13px;
+  }
+
+  .hr-btn-checkin,
+  .hr-btn-checkout {
+    font-size: 11px;
+    padding: 6px 8px;
+    min-height: 34px;
+  }
+
+  .hr-timer {
+    font-size: 11px;
+    padding: 4px 6px;
+  }
+
+  .hr-tasks-card h2 {
+    font-size: 13px;
+  }
+
+  .admin-right-card-title {
+    font-size: 11px;
+  }
+}

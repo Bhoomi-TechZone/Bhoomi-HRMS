@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Production builds
+build/
+dist/
+/Frontend/build/
+/Frontend/dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+*.log
+
+# Diagnostic & coverage
+coverage/
+.nyc_output/
+
+# Editor & OS files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+*.env
+Backend/.env
+Frontend/.env
+
+# Uploads & Large binaries / downloads
+Backend/downloads/
+Backend/uploads/
+Backend/uploads/agent-updates/
+*.exe
+*.zip
+*.blockmap

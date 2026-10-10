@@ -1,0 +1,107 @@
+.client-payments-page {
+  margin-left: 72px;
+  width: calc(100vw - 72px);
+  max-width: calc(100vw - 72px);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 24px;
+  box-sizing: border-box;
+  background: #f8fafc;
+  font-family: 'Inter', 'Poppins', 'Segoe UI', sans-serif;
+  transition: margin-left 0.25s ease, width 0.25s ease, max-width 0.25s ease;
+}
+
+body.sidebar-expanded .client-payments-page {
+  margin-left: 240px;
+  width: calc(100vw - 240px);
+  max-width: calc(100vw - 240px);
+}
+
+@media (max-width: 768px) {
+  .client-payments-page {
+    margin-left: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    padding: 16px;
+    padding-top: 78px;
+  }
+}
+
+.client-payments-page *,
+.client-payments-page *::before,
+.client-payments-page *::after {
+  box-sizing: border-box;
+}
+
+.client-payments-page input,
+.client-payments-page select,
+.client-payments-page button,
+.client-payments-page textarea {
+  font-family: inherit;
+}
+
+.client-payments-page input[type="number"]::-webkit-outer-spin-button,
+.client-payments-page input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.client-payments-page input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.client-payments-page ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.client-payments-page ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.client-payments-page ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.client-payments-page ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.cp-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+.cp-action-btn:hover {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+.cp-dropdown-item-btn {
+  width: 100%;
+  text-align: left;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background .12s;
+  border-radius: 4px;
+  color: #374151;
+  font-family: 'Inter', 'Poppins', 'Segoe UI', sans-serif;
+}
+.cp-dropdown-item-btn:hover {
+  background: #f3f4f6;
+}

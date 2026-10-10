@@ -1,0 +1,589 @@
+const express = require('express');
+const router = express.Router();
+const mongoose = require('mongoose');
+const Deal = require('../models/Deal');
+const Client = require('../models/Client');
+const User = require('../models/User');
+const auth = require('../middleware/auth');
+const { sendCrmNotification } = require('../utils/crmNotifier');
+
+// Helper to safely parse dates (supports DD-MM-YYYY, ISO strings, timestamps)
+function parseDate(val) {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val.getTime())) return val;
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    const ddmmyyyy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(trimmed);
+    if (ddmmyyyy) {
+      const day = parseInt(ddmmyyyy[1], 10);
+      const month = parseInt(ddmmyyyy[2], 10) - 1;
+      const year = parseInt(ddmmyyyy[3], 10);
+      const d = new Date(year, month, day);
+      if (!isNaN(d.getTime())) return d;
+    }
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+// Helper to validate Mongo ObjectIds
+function parseObjectId(val, fallback = null) {
+  if (val && mongoose.Types.ObjectId.isValid(val)) {
+    return val;
+  }
+  if (fallback && mongoose.Types.ObjectId.isValid(fallback)) {
+    return fallback;
+  }
+  return null;
+}
+
+// Helper for checking role permissions and data access levels
+function checkAccess(user) {
+  const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+  const isSalesHead = roleName === 'sales head' || roleName === 'saleshead' || roleName === 'head of sales';
+  const isAdmin = roleName === 'admin' || roleName === 'super admin' || roleName === 'director';
+  const hasFullAccess = isAdmin || isSalesHead;
+
+  const permissions = Array.isArray(user?.role?.permissions) ? user.role.permissions : [];
+  const hasRead = hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals' || p.module === 'proposals') && p.actions.includes('read'));
+  const hasCreate = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('create'));
+  const hasUpdate = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('update'));
+  const hasDelete = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('delete'));
+
+  return { roleName, isSalesHead, isAdmin, hasFullAccess, hasRead, hasCreate, hasUpdate, hasDelete };
+}
+
+// Helper to check if a specific deal is accessible to a user
+function isDealOwnedByUser(deal, user, hasFullAccess) {
+  if (hasFullAccess) return true;
+  if (!deal || !user) return false;
+
+  const userId = (user._id || user.id || '').toString();
+  const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+  const userEmail = (user.email || '').trim().toLowerCase();
+  const userOfficialEmail = (user.officialEmail || '').trim().toLowerCase();
+
+  const assignedId = (deal.assignedTo?._id || deal.assignedTo || '').toString();
+  const createdId = (deal.createdBy?._id || deal.createdBy || '').toString();
+  const salesOwner = (deal.salesOwner || '').trim().toLowerCase();
+  const addedBy = (deal.addedBy || '').trim().toLowerCase();
+  const dealEmail = (deal.email || '').trim().toLowerCase();
+
+  if (userId && (assignedId === userId || createdId === userId)) return true;
+  if (userFullName && (salesOwner === userFullName || addedBy === userFullName)) return true;
+  if (userEmail && (dealEmail === userEmail || salesOwner === userEmail || addedBy === userEmail)) return true;
+  if (userOfficialEmail && (dealEmail === userOfficialEmail || salesOwner === userOfficialEmail)) return true;
+
+  return false;
+}
+
+// Get all deals (with optional filtering and role isolation)
+router.get('/', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const { hasRead, hasFullAccess } = checkAccess(user);
+    if (!hasRead) {
+      return res.status(403).json({ message: 'Access denied. Read permission required.' });
+    }
+
+    let query = {};
+
+    // Data isolation: Sales Head and Admin see all deals; other roles only see their data
+    if (!hasFullAccess) {
+      const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+      const userEmail = (user.email || '').toLowerCase().trim();
+      const userOfficialEmail = (user.officialEmail || '').toLowerCase().trim();
+
+      const orConditions = [
+        { assignedTo: user._id },
+        { createdBy: user._id }
+      ];
+      if (userFullName) {
+        orConditions.push({ salesOwner: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+        orConditions.push({ addedBy: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+      }
+      if (userEmail) {
+        orConditions.push({ email: userEmail });
+      }
+      if (userOfficialEmail) {
+        orConditions.push({ email: userOfficialEmail });
+      }
+
+      query.$or = orConditions;
+    }
+
+    // Filter by pipeline if provided
+    if (req.query.pipeline) {
+      query.pipeline = req.query.pipeline;
+    }
+    
+    // Filter by stage if provided
+    if (req.query.stage && req.query.stage !== 'all') {
+      query.stage = req.query.stage;
+    }
+    
+    // Filter by source if provided
+    if (req.query.source && req.query.source !== 'all') {
+      query.source = req.query.source;
+    }
+    
+    try {
+      const deals = await Deal.find(query)
+        .populate('assignedTo', 'firstName lastName email officialEmail employeeId designation department phone alternatePhone isActive role')
+        .populate('createdBy', 'firstName lastName email')
+        .sort({ createdAt: -1 });
+      res.json(deals || []);
+    } catch (popError) {
+      const unpopulated = await Deal.find(query).sort({ createdAt: -1 });
+      res.json(unpopulated || []);
+    }
+  } catch (error) {
+    console.error('Get deals error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get single deal by ID
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const { hasRead, hasFullAccess } = checkAccess(user);
+    if (!hasRead) {
+      return res.status(403).json({ message: 'Access denied. Read permission required.' });
+    }
+
+    let deal;
+    try {
+      deal = await Deal.findById(req.params.id)
+        .populate('assignedTo', 'firstName lastName email officialEmail employeeId designation department phone alternatePhone isActive role')
+        .populate('createdBy', 'firstName lastName email');
+    } catch (e) {
+      deal = await Deal.findById(req.params.id);
+    }
+    
+    if (!deal) {
+      return res.status(404).json({ message: 'Deal not found' });
+    }
+
+    // Role data isolation check
+    if (!isDealOwnedByUser(deal, user, hasFullAccess)) {
+      return res.status(403).json({ message: 'Access denied. You can only view your own deals.' });
+    }
+    
+    res.json(deal);
+  } catch (error) {
+    console.error('Get deal error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Create new deal
+router.post('/', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const { hasCreate } = checkAccess(user);
+    if (!hasCreate) {
+      return res.status(403).json({ message: 'Access denied. Create permission required.' });
+    }
+
+    const {
+      dealName,
+      clientName,
+      email,
+      phone,
+      company,
+      pipeline,
+      stage,
+      dealValue,
+      currency,
+      dealType,
+      location,
+      salesOwner,
+      contactId,
+      expectedCloseDate,
+      probability,
+      source,
+      description,
+      requirements,
+      notes,
+      assignedTo
+    } = req.body;
+    
+    let validAssignedTo = parseObjectId(assignedTo, null);
+    const validCreatedBy = parseObjectId(req.user?._id, null);
+    const parsedCloseDate = parseDate(expectedCloseDate);
+    const resolvedSalesOwner = salesOwner || (req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() : 'Akhil Verma');
+
+    // Auto-resolve assignedTo if missing
+    if (!validAssignedTo && resolvedSalesOwner) {
+      try {
+        const foundUser = await User.findOne({
+          $or: [
+            { $expr: { $eq: [{ $concat: ['$firstName', ' ', '$lastName'] }, resolvedSalesOwner.trim()] } },
+            { email: resolvedSalesOwner.trim().toLowerCase() },
+            { officialEmail: resolvedSalesOwner.trim().toLowerCase() }
+          ]
+        });
+        if (foundUser) validAssignedTo = foundUser._id;
+      } catch (e) { }
+    }
+
+    const deal = new Deal({
+      dealName: dealName || clientName || 'New Deal',
+      clientName: clientName || dealName || 'Client',
+      email: email || '',
+      phone: phone || '',
+      company: company || '',
+      pipeline: pipeline || 'Sales Pipeline',
+      stage: stage || 'New',
+      dealValue: dealValue ? Number(dealValue) : 0,
+      currency: currency || '$',
+      dealType: dealType || 'New Business',
+      location: location || 'Pune, India',
+      salesOwner: resolvedSalesOwner,
+      contactId: contactId || null,
+      expectedCloseDate: parsedCloseDate,
+      probability: probability !== undefined ? Number(probability) : 10,
+      source: source || 'Direct',
+      description: description || '',
+      requirements: requirements || '',
+      notes: notes || '',
+      assignedTo: validAssignedTo,
+      createdBy: validCreatedBy,
+      addedBy: req.body.addedBy || (req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() : '') || 'Admin'
+    });
+    
+    await deal.save();
+    
+    // Trigger CRM notification
+    try {
+      const io = req.app.get('socketio');
+      sendCrmNotification(io, {
+        actorUser: user,
+        entityType: 'Deal',
+        action: 'create',
+        entityName: deal.dealName || deal.clientName || 'New Deal',
+        assigneeUser: deal.assignedTo,
+        assigneeName: deal.salesOwner,
+        link: '/pipeline?tab=deals'
+      });
+    } catch (notifErr) {
+      console.error('Deal create notification error:', notifErr);
+    }
+    
+    try {
+      const populatedDeal = await Deal.findById(deal._id)
+        .populate('assignedTo', 'firstName lastName email employeeId')
+        .populate('createdBy', 'firstName lastName email');
+      res.status(201).json(populatedDeal || deal);
+    } catch (popErr) {
+      res.status(201).json(deal);
+    }
+  } catch (error) {
+    console.error('Create deal error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Update deal
+router.put('/:id', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const { hasUpdate, hasFullAccess } = checkAccess(user);
+    if (!hasUpdate) {
+      return res.status(403).json({ message: 'Access denied. Update permission required.' });
+    }
+
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) {
+      return res.status(404).json({ message: 'Deal not found' });
+    }
+
+    if (!isDealOwnedByUser(deal, user, hasFullAccess)) {
+      return res.status(403).json({ message: 'Access denied. You can only update your own deals.' });
+    }
+    
+    const {
+      dealName,
+      clientName,
+      email,
+      phone,
+      company,
+      pipeline,
+      stage,
+      dealValue,
+      currency,
+      dealType,
+      location,
+      salesOwner,
+      contactId,
+      expectedCloseDate,
+      probability,
+      source,
+      description,
+      requirements,
+      notes,
+      lostReason,
+      assignedTo,
+      milestoneStatuses
+    } = req.body;
+
+    const oldSalesOwner = (deal.salesOwner || '').trim();
+    const oldAssignedToStr = (deal.assignedTo?._id || deal.assignedTo || '').toString();
+    
+    // Update fields
+    if (dealName !== undefined) deal.dealName = dealName;
+    if (clientName !== undefined) deal.clientName = clientName;
+    if (email !== undefined) deal.email = email;
+    if (phone !== undefined) deal.phone = phone;
+    if (company !== undefined) deal.company = company;
+    if (pipeline !== undefined) deal.pipeline = pipeline;
+    if (dealValue !== undefined) deal.dealValue = Number(dealValue);
+    if (currency !== undefined) deal.currency = currency;
+    if (dealType !== undefined) deal.dealType = dealType;
+    if (location !== undefined) deal.location = location;
+    if (salesOwner !== undefined) deal.salesOwner = salesOwner;
+    if (contactId !== undefined) deal.contactId = contactId;
+    if (expectedCloseDate !== undefined) deal.expectedCloseDate = parseDate(expectedCloseDate);
+    if (probability !== undefined) deal.probability = Number(probability);
+    if (source !== undefined) deal.source = source;
+    if (description !== undefined) deal.description = description;
+    if (requirements !== undefined) deal.requirements = requirements;
+    if (notes !== undefined) deal.notes = notes;
+    if (req.body.addedBy !== undefined) deal.addedBy = req.body.addedBy;
+    if (assignedTo !== undefined) deal.assignedTo = parseObjectId(assignedTo, deal.assignedTo);
+    if (milestoneStatuses !== undefined) {
+      deal.milestoneStatuses = milestoneStatuses;
+    }
+
+    // Auto-resolve assignedTo if salesOwner updated or missing
+    if (deal.salesOwner && (!deal.assignedTo || (salesOwner !== undefined && salesOwner !== oldSalesOwner && assignedTo === undefined))) {
+      try {
+        const foundUser = await User.findOne({
+          $or: [
+            { $expr: { $eq: [{ $concat: ['$firstName', ' ', '$lastName'] }, deal.salesOwner.trim()] } },
+            { email: deal.salesOwner.trim().toLowerCase() },
+            { officialEmail: deal.salesOwner.trim().toLowerCase() }
+          ]
+        });
+        if (foundUser) deal.assignedTo = foundUser._id;
+      } catch (e) { }
+    }
+
+    const newSalesOwner = (deal.salesOwner || '').trim();
+    const newAssignedToStr = (deal.assignedTo?._id || deal.assignedTo || '').toString();
+
+    const isOwnerChanged = (salesOwner !== undefined && newSalesOwner.toLowerCase() !== oldSalesOwner.toLowerCase()) ||
+      (assignedTo !== undefined && newAssignedToStr !== oldAssignedToStr && newAssignedToStr);
+
+    // If deal owner changed, automatically log activity in deal
+    if (isOwnerChanged && newSalesOwner) {
+      const actorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || user.email || 'Admin System';
+      const now = new Date();
+      const istTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+      const istDate = now.toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' }).replace(/\//g, '-');
+      const activityContent = oldSalesOwner && oldSalesOwner.toLowerCase() !== newSalesOwner.toLowerCase()
+        ? `${actorName} changed deal owner from ${oldSalesOwner} to ${newSalesOwner}.`
+        : `${actorName} assigned the deal to ${newSalesOwner}.`;
+
+      deal.activities.unshift({
+        type: 'deal',
+        title: 'Deal Owner Assigned',
+        content: activityContent,
+        author: actorName,
+        time: istTime,
+        date: istDate,
+        createdAt: now
+      });
+    }
+    
+    // Update stage
+    if (stage) {
+      deal.stage = stage;
+      if (stage.toLowerCase() === 'won' || stage === 'Closed Won') {
+        deal.actualCloseDate = new Date();
+        const existingClient = await Client.findOne({ relatedDeal: deal._id });
+        if (!existingClient) {
+          const newClient = new Client({
+            name: deal.clientName,
+            company: deal.company || '',
+            email: deal.email || '',
+            phone: deal.phone || '',
+            source: deal.source || 'Lead Conversion',
+            requirements: deal.requirements || '',
+            notes: deal.notes || '',
+            dealValue: deal.dealValue || 0,
+            assignedTo: deal.assignedTo || null,
+            createdBy: parseObjectId(req.user?._id, null),
+            relatedDeal: deal._id,
+            convertedAt: new Date()
+          });
+          await newClient.save();
+        }
+      } else if (stage.toLowerCase() === 'lost' || stage === 'Closed Lost') {
+        deal.actualCloseDate = new Date();
+        if (lostReason) deal.lostReason = lostReason;
+      }
+    }
+    
+    await deal.save();
+    
+    // Trigger CRM notification
+    try {
+      const io = req.app.get('socketio');
+      sendCrmNotification(io, {
+        actorUser: user,
+        entityType: 'Deal',
+        action: isOwnerChanged ? 'assign' : 'update',
+        entityName: deal.dealName || deal.clientName || 'Deal',
+        assigneeUser: deal.assignedTo,
+        assigneeName: deal.salesOwner,
+        link: '/pipeline?tab=deals'
+      });
+    } catch (notifErr) {
+      console.error('Deal update notification error:', notifErr);
+    }
+    
+    try {
+      const updatedDeal = await Deal.findById(deal._id)
+        .populate('assignedTo', 'firstName lastName email employeeId')
+        .populate('createdBy', 'firstName lastName email');
+      res.json(updatedDeal || deal);
+    } catch (popErr) {
+      res.json(deal);
+    }
+  } catch (error) {
+    console.error('Update deal error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Delete deal
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const { hasDelete, hasFullAccess } = checkAccess(user);
+    if (!hasDelete) {
+      return res.status(403).json({ message: 'Access denied. Delete permission required.' });
+    }
+
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) {
+      return res.status(404).json({ message: 'Deal not found' });
+    }
+
+    if (!isDealOwnedByUser(deal, user, hasFullAccess)) {
+      return res.status(403).json({ message: 'Access denied. You can only delete your own deals.' });
+    }
+    
+    const deletedDealName = deal.dealName || deal.clientName || 'Deal';
+    await Deal.findByIdAndDelete(req.params.id);
+
+    // Trigger CRM notification
+    try {
+      const io = req.app.get('socketio');
+      sendCrmNotification(io, {
+        actorUser: user,
+        entityType: 'Deal',
+        action: 'delete',
+        entityName: deletedDealName,
+        link: '/pipeline?tab=deals'
+      });
+    } catch (notifErr) {
+      console.error('Deal delete notification error:', notifErr);
+    }
+
+    res.json({ message: 'Deal deleted successfully' });
+  } catch (error) {
+    console.error('Delete deal error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Add activity log to deal
+router.post('/:id/activities', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const { hasUpdate, hasFullAccess } = checkAccess(user);
+    if (!hasUpdate) {
+      return res.status(403).json({ message: 'Access denied. Update permission required.' });
+    }
+
+    const deal = await Deal.findById(req.params.id);
+    if (!deal) {
+      return res.status(404).json({ message: 'Deal not found' });
+    }
+
+    if (!isDealOwnedByUser(deal, user, hasFullAccess)) {
+      return res.status(403).json({ message: 'Access denied. You can only add activities to your own deals.' });
+    }
+
+    const { type, title, content, author, time, date } = req.body;
+    const newActivity = {
+      type: type || 'note',
+      title: title || '',
+      content: content || '',
+      author: author || (req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() : 'Akhil Verma'),
+      time: time || 'Just now',
+      date: date || new Date().toISOString().slice(0, 10),
+      createdAt: new Date()
+    };
+
+    deal.activities.unshift(newActivity);
+    await deal.save();
+
+    res.status(201).json(newActivity);
+  } catch (error) {
+    console.error('Add deal activity error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get deals statistics
+router.get('/stats/overview', auth, async (req, res) => {
+  try {
+    const allDeals = await Deal.find({});
+    const total = allDeals.length;
+    const wonDeals = allDeals.filter(d => (d.stage || '').toLowerCase() === 'won' || d.stage === 'Closed Won');
+    const totalValue = allDeals.reduce((sum, d) => sum + (d.dealValue || 0), 0);
+    const wonValue = wonDeals.reduce((sum, d) => sum + (d.dealValue || 0), 0);
+    
+    res.json({
+      total,
+      totalValue,
+      wonValue,
+      winRate: total > 0 ? ((wonDeals.length / total) * 100).toFixed(2) : 0
+    });
+  } catch (error) {
+    console.error('Get stats error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+module.exports = router;

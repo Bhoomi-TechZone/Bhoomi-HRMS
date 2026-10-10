@@ -1,0 +1,18151 @@
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { useContextualQueryState } from '../utils/routeUtils';
+import {
+  ArrowUpDown,
+  List,
+  Kanban,
+  Download,
+  Plus,
+  MoreHorizontal,
+  Mail,
+  Phone,
+  MessageSquare,
+  Shield,
+  MapPin,
+  ChevronDown,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Eye,
+  ArrowRightLeft,
+  X,
+  Trash2,
+  Edit2,
+  Calendar,
+  DollarSign,
+  CreditCard,
+  User,
+  CheckCircle,
+  Building,
+  Building2,
+  LayoutDashboard,
+  Users,
+  Briefcase,
+  UserPlus,
+  FileText,
+  ExternalLink,
+  Paperclip,
+  CheckSquare,
+  Globe,
+  Search,
+  Filter,
+  Tag,
+  Smartphone,
+  Info,
+  Clock,
+  AlertCircle,
+  Check
+} from 'lucide-react';
+import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
+import NotificationBell from './NotificationBell';
+import './Pipeline.css';
+
+// Navigation Tabs for Left Sub-Sidebar (Deals, Contacts, Companies, Tasks)
+const SIDEBAR_TABS = [
+  { id: 'deals', label: 'Deals', icon: Briefcase },
+  { id: 'contacts', label: 'Contacts', icon: Users },
+  { id: 'companies', label: 'Companies', icon: Building2 },
+  { id: 'tasks', label: 'Tasks', icon: CheckSquare }
+];
+
+const TASK_PRIORITY_OPTIONS = ['High', 'Medium', 'Low'];
+const TASK_STATUS_OPTIONS = ['Pending', 'In Progress', 'Completed'];
+const TASK_TYPE_OPTIONS = ['Message', 'Email', 'Meeting', 'Follow-up', 'Review', 'To-Do'];
+
+const INITIAL_SAMPLE_TASKS = [];
+
+// Country codes with flags, max digits & placeholder formatting
+const COUNTRY_CODES = [
+  { code: '+1', country: 'United States', flag: '🇺🇸', maxDigits: 10, formatPlaceholder: '(555) 000-0000' },
+  { code: '+91', country: 'India', flag: '🇮🇳', maxDigits: 10, formatPlaceholder: '98765 43210' },
+  { code: '+44', country: 'United Kingdom', flag: '🇬🇧', maxDigits: 10, formatPlaceholder: '7911 123456' },
+  { code: '+61', country: 'Australia', flag: '🇦🇺', maxDigits: 9, formatPlaceholder: '412 345 678' },
+  { code: '+49', country: 'Germany', flag: '🇩🇪', maxDigits: 11, formatPlaceholder: '151 12345678' },
+  { code: '+971', country: 'UAE', flag: '🇦🇪', maxDigits: 9, formatPlaceholder: '50 123 4567' },
+  { code: '+65', country: 'Singapore', flag: '🇸🇬', maxDigits: 8, formatPlaceholder: '8123 4567' },
+  { code: '+33', country: 'France', flag: '🇫🇷', maxDigits: 9, formatPlaceholder: '6 12 34 56 78' },
+  { code: '+81', country: 'Japan', flag: '🇯🇵', maxDigits: 10, formatPlaceholder: '90 1234 5678' },
+  { code: '+86', country: 'China', flag: '🇨🇳', maxDigits: 11, formatPlaceholder: '138 0000 0000' },
+  { code: '+55', country: 'Brazil', flag: '🇧🇷', maxDigits: 11, formatPlaceholder: '11 91234-5678' }
+];
+
+const CONTACT_SOURCE_OPTIONS = [];
+const LEAD_STAGE_OPTIONS = [];
+const LEAD_STATUS_OPTIONS = [];
+
+// Default Contact Pipeline Stages for Columns
+const DEFAULT_CONTACT_STAGES = [
+  { id: 'Lead', name: 'Lead', badgeClass: 'new' }
+];
+
+// Initial High-Fidelity Pre-seeded Contacts
+const INITIAL_SAMPLE_CONTACTS = [];
+
+const INDUSTRY_OPTIONS = [];
+
+// Country to States/Regions Mapping Dictionary
+const COUNTRY_STATE_MAP = {
+  'United States': [
+    'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut',
+    'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana',
+    'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts',
+    'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
+    'New Hampshire', 'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota',
+    'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina',
+    'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington',
+    'West Virginia', 'Wisconsin', 'Wyoming'
+  ],
+  'India': [
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa',
+    'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala',
+    'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland',
+    'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
+    'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Delhi', 'Chandigarh'
+  ],
+  'United Kingdom': [
+    'England', 'Scotland', 'Wales', 'Northern Ireland', 'Greater London', 'West Midlands', 'Greater Manchester', 'Yorkshire'
+  ],
+  'Australia': [
+    'New South Wales', 'Victoria', 'Queensland', 'Western Australia', 'South Australia', 'Tasmania', 'Australian Capital Territory', 'Northern Territory'
+  ],
+  'Germany': [
+    'Bavaria', 'Berlin', 'Baden-Württemberg', 'Brandenburg', 'Bremen', 'Hamburg', 'Hesse', 'Lower Saxony', 'North Rhine-Westphalia', 'Saxony'
+  ],
+  'United Arab Emirates': [
+    'Abu Dhabi', 'Dubai', 'Sharjah', 'Ajman', 'Umm Al Quwain', 'Ras Al Khaimah', 'Fujairah'
+  ],
+  'Singapore': [
+    'Central Region', 'East Region', 'North Region', 'North-East Region', 'West Region'
+  ],
+  'France': [
+    'Île-de-France', 'Auvergne-Rhône-Alpes', 'Nouvelle-Aquitaine', 'Occitanie', 'Provence-Alpes-Côte d\'Azur', 'Hauts-de-France', 'Grand Est'
+  ],
+  'Canada': [
+    'Ontario', 'Quebec', 'British Columbia', 'Alberta', 'Manitoba', 'Saskatchewan', 'Nova Scotia', 'New Brunswick', 'Newfoundland and Labrador'
+  ],
+  'Netherlands': [
+    'North Holland', 'South Holland', 'Utrecht', 'North Brabant', 'Gelderland', 'Overijssel', 'Limburg'
+  ]
+};
+
+const COUNTRY_OPTIONS = Object.keys(COUNTRY_STATE_MAP);
+
+const INITIAL_SAMPLE_COMPANIES = [];
+
+// Date formatting helper for DD-MM-YYYY
+const formatDateDDMMYYYY = (dateStr) => {
+  if (!dateStr) return '';
+  const str = String(dateStr).trim();
+  if (/^\d{2}-\d{2}-\d{4}$/.test(str)) return str;
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    const [year, month, day] = str.slice(0, 10).split('-');
+    return `${day}-${month}-${year}`;
+  }
+  const d = new Date(str);
+  if (isNaN(d.getTime())) return str;
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
+// Global Phone Formatter (+CC 000-000-0000 format)
+const formatPhoneNumber = (rawPhone, defaultCountryCode = '+91') => {
+  if (!rawPhone || typeof rawPhone !== 'string') return '';
+  let str = rawPhone.trim();
+  if (!str || str === '-' || str === '—') return '—';
+
+  // Determine country code
+  let cc = '';
+  if (defaultCountryCode && typeof defaultCountryCode === 'string') {
+    const cleanDefCC = defaultCountryCode.trim();
+    cc = cleanDefCC.startsWith('+') ? cleanDefCC : `+${cleanDefCC}`;
+  }
+
+  // If rawPhone starts with +, extract CC
+  if (str.startsWith('+')) {
+    const matched = (COUNTRY_CODES || []).find(c => str.startsWith(c.code));
+    if (matched) {
+      cc = matched.code;
+      str = str.slice(matched.code.length);
+    } else {
+      const m = str.match(/^(\+\d{1,4})\s*(.*)$/);
+      if (m) {
+        cc = m[1];
+        str = m[2];
+      }
+    }
+  }
+
+  if (!cc) cc = '+91';
+
+  // Extract only digits from remaining phone string
+  let digits = str.replace(/\D/g, '');
+
+  // If digits still contain duplicate country code digits (e.g. "919874666799" when cc is "+91")
+  const ccNum = cc.replace(/\D/g, '');
+  if (ccNum && digits.startsWith(ccNum) && digits.length > 10) {
+    digits = digits.slice(ccNum.length);
+  }
+
+  if (!digits) return str;
+
+  let formatted = digits;
+  if (digits.length === 10) {
+    formatted = `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    const withoutZero = digits.slice(1);
+    formatted = `${withoutZero.slice(0, 3)}-${withoutZero.slice(3, 6)}-${withoutZero.slice(6)}`;
+  } else if (digits.length === 9) {
+    formatted = `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  } else if (digits.length === 8) {
+    formatted = `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  } else if (digits.length > 10) {
+    const last4 = digits.slice(-4);
+    const mid3 = digits.slice(-7, -4);
+    const firstPart = digits.slice(0, -7);
+    formatted = `${firstPart}-${mid3}-${last4}`;
+  }
+
+  return `${cc} ${formatted}`;
+};
+
+// Normalize raw currency symbols/strings to standard 3-letter currency code
+const normalizeCurrencyCode = (rawCurrency) => {
+  if (!rawCurrency || typeof rawCurrency !== 'string') return 'INR';
+  const c = rawCurrency.trim().toUpperCase();
+  if (c === '₹' || c === 'INR' || c === 'RS' || c === 'RS.') return 'INR';
+  if (c === '$' || c === 'USD' || c === 'US$') return 'USD';
+  if (c === '€' || c === 'EUR') return 'EUR';
+  if (c === '£' || c === 'GBP') return 'GBP';
+  if (c === 'A$' || c === 'AUD') return 'AUD';
+  if (c === 'C$' || c === 'CAD') return 'CAD';
+  if (c === '¥' || c === 'JPY' || c === 'CNY') return 'JPY';
+  if (c === 'CHF') return 'CHF';
+  if (c === 'AED') return 'AED';
+  if (c === 'SGD') return 'SGD';
+  if (/^[A-Z]{3}$/.test(c)) return c;
+  return 'USD';
+};
+
+// Robust numerical parser for deal values
+const parseNumericDealValue = (rawVal) => {
+  if (typeof rawVal === 'number') return isNaN(rawVal) ? 0 : rawVal;
+  if (!rawVal) return 0;
+  const cleaned = String(rawVal).replace(/[^0-9.-]+/g, '');
+  const parsed = parseFloat(cleaned);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+const getFutureDateDDMMYYYY = (daysAhead = 14) => {
+  const d = new Date();
+  d.setDate(d.getDate() + daysAhead);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
+// Robust date parser for deal dates & expected close dates
+const parseDealDate = (dateVal) => {
+  if (!dateVal) return null;
+  if (dateVal instanceof Date) return isNaN(dateVal.getTime()) ? null : dateVal;
+  const str = String(dateVal).trim();
+  if (!str) return null;
+  if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(str)) {
+    const parts = str.split(/[-/]/);
+    const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    const parts = str.slice(0, 10).split('-');
+    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+// Date & Time formatting helper with Indian Standard Time (IST) timezone
+const formatISTDateTime = (dateVal) => {
+  if (!dateVal) return '—';
+  try {
+    const str = String(dateVal).trim();
+    let d = new Date(dateVal);
+    let hasTime = true;
+
+    // Check if format is pure date like DD-MM-YYYY or DD/MM/YYYY
+    if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(str)) {
+      const parts = str.split(/[-/]/);
+      d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+      hasTime = false;
+    } else if (isNaN(d.getTime())) {
+      const parts = str.split(/[-/]/);
+      if (parts.length >= 3) {
+        d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+      }
+    }
+
+    if (isNaN(d.getTime())) return str;
+
+    const datePart = d.toLocaleDateString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    }).replace(/\//g, '-');
+
+    if (!hasTime) {
+      return `${datePart} (IST)`;
+    }
+
+    const timePart = d.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    return `${datePart}, ${timePart} IST`;
+  } catch (e) {
+    return String(dateVal);
+  }
+};
+
+// Activity timestamp formatting helper: DD-MM-YYYY, hh:mm AM/PM IST
+const formatActivityTimestamp = (act) => {
+  if (!act) return '—';
+  try {
+    const dtSource = act.createdAt || act.date || new Date();
+    let d = new Date(dtSource);
+    if (isNaN(d.getTime()) && typeof dtSource === 'string') {
+      if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(dtSource.trim())) {
+        const parts = dtSource.trim().split(/[-/]/);
+        d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+      }
+    }
+
+    if (!isNaN(d.getTime())) {
+      const datePart = d.toLocaleDateString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      }).replace(/\//g, '-');
+
+      let timePart = '';
+      if (act.time && /\d{1,2}:\d{2}/.test(act.time)) {
+        const trimmed = act.time.trim();
+        if (/am|pm/i.test(trimmed)) {
+          timePart = trimmed.toUpperCase();
+        } else {
+          const [hStr, mStr] = trimmed.split(':');
+          const h = parseInt(hStr, 10);
+          const m = parseInt(mStr, 10);
+          if (!isNaN(h) && !isNaN(m)) {
+            const period = h >= 12 ? 'PM' : 'AM';
+            const h12 = h % 12 === 0 ? 12 : h % 12;
+            timePart = `${String(h12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${period}`;
+          } else {
+            timePart = trimmed.toUpperCase();
+          }
+        }
+      } else {
+        timePart = d.toLocaleTimeString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        }).toUpperCase();
+      }
+
+      return `${datePart}, ${timePart} IST`;
+    }
+  } catch (e) { }
+
+  const dateFallback = formatDateDDMMYYYY(act.date || new Date());
+  let timeFallback = '12:00 PM';
+  if (act.time && /\d{1,2}:\d{2}/.test(act.time)) {
+    const trimmed = act.time.trim();
+    if (/am|pm/i.test(trimmed)) {
+      timeFallback = trimmed.toUpperCase();
+    } else {
+      const [hStr, mStr] = trimmed.split(':');
+      const h = parseInt(hStr, 10);
+      const m = parseInt(mStr, 10);
+      if (!isNaN(h) && !isNaN(m)) {
+        const period = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 === 0 ? 12 : h % 12;
+        timeFallback = `${String(h12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${period}`;
+      }
+    }
+  }
+  return `${dateFallback}, ${timeFallback} IST`;
+};
+
+// Robust activity timestamp parser for sorting (latest first)
+const parseActivityTimestamp = (act) => {
+  if (!act) return 0;
+  if (act.timestamp && typeof act.timestamp === 'number' && act.timestamp > 0) {
+    return act.timestamp;
+  }
+
+  // 1. If createdAt is a full ISO 8601 string (e.g. 2026-09-04T13:56:00.000Z)
+  if (act.createdAt && typeof act.createdAt === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(act.createdAt)) {
+    const t = new Date(act.createdAt).getTime();
+    if (!isNaN(t)) return t;
+  }
+
+  // 2. Parse DD-MM-YYYY or DD/MM/YYYY with time
+  const dtSource = act.date || act.createdAt;
+  const timeSource = act.time;
+
+  if (dtSource) {
+    if (dtSource instanceof Date) return dtSource.getTime();
+    const str = String(dtSource).trim();
+
+    // Match DD-MM-YYYY or DD/MM/YYYY with optional inline time
+    const match = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+    if (match) {
+      const day = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1;
+      const year = parseInt(match[3], 10);
+      let hours = match[4] ? parseInt(match[4], 10) : 12;
+      let mins = match[5] ? parseInt(match[5], 10) : 0;
+      let secs = match[6] ? parseInt(match[6], 10) : 0;
+      let ampm = match[7] ? match[7].toUpperCase() : null;
+
+      if (timeSource && /\d{1,2}:\d{2}/.test(timeSource)) {
+        const tMatch = timeSource.trim().match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+        if (tMatch) {
+          hours = parseInt(tMatch[1], 10);
+          mins = parseInt(tMatch[2], 10);
+          secs = tMatch[3] ? parseInt(tMatch[3], 10) : 0;
+          ampm = tMatch[4] ? tMatch[4].toUpperCase() : ampm;
+        }
+      }
+
+      if (ampm === 'PM' && hours < 12) hours += 12;
+      if (ampm === 'AM' && hours === 12) hours = 0;
+
+      const dt = new Date(year, month, day, hours, mins, secs);
+      if (!isNaN(dt.getTime())) return dt.getTime();
+    }
+
+    const t = new Date(str).getTime();
+    if (!isNaN(t)) return t;
+  }
+
+  return 0;
+};
+
+// Relative time formatter for activities (e.g., '10 mins ago', '2 hours ago', 'Yesterday', '07-09-2026')
+const formatRelativeActivityTime = (act) => {
+  if (!act) return '';
+  const ts = parseActivityTimestamp(act);
+  if (!ts) {
+    return act.time ? `${act.date ? `${act.date}, ` : ''}${act.time}` : 'Recently';
+  }
+  const now = Date.now();
+  const diffMs = now - ts;
+  if (diffMs < 0) {
+    return formatActivityTimestamp(act);
+  }
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins} ${diffMins === 1 ? 'min' : 'mins'} ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)} ${Math.floor(diffDays / 7) === 1 ? 'week' : 'weeks'} ago`;
+  return formatActivityTimestamp(act);
+};
+
+const INITIAL_SAMPLE_DEALS = [];
+
+// Real-time domain validation helper
+const isValidCompanyDomain = (domain) => {
+  if (!domain || !domain.trim()) return true;
+  const clean = domain.trim().toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('/')[0]
+    .split('?')[0]
+    .split('#')[0];
+
+  // Valid domain format: hostname with at least 1 period, valid labels, and valid TLD (2+ chars)
+  const domainRegex = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,63}$/i;
+  return domainRegex.test(clean);
+};
+
+const DEFAULT_PIPELINES = [
+  { id: 'Initial', name: 'Initial', badgeClass: 'new' },
+  { id: 'Sales Pipeline', name: 'Sales Pipeline', badgeClass: 'hot' },
+  { id: 'Enterprise Pipeline', name: 'Enterprise Pipeline', badgeClass: 'cold' },
+  { id: 'Lead Conversion Pipeline', name: 'Lead Conversion Pipeline', badgeClass: 'won' },
+  { id: 'Renewal & Retention Pipeline', name: 'Renewal & Retention Pipeline', badgeClass: 'old' },
+  { id: 'Partnership Pipeline', name: 'Partnership Pipeline', badgeClass: 'custom' }
+];
+
+const DEFAULT_STAGES = [
+  { id: 'New', name: 'New', badgeClass: 'new' },
+  { id: 'Hot', name: 'Hot', badgeClass: 'hot' },
+  { id: 'Old', name: 'Old', badgeClass: 'old' },
+  { id: 'Cold', name: 'Cold', badgeClass: 'cold' },
+  { id: 'Won', name: 'Won', badgeClass: 'won' },
+  { id: 'Lost', name: 'Lost', badgeClass: 'lost' }
+];
+
+const PIPELINE_OPTIONS = [
+  'Initial',
+  'Sales Pipeline',
+  'Enterprise Pipeline',
+  'Lead Conversion Pipeline',
+  'Renewal & Retention Pipeline',
+  'Partnership Pipeline'
+];
+
+const DEAL_TYPE_OPTIONS = [];
+
+const DEFAULT_DEAL_ACTIVITIES = {};
+
+const CURRENCY_OPTIONS = [
+  { code: 'USD', symbol: '$', label: '$ (USD)' },
+  { code: 'INR', symbol: '₹', label: '₹ (INR)' },
+  { code: 'EUR', symbol: '€', label: '€ (EUR)' },
+  { code: 'GBP', symbol: '£', label: '£ (GBP)' },
+  { code: 'AED', symbol: 'AED', label: 'AED (د.إ)' },
+  { code: 'CAD', symbol: 'CAD $', label: 'CAD ($)' },
+  { code: 'AUD', symbol: 'AUD $', label: 'AUD ($)' },
+  { code: 'JPY', symbol: '¥', label: '¥ (JPY)' }
+];
+
+const FILTER_ITEMS = [
+  { id: 'open', label: 'Open deals' },
+  { id: 'my', label: 'My deals' },
+  { id: 'recent', label: 'Recent deals' },
+  { id: 'territory', label: 'Territory deals' },
+  { id: 'imported', label: 'Recently imported' },
+  { id: 'lost', label: 'Lost deals' },
+  { id: 'won', label: 'Won deals' },
+  { id: 'hot', label: 'Hot deals' },
+  { id: 'cold', label: 'Cold deals' },
+  { id: 'closing_week', label: 'Closing this week' },
+  { id: 'monthly_sales', label: "This month's sales" },
+  { id: 'recycle_bin', label: 'Recycle bin' },
+  { id: 'all', label: 'All deals' }
+];
+
+// Reusable Custom / Creatable Combobox & Select Component (with Portal Floating Dropdown)
+function CreatableSelect({
+  value,
+  onChange,
+  options,
+  onCreateOption,
+  onDeleteOption,
+  placeholder,
+  className = '',
+  required = false,
+  isSearchable = true,
+  isCreatable = true,
+  isDeleteable = true,
+  storageKey = '',
+  placement = 'auto' // 'auto' | 'bottom' | 'top'
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState(value || '');
+  const [isTyping, setIsTyping] = useState(false);
+  const [dropdownCoords, setDropdownCoords] = useState({ top: 0, left: 0, width: 200, placement: 'bottom', transform: 'none' });
+  const wrapperRef = React.useRef(null);
+  const inputRef = React.useRef(null);
+  const dropdownRef = React.useRef(null);
+
+  // Persistent custom added options for CreatableSelect
+  const [customCreatedOptions, setCustomCreatedOptions] = useState(() => {
+    if (!storageKey) return [];
+    try {
+      const saved = localStorage.getItem(`hrms_custom_${storageKey}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Persistent deleted options for CreatableSelect
+  const [deletedSelectOptions, setDeletedSelectOptions] = useState(() => {
+    if (!storageKey) return [];
+    try {
+      const saved = localStorage.getItem(`hrms_deleted_${storageKey}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const saveCustomOptions = (newList) => {
+    setCustomCreatedOptions(newList);
+    if (storageKey) {
+      try {
+        localStorage.setItem(`hrms_custom_${storageKey}`, JSON.stringify(newList));
+      } catch (e) { }
+    }
+  };
+
+  const saveDeletedOptions = (newList) => {
+    setDeletedSelectOptions(newList);
+    if (storageKey) {
+      try {
+        localStorage.setItem(`hrms_deleted_${storageKey}`, JSON.stringify(newList));
+      } catch (e) { }
+    }
+  };
+
+  // Calculate floating portal coordinates
+  const calculateCoords = () => {
+    if (!wrapperRef.current) return null;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
+
+    // Check if space below is tight (< 230px) and place upwards if more room above
+    const placeTop = placement === 'top' || (placement === 'auto' && spaceBelow < 230 && spaceAbove > spaceBelow);
+    const availableSpace = placeTop ? spaceAbove - 20 : spaceBelow - 20;
+    const calculatedMaxHeight = Math.min(220, Math.max(120, availableSpace));
+
+    return {
+      top: placeTop ? Math.max(10, rect.top - 6) : rect.bottom + 6,
+      left: rect.left,
+      width: Math.max(rect.width, 180),
+      placement: placeTop ? 'top' : 'bottom',
+      transform: placeTop ? 'translateY(-100%)' : 'none',
+      maxHeight: `${calculatedMaxHeight}px`
+    };
+  };
+
+  const updateCoords = () => {
+    const nextCoords = calculateCoords();
+    if (nextCoords) {
+      setDropdownCoords(nextCoords);
+    }
+  };
+
+  const openDropdown = () => {
+    const nextCoords = calculateCoords();
+    if (nextCoords) {
+      setDropdownCoords(nextCoords);
+    }
+    setIsOpen(true);
+    setIsTyping(false);
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updateCoords();
+      window.addEventListener('resize', updateCoords);
+      window.addEventListener('scroll', updateCoords, true);
+      return () => {
+        window.removeEventListener('resize', updateCoords);
+        window.removeEventListener('scroll', updateCoords, true);
+      };
+    }
+  }, [isOpen]);
+
+  // Normalize options to { id, label } with custom additions and deleted exclusions
+  const normalizedOptions = useMemo(() => {
+    const map = new Map();
+    const deletedSet = new Set(deletedSelectOptions.map(d => (typeof d === 'string' ? d : d.id || d.label || '').toLowerCase()));
+
+    // Base options
+    (options || []).forEach(opt => {
+      let id, label;
+      if (typeof opt === 'string') {
+        id = opt;
+        label = opt;
+      } else {
+        id = opt.id ?? opt.name ?? opt.value ?? opt.label;
+        label = opt.label ?? opt.name ?? opt.id ?? opt.value;
+      }
+      if (!id) return;
+      if (deletedSet.has(String(id).toLowerCase()) || deletedSet.has(String(label).toLowerCase())) return;
+      map.set(String(id).toLowerCase(), { id: String(id), label: String(label) });
+    });
+
+    // Custom options
+    (customCreatedOptions || []).forEach(opt => {
+      let id, label;
+      if (typeof opt === 'string') {
+        id = opt;
+        label = opt;
+      } else {
+        id = opt.id ?? opt.label;
+        label = opt.label ?? opt.id;
+      }
+      if (!id) return;
+      const lower = String(id).toLowerCase();
+      if (deletedSet.has(lower) || deletedSet.has(String(label).toLowerCase())) return;
+      if (!map.has(lower)) {
+        map.set(lower, { id: String(id), label: String(label) });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [options, customCreatedOptions, deletedSelectOptions]);
+
+  // Sync searchTerm when value changes externally
+  useEffect(() => {
+    const valLower = (value || '').trim().toLowerCase();
+    const matched = normalizedOptions.find(o =>
+      o.id === value ||
+      o.label === value ||
+      (valLower && o.id.toLowerCase() === valLower) ||
+      (valLower && o.label.toLowerCase() === valLower) ||
+      (valLower && o.label.toLowerCase().includes(valLower))
+    );
+    setSearchTerm(matched ? matched.label : (value || ''));
+    setIsTyping(false);
+  }, [value, normalizedOptions]);
+
+  // Filter options: when opened, display ALL options unless user is actively typing a search
+  const filteredOptions = useMemo(() => {
+    if (!isSearchable || !isTyping || !searchTerm.trim() || searchTerm.trim().toLowerCase() === (value || '').trim().toLowerCase()) {
+      return normalizedOptions;
+    }
+    return normalizedOptions.filter(opt =>
+      opt.label.toLowerCase().includes(searchTerm.toLowerCase().trim())
+    );
+  }, [normalizedOptions, searchTerm, isSearchable, isTyping, value]);
+
+  // Check if current search term exact matches any existing option
+  const exactMatch = useMemo(() => {
+    if (!isCreatable || !searchTerm.trim()) return true;
+    return normalizedOptions.some(
+      opt => opt.label.toLowerCase() === searchTerm.toLowerCase().trim()
+    );
+  }, [normalizedOptions, searchTerm, isCreatable]);
+
+  // Close when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target)
+      ) {
+        setIsOpen(false);
+        setIsTyping(false);
+        setSearchTerm(value || '');
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen, value]);
+
+  const handleSelectOrAdd = (val) => {
+    const trimmed = (val || '').trim();
+    if (!trimmed) return;
+
+    const lower = trimmed.toLowerCase();
+
+    // If it was in deleted list, restore it
+    if (deletedSelectOptions.some(d => (typeof d === 'string' ? d : d.id || d.label || '').toLowerCase() === lower)) {
+      const nextDel = deletedSelectOptions.filter(d => (typeof d === 'string' ? d : d.id || d.label || '').toLowerCase() !== lower);
+      saveDeletedOptions(nextDel);
+    }
+
+    const existing = normalizedOptions.find(
+      opt => opt.label.toLowerCase() === lower
+    );
+
+    if (existing) {
+      onChange(existing.id);
+      setSearchTerm(existing.label);
+    } else if (isCreatable) {
+      // Save to custom options
+      const nextCustom = [...customCreatedOptions.filter(c => (typeof c === 'string' ? c : c.id || c.label || '').toLowerCase() !== lower), { id: trimmed, label: trimmed }];
+      saveCustomOptions(nextCustom);
+
+      if (onCreateOption) {
+        onCreateOption(trimmed);
+      }
+      onChange(trimmed);
+      setSearchTerm(trimmed);
+    }
+    setIsTyping(false);
+    setIsOpen(false);
+  };
+
+  const handleDeleteOption = (optToDelete, e) => {
+    if (e) e.stopPropagation();
+    const optId = (optToDelete.id || optToDelete.label || '').toLowerCase();
+    const optLabel = (optToDelete.label || optToDelete.id || '').toLowerCase();
+    if (!optId && !optLabel) return;
+
+    // Remove from custom options
+    const nextCustom = customCreatedOptions.filter(c => {
+      const cId = (typeof c === 'string' ? c : c.id || c.label || '').toLowerCase();
+      return cId !== optId && cId !== optLabel;
+    });
+    saveCustomOptions(nextCustom);
+
+    // Add to deleted options
+    if (!deletedSelectOptions.some(d => {
+      const dId = (typeof d === 'string' ? d : d.id || d.label || '').toLowerCase();
+      return dId === optId || dId === optLabel;
+    })) {
+      const nextDel = [...deletedSelectOptions, optToDelete.id || optToDelete.label];
+      saveDeletedOptions(nextDel);
+    }
+
+    if (onDeleteOption) {
+      onDeleteOption(optToDelete);
+    }
+
+    // If current value was this option, clear it
+    if ((value || '').toLowerCase() === optId || (value || '').toLowerCase() === optLabel) {
+      onChange('');
+      setSearchTerm('');
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredOptions.length > 0) {
+        handleSelectOrAdd(filteredOptions[0].label);
+      } else if (isCreatable && searchTerm.trim()) {
+        handleSelectOrAdd(searchTerm.trim());
+      }
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+      setIsTyping(false);
+    } else if (e.key === 'ArrowDown' && !isOpen) {
+      openDropdown();
+    }
+  };
+
+  const handleBoxClick = () => {
+    if (isOpen) {
+      setIsOpen(false);
+    } else {
+      openDropdown();
+      if (inputRef.current) {
+        inputRef.current.select();
+      }
+    }
+  };
+
+  const dropdownMenu = isOpen && (
+    <div
+      ref={dropdownRef}
+      className={`pipeline-creatable-dropdown pipeline-portal-dropdown ${dropdownCoords.placement === 'top' ? 'placement-top' : 'placement-bottom'}`}
+      style={{
+        position: 'fixed',
+        top: `${dropdownCoords.top}px`,
+        left: `${dropdownCoords.left}px`,
+        width: `${dropdownCoords.width}px`,
+        maxHeight: dropdownCoords.maxHeight || '220px',
+        transform: dropdownCoords.transform,
+        zIndex: 999999
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="pipeline-creatable-options-list">
+        {filteredOptions.length > 0 ? (
+          filteredOptions.map((opt) => {
+            const isSelected = (value || '').toLowerCase() === opt.id.toLowerCase();
+            return (
+              <div
+                key={opt.id}
+                className={`pipeline-creatable-option ${isSelected ? 'selected' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSelectOrAdd(opt.label);
+                }}
+              >
+                <span className="pipeline-creatable-opt-text">{opt.label}</span>
+                {isSelected && <CheckCircle size={14} className="pipeline-creatable-opt-check" />}
+                {isDeleteable && (
+                  <button
+                    type="button"
+                    className="pipeline-creatable-opt-delete-btn"
+                    onClick={(e) => handleDeleteOption(opt, e)}
+                    title={`Remove "${opt.label}" from options`}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          <div className="pipeline-creatable-no-match">
+            {isCreatable ? 'Type to add new option...' : 'No options available'}
+          </div>
+        )}
+      </div>
+
+      {isCreatable && isTyping && !exactMatch && searchTerm.trim() && (
+        <div
+          className="pipeline-creatable-add-new-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleSelectOrAdd(searchTerm.trim());
+          }}
+        >
+          <Plus size={14} />
+          <span>Add "<strong>{searchTerm.trim()}</strong>" as new</span>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className={`pipeline-creatable-select-wrapper ${isOpen ? 'is-open' : ''} ${className}`} ref={wrapperRef}>
+      <div
+        className={`pipeline-creatable-input-box ${isOpen ? 'is-focused' : ''}`}
+        onClick={handleBoxClick}
+        style={{ cursor: isSearchable ? 'text' : 'pointer' }}
+      >
+        <input
+          ref={inputRef}
+          type="text"
+          className="pipeline-creatable-input"
+          placeholder={placeholder}
+          value={(() => {
+            const valLower = (value || '').trim().toLowerCase();
+            const matched = normalizedOptions.find(o =>
+              o.id === value ||
+              o.label === value ||
+              (valLower && o.id.toLowerCase() === valLower) ||
+              (valLower && o.label.toLowerCase() === valLower) ||
+              (valLower && o.label.toLowerCase().includes(valLower))
+            );
+            const displayLabel = matched ? matched.label : (value || '');
+            return isSearchable ? (isTyping ? searchTerm : (displayLabel || searchTerm)) : displayLabel;
+          })()}
+          readOnly={!isSearchable}
+          style={{ cursor: isSearchable ? 'text' : 'pointer', userSelect: isSearchable ? 'auto' : 'none' }}
+          required={required}
+          onChange={(e) => {
+            if (isSearchable) {
+              setSearchTerm(e.target.value);
+              setIsTyping(true);
+              if (!isOpen) openDropdown();
+            }
+          }}
+          onFocus={(e) => {
+            if (isSearchable && !isOpen) {
+              openDropdown();
+              e.target.select();
+            }
+          }}
+          onKeyDown={handleKeyDown}
+        />
+        <button
+          type="button"
+          className="pipeline-creatable-chevron-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isOpen) {
+              setIsOpen(false);
+            } else {
+              openDropdown();
+            }
+          }}
+          tabIndex={-1}
+          title="Toggle options"
+        >
+          <ChevronDown size={15} className={`pipeline-chevron-icon ${isOpen ? 'open' : ''}`} />
+        </button>
+      </div>
+
+      {isOpen && createPortal(dropdownMenu, document.body)}
+    </div>
+  );
+}
+
+// Reusable Multi-Select Contacts & Emails Combobox with Badges, Persistent Additions & Remove (X) button
+function MultiSelectContactEmails({
+  values = [],
+  onChange,
+  options = [],
+  placeholder = "Select contact emails...",
+  className = "",
+  isCreatable = true,
+  storageKey = "hrms_company_owner_contacts"
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dropdownCoords, setDropdownCoords] = useState({ top: 0, left: 0, width: 260, placement: 'bottom', transform: 'none' });
+  const wrapperRef = useRef(null);
+  const dropdownRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  // Persistent custom added options
+  const [customOptions, setCustomOptions] = useState(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Persistent deleted / hidden options
+  const [deletedOptions, setDeletedOptions] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`${storageKey}_deleted`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const saveCustomOptions = (newList) => {
+    setCustomOptions(newList);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(newList));
+    } catch (e) { }
+  };
+
+  const saveDeletedOptions = (newList) => {
+    setDeletedOptions(newList);
+    try {
+      localStorage.setItem(`${storageKey}_deleted`, JSON.stringify(newList));
+    } catch (e) { }
+  };
+
+  const selectedArray = useMemo(() => {
+    if (Array.isArray(values)) return values.filter(Boolean);
+    if (typeof values === 'string' && values.trim()) {
+      return values.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+  }, [values]);
+
+  // Combine passed options + customOptions, excluding deletedOptions
+  const allMergedOptions = useMemo(() => {
+    const map = new Map();
+    const deletedSet = new Set(deletedOptions.map(d => (typeof d === 'string' ? d : d.email || d.id || '').toLowerCase()));
+
+    // Process base options
+    (options || []).forEach(opt => {
+      const email = (typeof opt === 'string' ? opt : opt.email || opt.id || '').trim();
+      if (!email) return;
+      const lower = email.toLowerCase();
+      if (deletedSet.has(lower)) return;
+      map.set(lower, typeof opt === 'string' ? { id: opt, email: opt, name: opt.split('@')[0], company: '' } : opt);
+    });
+
+    // Process custom options
+    (customOptions || []).forEach(opt => {
+      const email = (typeof opt === 'string' ? opt : opt.email || opt.id || '').trim();
+      if (!email) return;
+      const lower = email.toLowerCase();
+      if (deletedSet.has(lower)) return;
+      if (!map.has(lower)) {
+        map.set(lower, typeof opt === 'string' ? { id: opt, email: opt, name: opt.split('@')[0], company: 'Custom' } : opt);
+      }
+    });
+
+    return Array.from(map.values());
+  }, [options, customOptions, deletedOptions]);
+
+  const calculateCoords = () => {
+    if (!wrapperRef.current) return null;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
+
+    const placeTop = spaceBelow < 260 && spaceAbove > spaceBelow;
+    const availableSpace = placeTop ? spaceAbove - 20 : spaceBelow - 20;
+    const calculatedMaxHeight = Math.min(270, Math.max(140, availableSpace));
+
+    return {
+      top: placeTop ? Math.max(10, rect.top - 6) : rect.bottom + 6,
+      left: rect.left,
+      width: Math.max(rect.width, 300),
+      placement: placeTop ? 'top' : 'bottom',
+      transform: placeTop ? 'translateY(-100%)' : 'none',
+      maxHeight: `${calculatedMaxHeight}px`
+    };
+  };
+
+  const updateCoords = () => {
+    const nextCoords = calculateCoords();
+    if (nextCoords) setDropdownCoords(nextCoords);
+  };
+
+  const openDropdown = () => {
+    const nextCoords = calculateCoords();
+    if (nextCoords) setDropdownCoords(nextCoords);
+    setIsOpen(true);
+    setTimeout(() => {
+      if (searchInputRef.current) searchInputRef.current.focus();
+    }, 50);
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updateCoords();
+      window.addEventListener('resize', updateCoords);
+      window.addEventListener('scroll', updateCoords, true);
+      return () => {
+        window.removeEventListener('resize', updateCoords);
+        window.removeEventListener('scroll', updateCoords, true);
+      };
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target)
+      ) {
+        setIsOpen(false);
+        setSearchTerm('');
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
+
+  const handleToggleOption = (email) => {
+    if (!email) return;
+    const cleanEmail = email.trim();
+    const isSelected = selectedArray.some(e => e.toLowerCase() === cleanEmail.toLowerCase());
+    let next;
+    if (isSelected) {
+      next = selectedArray.filter(e => e.toLowerCase() !== cleanEmail.toLowerCase());
+    } else {
+      next = [...selectedArray, cleanEmail];
+    }
+    if (onChange) onChange(next);
+  };
+
+  const handleAddNewOption = (newEmail) => {
+    if (!newEmail || !newEmail.trim()) return;
+    const cleanEmail = newEmail.trim();
+    const lower = cleanEmail.toLowerCase();
+
+    // If it was in deleted list, restore it
+    if (deletedOptions.some(d => (typeof d === 'string' ? d : d.email || d.id || '').toLowerCase() === lower)) {
+      const nextDeleted = deletedOptions.filter(d => (typeof d === 'string' ? d : d.email || d.id || '').toLowerCase() !== lower);
+      saveDeletedOptions(nextDeleted);
+    }
+
+    // Add to custom options if not already present
+    const existing = allMergedOptions.find(o => (o.email || o.id || '').toLowerCase() === lower);
+    if (!existing) {
+      const newOptObj = {
+        id: cleanEmail,
+        email: cleanEmail,
+        name: cleanEmail.includes('@') ? cleanEmail.split('@')[0] : cleanEmail,
+        company: '',
+        type: 'Custom'
+      };
+      const nextCustom = [...customOptions.filter(c => (c.email || c.id || '').toLowerCase() !== lower), newOptObj];
+      saveCustomOptions(nextCustom);
+    }
+
+    // Also select this newly added option
+    if (!selectedArray.some(e => e.toLowerCase() === lower)) {
+      if (onChange) onChange([...selectedArray, cleanEmail]);
+    }
+    setSearchTerm('');
+  };
+
+  const handleDeleteOptionFromList = (optToDelete, e) => {
+    if (e) e.stopPropagation();
+    const emailToDelete = (typeof optToDelete === 'string' ? optToDelete : optToDelete.email || optToDelete.id || '').toLowerCase();
+    if (!emailToDelete) return;
+
+    // 1. Remove from custom options
+    const nextCustom = customOptions.filter(c => (c.email || c.id || '').toLowerCase() !== emailToDelete);
+    saveCustomOptions(nextCustom);
+
+    // 2. Add to deleted options list
+    if (!deletedOptions.some(d => (typeof d === 'string' ? d : d.email || d.id || '').toLowerCase() === emailToDelete)) {
+      const nextDeleted = [...deletedOptions, emailToDelete];
+      saveDeletedOptions(nextDeleted);
+    }
+
+    // 3. If currently selected in values, unselect it
+    if (selectedArray.some(e => e.toLowerCase() === emailToDelete)) {
+      const nextSelected = selectedArray.filter(e => e.toLowerCase() !== emailToDelete);
+      if (onChange) onChange(nextSelected);
+    }
+  };
+
+  const handleRemoveBadge = (emailToRemove, e) => {
+    if (e) e.stopPropagation();
+    const next = selectedArray.filter(e => e.toLowerCase() !== emailToRemove.toLowerCase());
+    if (onChange) onChange(next);
+  };
+
+  const filteredOptions = useMemo(() => {
+    if (!searchTerm.trim()) return allMergedOptions;
+    const term = searchTerm.toLowerCase().trim();
+    return allMergedOptions.filter(opt => {
+      const email = (opt.email || opt.id || '').toLowerCase();
+      const name = (opt.name || opt.label || '').toLowerCase();
+      const company = (opt.company || '').toLowerCase();
+      return email.includes(term) || name.includes(term) || company.includes(term);
+    });
+  }, [allMergedOptions, searchTerm]);
+
+  const exactMatch = useMemo(() => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase().trim();
+    return allMergedOptions.some(opt => (opt.email || opt.id || '').toLowerCase() === term);
+  }, [allMergedOptions, searchTerm]);
+
+  const firstEmail = selectedArray[0] || '';
+  const firstMatchedOpt = allMergedOptions.find(o => (o.email || o.id || '').toLowerCase() === firstEmail.toLowerCase());
+  const firstDisplayLabel = firstMatchedOpt
+    ? (firstMatchedOpt.name ? `${firstMatchedOpt.name} (${firstEmail})` : firstEmail)
+    : firstEmail;
+
+  const dropdownMenu = isOpen && (
+    <div
+      ref={dropdownRef}
+      className={`pipeline-multiselect-dropdown pipeline-portal-dropdown ${dropdownCoords.placement === 'top' ? 'placement-top' : 'placement-bottom'}`}
+      style={{
+        position: 'fixed',
+        top: `${dropdownCoords.top}px`,
+        left: `${dropdownCoords.left}px`,
+        width: `${dropdownCoords.width}px`,
+        maxHeight: dropdownCoords.maxHeight || '270px',
+        transform: dropdownCoords.transform,
+        zIndex: 999999
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="pipeline-multiselect-search-box" onClick={e => e.stopPropagation()}>
+        <Search size={13} style={{ color: '#94a3b8', flexShrink: 0 }} />
+        <input
+          ref={searchInputRef}
+          type="text"
+          className="pipeline-multiselect-search-input"
+          placeholder="Search contacts by name or email..."
+          value={searchTerm}
+          onChange={e => setSearchTerm(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (searchTerm.trim()) {
+                handleAddNewOption(searchTerm.trim());
+              }
+            } else if (e.key === 'Escape') {
+              setIsOpen(false);
+              setSearchTerm('');
+            }
+          }}
+          onClick={e => e.stopPropagation()}
+        />
+        {searchTerm && (
+          <button
+            type="button"
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px', color: '#94a3b8', display: 'flex', alignItems: 'center' }}
+            onClick={() => setSearchTerm('')}
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+
+      <div className="pipeline-multiselect-dropdown-header">
+        <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          CRM Contacts ({filteredOptions.length})
+        </span>
+        {selectedArray.length > 0 && (
+          <button
+            type="button"
+            className="pipeline-multiselect-clear-all"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onChange) onChange([]);
+            }}
+          >
+            Clear all ({selectedArray.length})
+          </button>
+        )}
+      </div>
+
+      <div className="pipeline-multiselect-options-list" style={{ maxHeight: '180px', overflowY: 'auto' }}>
+        {filteredOptions.length > 0 ? (
+          filteredOptions.map((opt) => {
+            const email = opt.email || opt.id || '';
+            const isSelected = selectedArray.some(e => e.toLowerCase() === email.toLowerCase());
+            const name = opt.name || opt.label || email.split('@')[0];
+            const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'C';
+
+            return (
+              <div
+                key={email}
+                className={`pipeline-multiselect-option ${isSelected ? 'selected' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleOption(email);
+                }}
+              >
+                <div className="pipeline-multiselect-opt-left">
+                  <div className={`pipeline-multiselect-avatar ${isSelected ? 'active' : ''}`}>
+                    {initials}
+                  </div>
+                  <div className="pipeline-multiselect-opt-details">
+                    <span className="pipeline-multiselect-opt-name">
+                      {name}
+                      {opt.company && opt.company !== 'Direct Client' && (
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 500, marginLeft: '6px' }}>({opt.company})</span>
+                      )}
+                    </span>
+                    <span className="pipeline-multiselect-opt-email">{email}</span>
+                  </div>
+                </div>
+
+                <div className="pipeline-multiselect-opt-actions">
+                  <div className={`pipeline-multiselect-checkbox ${isSelected ? 'checked' : ''}`}>
+                    {isSelected && <Check size={12} strokeWidth={3} />}
+                  </div>
+                  <button
+                    type="button"
+                    className="pipeline-multiselect-opt-delete-btn"
+                    onClick={(e) => handleDeleteOptionFromList(opt, e)}
+                    title={`Delete "${email}" from list`}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="pipeline-creatable-no-match" style={{ padding: '14px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+            No contacts found matching "{searchTerm}"
+          </div>
+        )}
+      </div>
+
+      {isCreatable && searchTerm.trim() && !exactMatch && (
+        <div
+          className="pipeline-creatable-add-new-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleAddNewOption(searchTerm.trim());
+          }}
+          style={{ borderTop: '1px solid #f1f5f9', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', background: '#f8fafc', color: '#0284c7', fontSize: '13px', fontWeight: 600 }}
+        >
+          <Plus size={14} />
+          <span>Add "<strong>{searchTerm.trim()}</strong>" as contact email</span>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className={`pipeline-multiselect-wrapper ${isOpen ? 'is-open' : ''} ${className}`} ref={wrapperRef}>
+      <div
+        className={`pipeline-multiselect-box ${isOpen ? 'is-focused' : ''}`}
+        onClick={() => {
+          if (isOpen) {
+            setIsOpen(false);
+          } else {
+            openDropdown();
+          }
+        }}
+      >
+        {selectedArray.length === 0 ? (
+          <span className="pipeline-multiselect-placeholder">{placeholder}</span>
+        ) : (
+          <div className="pipeline-multiselect-selection-row">
+            <span className="pipeline-multiselect-badge" title={firstEmail}>
+              <Mail size={12} className="pipeline-multiselect-badge-icon" />
+              <span className="pipeline-multiselect-badge-text">{firstDisplayLabel}</span>
+              <button
+                type="button"
+                className="pipeline-multiselect-badge-remove"
+                onClick={(e) => handleRemoveBadge(firstEmail, e)}
+                title={`Remove ${firstEmail}`}
+              >
+                <X size={11} />
+              </button>
+            </span>
+
+            {selectedArray.length > 1 && (
+              <span
+                className="pipeline-multiselect-count-badge"
+                title={selectedArray.slice(1).map(em => {
+                  const m = allMergedOptions.find(o => (o.email || o.id || '').toLowerCase() === em.toLowerCase());
+                  return m ? (m.name ? `${m.name} (${em})` : em) : em;
+                }).join(', ')}
+              >
+                +{selectedArray.length - 1}
+              </span>
+            )}
+          </div>
+        )}
+
+        <button
+          type="button"
+          className="pipeline-creatable-chevron-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isOpen) {
+              setIsOpen(false);
+            } else {
+              openDropdown();
+            }
+          }}
+          tabIndex={-1}
+          title="Toggle contacts"
+        >
+          <ChevronDown size={15} className={`pipeline-chevron-icon ${isOpen ? 'open' : ''}`} />
+        </button>
+      </div>
+
+      {isOpen && createPortal(dropdownMenu, document.body)}
+    </div>
+  );
+}
+
+// Multi-Select Component for Contacts strictly associated with a Deal
+function MultiSelectDealContacts({
+  contacts = [],
+  selectedIds = [],
+  onChange,
+  placeholder = "Select associated contacts..."
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dropdownCoords, setDropdownCoords] = useState({ top: 0, left: 0, width: 280, placement: 'bottom', transform: 'none' });
+  const wrapperRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  const calculateCoords = () => {
+    if (!wrapperRef.current) return null;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
+
+    const placeTop = spaceBelow < 240 && spaceAbove > spaceBelow;
+    const availableSpace = placeTop ? spaceAbove - 20 : spaceBelow - 20;
+    const calculatedMaxHeight = Math.min(260, Math.max(130, availableSpace));
+
+    return {
+      top: placeTop ? Math.max(10, rect.top - 6) : rect.bottom + 6,
+      left: rect.left,
+      width: Math.max(rect.width, 280),
+      placement: placeTop ? 'top' : 'bottom',
+      transform: placeTop ? 'translateY(-100%)' : 'none',
+      maxHeight: `${calculatedMaxHeight}px`
+    };
+  };
+
+  const updateCoords = () => {
+    const nextCoords = calculateCoords();
+    if (nextCoords) setDropdownCoords(nextCoords);
+  };
+
+  const openDropdown = () => {
+    const nextCoords = calculateCoords();
+    if (nextCoords) setDropdownCoords(nextCoords);
+    setIsOpen(true);
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updateCoords();
+      window.addEventListener('resize', updateCoords);
+      window.addEventListener('scroll', updateCoords, true);
+      return () => {
+        window.removeEventListener('resize', updateCoords);
+        window.removeEventListener('scroll', updateCoords, true);
+      };
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target)
+      ) {
+        setIsOpen(false);
+        setSearchTerm('');
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
+
+  const handleToggle = (id) => {
+    const isSelected = selectedIds.includes(id);
+    let next;
+    if (isSelected) {
+      next = selectedIds.filter(item => item !== id);
+    } else {
+      next = [...selectedIds, id];
+    }
+    onChange(next);
+  };
+
+  const allSelected = contacts.length > 0 && selectedIds.length === contacts.length;
+
+  const filteredContacts = useMemo(() => {
+    if (!searchTerm.trim()) return contacts;
+    const q = searchTerm.toLowerCase();
+    return contacts.filter(c => {
+      const name = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+      const email = (c.email || '').toLowerCase();
+      const company = (c.company || '').toLowerCase();
+      return name.includes(q) || email.includes(q) || company.includes(q);
+    });
+  }, [contacts, searchTerm]);
+
+  const dropdownMenu = (
+    <div
+      ref={dropdownRef}
+      style={{
+        position: 'fixed',
+        top: `${dropdownCoords.top}px`,
+        left: `${dropdownCoords.left}px`,
+        width: `${dropdownCoords.width}px`,
+        maxHeight: dropdownCoords.maxHeight || '240px',
+        transform: dropdownCoords.transform,
+        backgroundColor: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '8px',
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
+        zIndex: 999999,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Search Filter if more than 4 contacts */}
+      {contacts.length > 4 && (
+        <div style={{ padding: '8px 10px 6px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Search size={13} style={{ color: '#94a3b8' }} />
+          <input
+            type="text"
+            placeholder="Filter deal contacts..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            style={{ width: '100%', border: 'none', outline: 'none', fontSize: '12.5px', color: '#1e293b' }}
+          />
+          {searchTerm && (
+            <button type="button" onClick={() => setSearchTerm('')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#94a3b8' }}>
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Header with Select All / Deselect All */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
+        <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Deal Contacts ({contacts.length})
+        </span>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange(allSelected ? [] : contacts.map(c => c._id));
+            }}
+            style={{ background: 'none', border: 'none', color: '#0284c7', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+          >
+            {allSelected ? 'Deselect All' : 'Select All'}
+          </button>
+        </div>
+      </div>
+
+      {/* Options List */}
+      <div style={{ overflowY: 'auto', flex: 1, padding: '4px' }}>
+        {filteredContacts.map(c => {
+          const isChecked = selectedIds.includes(c._id);
+          const name = `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || c.company || 'Contact';
+          return (
+            <div
+              key={c._id}
+              onClick={() => handleToggle(c._id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '7px 10px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                backgroundColor: isChecked ? '#f0f9ff' : 'transparent',
+                transition: 'background-color 0.1s ease'
+              }}
+              onMouseEnter={e => { if (!isChecked) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+              onMouseLeave={e => { if (!isChecked) e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <input
+                type="checkbox"
+                checked={isChecked}
+                onChange={() => { }}
+                style={{ width: '15px', height: '15px', accentColor: '#0284c7', cursor: 'pointer', flexShrink: 0 }}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                <span style={{ fontSize: '13px', fontWeight: isChecked ? 600 : 500, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {name}
+                </span>
+                {c.email && (
+                  <span style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {c.email}
+                  </span>
+                )}
+              </div>
+              {c.leadStage && (
+                <span className="pipeline-stage-badge new" style={{ fontSize: '10px', padding: '1px 6px', flexShrink: 0 }}>
+                  {c.leadStage}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative', width: '100%' }}>
+      <div
+        onClick={() => {
+          if (isOpen) setIsOpen(false);
+          else openDropdown();
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '4px 10px',
+          backgroundColor: '#ffffff',
+          border: isOpen ? '1.5px solid #0284c7' : '1.5px solid #cbd5e1',
+          borderRadius: '8px',
+          minHeight: '38px',
+          cursor: 'pointer',
+          boxSizing: 'border-box',
+          gap: '6px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', flex: 1, overflow: 'hidden' }}>
+          {selectedIds.length === 0 ? (
+            <span style={{ fontSize: '13px', color: '#94a3b8' }}>{placeholder}</span>
+          ) : selectedIds.length <= 2 ? (
+            selectedIds.map(id => {
+              const c = contacts.find(item => item._id === id);
+              const label = c ? `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email : id;
+              return (
+                <span
+                  key={id}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    backgroundColor: '#e0f2fe',
+                    color: '#0369a1',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    padding: '2px 7px',
+                    borderRadius: '5px'
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggle(id);
+                  }}
+                >
+                  {label}
+                  <X size={11} style={{ cursor: 'pointer' }} />
+                </span>
+              );
+            })
+          ) : (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              backgroundColor: '#e0f2fe',
+              color: '#0369a1',
+              fontSize: '12.5px',
+              fontWeight: 600,
+              padding: '2px 8px',
+              borderRadius: '5px'
+            }}>
+              <CheckCircle size={13} />
+              {selectedIds.length} of {contacts.length} contacts selected
+            </span>
+          )}
+        </div>
+
+        <ChevronDown size={15} style={{ color: '#64748b', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease', flexShrink: 0 }} />
+      </div>
+
+      {isOpen && createPortal(dropdownMenu, document.body)}
+    </div>
+  );
+}
+
+// Multi-Select Component for Deals strictly associated with a Contact
+function MultiSelectContactDeals({
+  deals = [],
+  selectedIds = [],
+  onChange,
+  placeholder = "Select associated deals..."
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dropdownCoords, setDropdownCoords] = useState({ top: 0, left: 0, width: 280, placement: 'bottom', transform: 'none' });
+  const wrapperRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  const calculateCoords = () => {
+    if (!wrapperRef.current) return null;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
+
+    const placeTop = spaceBelow < 240 && spaceAbove > spaceBelow;
+    const availableSpace = placeTop ? spaceAbove - 20 : spaceBelow - 20;
+    const calculatedMaxHeight = Math.min(260, Math.max(130, availableSpace));
+
+    return {
+      top: placeTop ? Math.max(10, rect.top - 6) : rect.bottom + 6,
+      left: rect.left,
+      width: Math.max(rect.width, 280),
+      placement: placeTop ? 'top' : 'bottom',
+      transform: placeTop ? 'translateY(-100%)' : 'none',
+      maxHeight: `${calculatedMaxHeight}px`
+    };
+  };
+
+  const updateCoords = () => {
+    const nextCoords = calculateCoords();
+    if (nextCoords) setDropdownCoords(nextCoords);
+  };
+
+  const openDropdown = () => {
+    const nextCoords = calculateCoords();
+    if (nextCoords) setDropdownCoords(nextCoords);
+    setIsOpen(true);
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updateCoords();
+      window.addEventListener('resize', updateCoords);
+      window.addEventListener('scroll', updateCoords, true);
+      return () => {
+        window.removeEventListener('resize', updateCoords);
+        window.removeEventListener('scroll', updateCoords, true);
+      };
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target)
+      ) {
+        setIsOpen(false);
+        setSearchTerm('');
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
+
+  const handleToggle = (id) => {
+    const isSelected = selectedIds.includes(id);
+    let next;
+    if (isSelected) {
+      next = selectedIds.filter(item => item !== id);
+    } else {
+      next = [...selectedIds, id];
+    }
+    onChange(next);
+  };
+
+  const allSelected = deals.length > 0 && selectedIds.length === deals.length;
+
+  const filteredDeals = useMemo(() => {
+    if (!searchTerm.trim()) return deals;
+    const q = searchTerm.toLowerCase();
+    return deals.filter(d => {
+      const name = (d.dealName || d.clientName || '').toLowerCase();
+      const val = (d.dealValue || '').toString();
+      const owner = (d.salesOwner || '').toLowerCase();
+      return name.includes(q) || val.includes(q) || owner.includes(q);
+    });
+  }, [deals, searchTerm]);
+
+  const dropdownMenu = (
+    <div
+      ref={dropdownRef}
+      style={{
+        position: 'fixed',
+        top: `${dropdownCoords.top}px`,
+        left: `${dropdownCoords.left}px`,
+        width: `${dropdownCoords.width}px`,
+        maxHeight: dropdownCoords.maxHeight || '240px',
+        transform: dropdownCoords.transform,
+        backgroundColor: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '8px',
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
+        zIndex: 999999,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Search Filter if more than 4 deals */}
+      {deals.length > 4 && (
+        <div style={{ padding: '8px 10px 6px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Search size={13} style={{ color: '#94a3b8' }} />
+          <input
+            type="text"
+            placeholder="Filter contact deals..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            style={{ width: '100%', border: 'none', outline: 'none', fontSize: '12.5px', color: '#1e293b' }}
+          />
+          {searchTerm && (
+            <button type="button" onClick={() => setSearchTerm('')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#94a3b8' }}>
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Header with Select All / Deselect All */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
+        <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Associated Deals ({deals.length})
+        </span>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange(allSelected ? [] : deals.map(d => d._id));
+            }}
+            style={{ background: 'none', border: 'none', color: '#0284c7', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+          >
+            {allSelected ? 'Deselect All' : 'Select All'}
+          </button>
+        </div>
+      </div>
+
+      {/* Options List */}
+      <div style={{ overflowY: 'auto', flex: 1, padding: '4px' }}>
+        {filteredDeals.map(d => {
+          const isChecked = selectedIds.includes(d._id);
+          const name = d.dealName || d.clientName || 'Deal';
+          return (
+            <div
+              key={d._id}
+              onClick={() => handleToggle(d._id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '7px 10px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                backgroundColor: isChecked ? '#f0f9ff' : 'transparent',
+                transition: 'background-color 0.1s ease'
+              }}
+              onMouseEnter={e => { if (!isChecked) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+              onMouseLeave={e => { if (!isChecked) e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <input
+                type="checkbox"
+                checked={isChecked}
+                onChange={() => { }}
+                style={{ width: '15px', height: '15px', accentColor: '#0284c7', cursor: 'pointer', flexShrink: 0 }}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                <span style={{ fontSize: '13px', fontWeight: isChecked ? 600 : 500, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {name}
+                </span>
+                <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
+                  {d.currency || '$'}{Number(d.dealValue || 0).toLocaleString()}
+                </span>
+              </div>
+              <span className={`pipeline-stage-badge ${(d.stage || 'new').toLowerCase()}`} style={{ fontSize: '10px', padding: '1px 6px', flexShrink: 0 }}>
+                {d.stage || 'Deal'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative', width: '100%' }}>
+      <div
+        onClick={() => {
+          if (isOpen) setIsOpen(false);
+          else openDropdown();
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '4px 10px',
+          backgroundColor: '#ffffff',
+          border: isOpen ? '1.5px solid #0284c7' : '1.5px solid #cbd5e1',
+          borderRadius: '8px',
+          minHeight: '38px',
+          cursor: 'pointer',
+          boxSizing: 'border-box',
+          gap: '6px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', flex: 1, overflow: 'hidden' }}>
+          {selectedIds.length === 0 ? (
+            <span style={{ fontSize: '13px', color: '#94a3b8' }}>{placeholder}</span>
+          ) : selectedIds.length <= 2 ? (
+            selectedIds.map(id => {
+              const d = deals.find(item => item._id === id);
+              const label = d ? (d.dealName || d.clientName) : id;
+              return (
+                <span
+                  key={id}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    backgroundColor: '#e0f2fe',
+                    color: '#0369a1',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    padding: '2px 7px',
+                    borderRadius: '5px'
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggle(id);
+                  }}
+                >
+                  {label}
+                  <X size={11} style={{ cursor: 'pointer' }} />
+                </span>
+              );
+            })
+          ) : (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              backgroundColor: '#e0f2fe',
+              color: '#0369a1',
+              fontSize: '12.5px',
+              fontWeight: 600,
+              padding: '2px 8px',
+              borderRadius: '5px'
+            }}>
+              <CheckCircle size={13} />
+              {selectedIds.length} of {deals.length} deals selected
+            </span>
+          )}
+        </div>
+
+        <ChevronDown size={15} style={{ color: '#64748b', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease', flexShrink: 0 }} />
+      </div>
+
+      {isOpen && createPortal(dropdownMenu, document.body)}
+    </div>
+  );
+}
+
+// Interactive Pill Shape Badge for Single or Multiple Company Owners
+function CompanyOwnerDisplay({ owner, fallback = '—', className = '' }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const pillRef = useRef(null);
+  const tooltipRef = useRef(null);
+
+  const owners = useMemo(() => {
+    if (Array.isArray(owner)) {
+      return owner.map(s => String(s || '').trim()).filter(Boolean);
+    }
+    if (typeof owner === 'string' && owner.trim()) {
+      return owner.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (fallback && fallback !== '—' && fallback !== '-') {
+      return [fallback];
+    }
+    return [];
+  }, [owner, fallback]);
+
+  useEffect(() => {
+    if (!showTooltip) return;
+    const handleClickOutside = (e) => {
+      if (
+        pillRef.current &&
+        !pillRef.current.contains(e.target) &&
+        tooltipRef.current &&
+        !tooltipRef.current.contains(e.target)
+      ) {
+        setShowTooltip(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showTooltip]);
+
+  if (owners.length === 0) {
+    return <span style={{ color: '#94a3b8' }}>—</span>;
+  }
+
+  // Single Owner: Blue text with Mail icon
+  if (owners.length === 1) {
+    return (
+      <span
+        className={`pipeline-company-single-owner ${className}`}
+        style={{
+          color: '#0284c7',
+          fontWeight: 600,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          wordBreak: 'break-all',
+          fontSize: '12.5px'
+        }}
+        title={`Company Owner: ${owners[0]}`}
+      >
+        <Mail size={12} style={{ color: '#0284c7', flexShrink: 0 }} />
+        <span>{owners[0]}</span>
+      </span>
+    );
+  }
+
+  // Multiple Owners: Pill shape badge with interactive dropdown/tooltip
+  const firstOwner = owners[0];
+  const allOwnersTitle = `Associated Company Owners (${owners.length}):\n${owners.map((o, i) => `${i + 1}. ${o}`).join('\n')}`;
+
+  return (
+    <div
+      ref={pillRef}
+      style={{ position: 'relative', display: 'inline-block' }}
+      className={`pipeline-company-owner-pill-container ${className}`}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <div
+        className="pipeline-company-owner-pill-badge"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowTooltip(prev => !prev);
+        }}
+        title={allOwnersTitle}
+        style={{
+          background: '#e0f2fe',
+          color: '#0284c7',
+          border: '1px solid #bae6fd',
+          borderRadius: '999px',
+          padding: '2px 9px',
+          fontSize: '11px',
+          fontWeight: 600,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px',
+          cursor: 'pointer',
+          transition: 'all 0.15s ease',
+          userSelect: 'none'
+        }}
+      >
+        <Mail size={11} style={{ flexShrink: 0 }} />
+        <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {firstOwner}
+        </span>
+        <span
+          style={{
+            background: '#0284c7',
+            color: '#ffffff',
+            borderRadius: '999px',
+            padding: '1px 6px',
+            fontSize: '9.5px',
+            fontWeight: 700,
+            lineHeight: 1.2
+          }}
+        >
+          +{owners.length - 1}
+        </span>
+      </div>
+
+      {showTooltip && (
+        <div
+          ref={tooltipRef}
+          className="pipeline-company-owner-popover"
+          style={{
+            position: 'absolute',
+            bottom: 'calc(100% + 6px)',
+            right: 0,
+            background: '#ffffff',
+            border: '1px solid #cbd5e1',
+            borderRadius: '10px',
+            boxShadow: '0 10px 25px -3px rgba(15, 23, 42, 0.2), 0 4px 10px -2px rgba(15, 23, 42, 0.1)',
+            padding: '10px',
+            zIndex: 99999,
+            minWidth: '220px',
+            maxWidth: '300px',
+            animation: 'pipelineModalFade 0.15s ease-out'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', paddingBottom: '6px', marginBottom: '6px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+              Company Owners ({owners.length})
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', maxHeight: '160px', overflowY: 'auto' }}>
+            {owners.map((email, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '11.5px',
+                  color: '#0284c7',
+                  fontWeight: 600,
+                  padding: '4px 6px',
+                  borderRadius: '6px',
+                  background: '#f8fafc',
+                  wordBreak: 'break-all'
+                }}
+              >
+                <Mail size={11} style={{ flexShrink: 0 }} />
+                <span>{email}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Floating Portal Status Dropdown for Table Rows
+function TableStatusPill({ status, onSelectStatus }) {
+  const isPaid = (status || '').toLowerCase() === 'paid';
+  const [isOpen, setIsOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0, transform: 'none' });
+  const btnRef = useRef(null);
+
+  const updateCoords = () => {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const spaceBelow = viewportHeight - rect.bottom;
+      const placeTop = spaceBelow < 180 && rect.top > 180;
+      setCoords({
+        top: placeTop ? Math.max(10, rect.top - 4) : rect.bottom + 4,
+        left: rect.left,
+        transform: placeTop ? 'translateY(-100%)' : 'none'
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updateCoords();
+      const handleClick = (e) => {
+        if (btnRef.current && !btnRef.current.contains(e.target)) {
+          setIsOpen(false);
+        }
+      };
+      window.addEventListener('click', handleClick);
+      window.addEventListener('scroll', updateCoords, true);
+      window.addEventListener('resize', updateCoords);
+      return () => {
+        window.removeEventListener('click', handleClick);
+        window.removeEventListener('scroll', updateCoords, true);
+        window.removeEventListener('resize', updateCoords);
+      };
+    }
+  }, [isOpen]);
+
+  if (isPaid) {
+    return <span className="pipeline-milestone-status-badge paid">Paid</span>;
+  }
+
+  const curStatus = status || 'Pending';
+
+  const menu = isOpen && (
+    <div
+      className="pipeline-status-pill-menu"
+      style={{
+        position: 'fixed',
+        top: `${coords.top}px`,
+        left: `${coords.left}px`,
+        transform: coords.transform,
+        zIndex: 999999
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {['Paid', 'Pending', 'Partial', 'Overdue', 'Cancelled'].map(opt => (
+        <div
+          key={opt}
+          className={`pipeline-status-pill-option ${opt.toLowerCase()} ${curStatus.toLowerCase() === opt.toLowerCase() ? 'selected' : ''}`}
+          onClick={() => {
+            onSelectStatus(opt);
+            setIsOpen(false);
+          }}
+        >
+          <span className={`pipeline-status-dot ${opt.toLowerCase()}`} />
+          <span>{opt}</span>
+          {curStatus.toLowerCase() === opt.toLowerCase() && (
+            <CheckCircle size={12} style={{ marginLeft: 'auto', color: '#0284c7' }} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`pipeline-milestone-status-badge ${curStatus.toLowerCase()} interactive`}
+        onClick={(e) => {
+          e.stopPropagation();
+          updateCoords();
+          setIsOpen(prev => !prev);
+        }}
+      >
+        <span>{curStatus}</span>
+        <ChevronDown size={11} className="pipeline-status-chevron" />
+      </button>
+      {isOpen && createPortal(menu, document.body)}
+    </>
+  );
+}
+
+function Pipeline() {
+  const { user, hasPermission } = useAuth();
+
+  const roleName = useMemo(() => {
+    return (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+  }, [user]);
+
+  const isSalesHead = useMemo(() => {
+    return roleName === 'sales head' || roleName === 'saleshead' || roleName === 'head of sales';
+  }, [roleName]);
+
+  const isAdmin = useMemo(() => {
+    return roleName === 'admin' || roleName === 'super admin' || roleName === 'director';
+  }, [roleName]);
+
+  const hasFullAccess = isAdmin || isSalesHead;
+
+  // Module actions permissions
+  const canRead = useMemo(() => {
+    return hasFullAccess || hasPermission('pipeline', 'read') || hasPermission('deals', 'read') || hasPermission('contacts', 'read') || hasPermission('companies', 'read') || hasPermission('tasks', 'read');
+  }, [hasFullAccess, hasPermission]);
+
+  const canCreate = useMemo(() => {
+    return isAdmin || hasPermission('pipeline', 'create') || hasPermission('deals', 'create') || hasPermission('contacts', 'create') || hasPermission('companies', 'create') || hasPermission('tasks', 'create');
+  }, [isAdmin, hasPermission]);
+
+  const canUpdate = useMemo(() => {
+    return isAdmin || hasPermission('pipeline', 'update') || hasPermission('deals', 'update') || hasPermission('contacts', 'update') || hasPermission('companies', 'update') || hasPermission('tasks', 'update');
+  }, [isAdmin, hasPermission]);
+
+  const canDelete = useMemo(() => {
+    return isAdmin || hasPermission('pipeline', 'delete') || hasPermission('deals', 'delete') || hasPermission('contacts', 'delete') || hasPermission('companies', 'delete') || hasPermission('tasks', 'delete');
+  }, [isAdmin, hasPermission]);
+
+  // Ownership verification for data isolation
+  const isItemOwnedByUser = useCallback((item, type = 'deal') => {
+    if (hasFullAccess) return true;
+    if (!item || !user) return false;
+
+    const userId = (user._id || user.id || '').toString();
+    const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+    const userEmail = (user.email || '').trim().toLowerCase();
+    const userOfficialEmail = (user.officialEmail || '').trim().toLowerCase();
+
+    const assignedId = (item.assignedTo?._id || item.assignedTo || '').toString();
+    const createdId = (item.createdBy?._id || item.createdBy || '').toString();
+
+    if (userId && (assignedId === userId || createdId === userId)) return true;
+
+    if (type === 'deal') {
+      const salesOwner = (item.salesOwner || '').trim().toLowerCase();
+      const addedBy = (item.addedBy || '').trim().toLowerCase();
+      const email = (item.email || '').trim().toLowerCase();
+      if (userFullName && (salesOwner === userFullName || addedBy === userFullName)) return true;
+      if (userEmail && (salesOwner === userEmail || addedBy === userEmail || email === userEmail)) return true;
+      if (userOfficialEmail && (salesOwner === userOfficialEmail || email === userOfficialEmail)) return true;
+    } else if (type === 'contact') {
+      const owner = (item.owner || '').trim().toLowerCase();
+      const addedBy = (item.addedBy || '').trim().toLowerCase();
+      const email = (item.email || '').trim().toLowerCase();
+      if (userFullName && (owner === userFullName || addedBy === userFullName)) return true;
+      if (userEmail && (owner === userEmail || addedBy === userEmail || email === userEmail)) return true;
+      if (userOfficialEmail && (owner === userOfficialEmail || email === userOfficialEmail)) return true;
+    } else if (type === 'company') {
+      const owner = (item.owner || '').trim().toLowerCase();
+      if (userFullName && owner === userFullName) return true;
+      if (userEmail && owner === userEmail) return true;
+    } else if (type === 'task') {
+      const assignee = (item.assignee || '').trim().toLowerCase();
+      if (userFullName && assignee === userFullName) return true;
+      if (userEmail && assignee === userEmail) return true;
+    }
+
+    return false;
+  }, [user, hasFullAccess]);
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [deals, setDeals] = useState([]);
+  const [pipelines, setPipelines] = useState(() => {
+    try {
+      const deleted = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || '[]');
+      const saved = localStorage.getItem('crm_pipelines');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const filtered = parsed.filter(p => !deleted.includes((p.name || p.id || '').toLowerCase()));
+          if (!filtered.some(p => (p.name || p.id || '').toLowerCase() === 'initial') && !deleted.includes('initial')) {
+            return [{ id: 'Initial', name: 'Initial', badgeClass: 'new' }, ...filtered];
+          }
+          return filtered;
+        }
+      }
+      return DEFAULT_PIPELINES.filter(p => !deleted.includes((p.name || p.id || '').toLowerCase()));
+    } catch (e) { }
+    return DEFAULT_PIPELINES;
+  });
+  const [stages, setStages] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crm_stages');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) { }
+    return DEFAULT_STAGES;
+  });
+  const [dealTypes, setDealTypes] = useState(DEAL_TYPE_OPTIONS);
+  const [pipelineOptions, setPipelineOptions] = useState(() => {
+    try {
+      const deleted = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || '[]');
+      const saved = localStorage.getItem('crm_pipeline_options');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const list = parsed.filter(p => !deleted.includes(String(p).toLowerCase()));
+          if (!list.some(p => p.toLowerCase() === 'initial') && !deleted.includes('initial')) {
+            return ['Initial', ...list];
+          }
+          return list;
+        }
+      }
+      return PIPELINE_OPTIONS.filter(p => !deleted.includes(String(p).toLowerCase()));
+    } catch (e) { }
+    return PIPELINE_OPTIONS;
+  });
+  const [customOwners, setCustomOwners] = useState([]);
+  const [employees, setEmployees] = useState([]);
+
+  // Dynamic Deal & Contact Owner list (Only active employees with Sales role)
+  const ownerOptions = useMemo(() => {
+    const list = new Set();
+
+    (employees || []).forEach(emp => {
+      if (!emp) return;
+      // Must be Active
+      if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive') {
+        return;
+      }
+
+      const roleName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
+      const department = (emp.department || '').toLowerCase().trim();
+      const designation = (emp.designation || '').toLowerCase().trim();
+
+      const isSales =
+        roleName === 'sales' ||
+        roleName.includes('sales') ||
+        roleName.includes('business development') ||
+        roleName.includes('bde') ||
+        department === 'sales' ||
+        department.includes('sales') ||
+        designation.includes('sales') ||
+        designation.includes('bde');
+
+      if (isSales) {
+        const name = `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
+        if (name) list.add(name);
+      }
+    });
+
+    return Array.from(list);
+  }, [employees]);
+  const [showAddPipelineInput, setShowAddPipelineInput] = useState(false);
+  const [newPipelineName, setNewPipelineName] = useState('');
+  const [editingPipelineId, setEditingPipelineId] = useState(null);
+  const [editingPipelineName, setEditingPipelineName] = useState('');
+  const [{ tab: activeTab, view: viewMode, detailTab: detailActiveTab, stage: selectedStageFilter }, setQueryState] = useContextualQueryState({
+    tab: 'deals',
+    view: 'kanban',
+    detailTab: 'all',
+    stage: 'all',
+  });
+
+  const setActiveTab = useCallback((tab) => setQueryState({ tab }), [setQueryState]);
+  const setViewMode = useCallback((view) => setQueryState({ view }), [setQueryState]);
+  const setDetailActiveTab = useCallback((detailTab) => setQueryState({ detailTab }), [setQueryState]);
+  const setSelectedStageFilter = useCallback((stage) => setQueryState({ stage }), [setQueryState]);
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [modalStage, setModalStage] = useState('New');
+  const [activeMenuId, setActiveMenuId] = useState(null);
+  const [moveSubmenuDealId, setMoveSubmenuDealId] = useState(null);
+  const [viewingDeal, setViewingDeal] = useState(null);
+  const [editingDeal, setEditingDeal] = useState(null);
+  const [hoveredActivityDealId, setHoveredActivityDealId] = useState(null);
+  const [hoveredActivityContactId, setHoveredActivityContactId] = useState(null);
+  const [popoverCoords, setPopoverCoords] = useState({ top: 0, left: 0, placement: 'right', arrowTop: 20 });
+  const hoverTimeoutRef = React.useRef(null);
+  const lastContactScrollTopRef = useRef(0);
+  const lastDealScrollTopRef = useRef(0);
+  const [draggedDealId, setDraggedDealId] = useState(null);
+  const [dragOverColumnId, setDragOverColumnId] = useState(null);
+
+  // Live currency exchange rates to INR from official Frankfurter v2 API
+  const [exchangeRatesToINR, setExchangeRatesToINR] = useState({ INR: 1 });
+
+  // Auto-fetch latest live exchange rates from Frankfurter v2 API (no hardcoding, no API key required)
+  useEffect(() => {
+    if (!deals || deals.length === 0) return;
+
+    const uniqueCurrencies = Array.from(
+      new Set(
+        deals
+          .map(d => normalizeCurrencyCode(d.currency))
+          .filter(code => code && code !== 'INR')
+      )
+    );
+
+    const neededCurrencies = uniqueCurrencies.filter(code => exchangeRatesToINR[code] === undefined);
+    if (neededCurrencies.length === 0) return;
+
+    let isMounted = true;
+
+    neededCurrencies.forEach(async (baseCode) => {
+      try {
+        const response = await fetch(`https://api.frankfurter.dev/v2/rate/${encodeURIComponent(baseCode)}/INR`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data && typeof data.rate === 'number' && isMounted) {
+            setExchangeRatesToINR(prev => ({
+              ...prev,
+              [baseCode]: data.rate
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn(`Frankfurter v2 exchange rate fetch failed for ${baseCode}/INR:`, err.message);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [deals, exchangeRatesToINR]);
+
+  // Convert deal value from its native currency to INR using latest Frankfurter rates
+  const getDealValueInINR = useCallback((deal) => {
+    if (!deal) return 0;
+    const rawVal = parseNumericDealValue(deal.dealValue);
+    const baseCode = normalizeCurrencyCode(deal.currency);
+    if (baseCode === 'INR') return rawVal;
+    const rate = exchangeRatesToINR[baseCode];
+    if (typeof rate === 'number' && rate > 0) {
+      return rawVal * rate;
+    }
+    return rawVal;
+  }, [exchangeRatesToINR]);
+
+  const hoveredDeal = useMemo(() => {
+    return deals.find(d => d._id === hoveredActivityDealId) || null;
+  }, [deals, hoveredActivityDealId]);
+
+  // Detailed Deal 2-Section Page State
+  const [detailedDealId, setDetailedDealId] = useState(null);
+  const [dealActivities, setDealActivities] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crm_deal_activities');
+      if (saved) return JSON.parse(saved);
+    } catch (e) { }
+    return {};
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_deal_activities', JSON.stringify(dealActivities));
+    } catch (e) { }
+  }, [dealActivities]);
+
+  const [newActivityType, setNewActivityType] = useState('note'); // 'note' | 'email' | 'message' | 'call'
+  const [newActivityContent, setNewActivityContent] = useState('');
+  const [newActivitySubject, setNewActivitySubject] = useState('');
+  const [isComposingActivity, setIsComposingActivity] = useState(false);
+
+  const detailedDeal = useMemo(() => {
+    if (!detailedDealId) return null;
+    return deals.find(d => d._id === detailedDealId) || null;
+  }, [deals, detailedDealId]);
+
+
+  const [isCurrencyOpen, setIsCurrencyOpen] = useState(false);
+  const currencyRef = useRef(null);
+  const [dealSearchQuery, setDealSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('newest'); // 'newest', 'oldest', 'value_high', 'value_low', 'name_asc', 'name_desc', 'date_asc', 'date_desc'
+  const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
+  const [ownerFilter, setOwnerFilter] = useState('all');
+  const [isOwnerDropdownOpen, setIsOwnerDropdownOpen] = useState(false);
+  const [ownerSearchQuery, setOwnerSearchQuery] = useState('');
+  const [dealStatusFilter, setDealStatusFilter] = useState('all');
+  const [isDealStatusDropdownOpen, setIsDealStatusDropdownOpen] = useState(false);
+  const [dealOriginFilter, setDealOriginFilter] = useState('all'); // 'all', 'Domestic', 'International'
+  const [isDealOriginDropdownOpen, setIsDealOriginDropdownOpen] = useState(false);
+  const [dateFilter, setDateFilter] = useState('all'); // 'all', 'today', 'this_week', 'this_month', 'next_30_days', 'this_quarter', 'this_year', 'custom'
+  const [customDateStart, setCustomDateStart] = useState('');
+  const [customDateEnd, setCustomDateEnd] = useState('');
+  const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false);
+
+  // Toolbar & Column 3-dots Menu States
+  const [isDealsToolbarMenuOpen, setIsDealsToolbarMenuOpen] = useState(false);
+  const [isContactsToolbarMenuOpen, setIsContactsToolbarMenuOpen] = useState(false);
+  const [isCompaniesToolbarMenuOpen, setIsCompaniesToolbarMenuOpen] = useState(false);
+  const [isTasksToolbarMenuOpen, setIsTasksToolbarMenuOpen] = useState(false);
+  const [activeColMenuId, setActiveColMenuId] = useState(null);
+  const [isDealDetailsMenuOpen, setIsDealDetailsMenuOpen] = useState(false);
+  const [isContactDetailsMenuOpen, setIsContactDetailsMenuOpen] = useState(false);
+  const [isPipelineDropdownOpen, setIsPipelineDropdownOpen] = useState(false);
+  const [isStageDropdownOpen, setIsStageDropdownOpen] = useState(false);
+  const [isContactLeadStageDropdownOpen, setIsContactLeadStageDropdownOpen] = useState(false);
+  const [isContactLeadStatusDropdownOpen, setIsContactLeadStatusDropdownOpen] = useState(false);
+  const [isDealerPopoverOpen, setIsDealerPopoverOpen] = useState(false);
+  const [isDealerDropdownOpen, setIsDealerDropdownOpen] = useState(false);
+  const [dealerSearchQuery, setDealerSearchQuery] = useState('');
+  const [dealerPopoverCoords, setDealerPopoverCoords] = useState({ top: 0, left: 0 });
+  const dealerPopoverTimeoutRef = useRef(null);
+  const [isContactAddedByPopoverOpen, setIsContactAddedByPopoverOpen] = useState(false);
+  const [contactAddedByPopoverCoords, setContactAddedByPopoverCoords] = useState({ top: 0, left: 0 });
+  const contactAddedByPopoverTimeoutRef = useRef(null);
+  const [isDealAddedByPopoverOpen, setIsDealAddedByPopoverOpen] = useState(false);
+  const [dealAddedByPopoverCoords, setDealAddedByPopoverCoords] = useState({ top: 0, left: 0 });
+  const dealAddedByPopoverTimeoutRef = useRef(null);
+  const [isMilestonePopoverOpen, setIsMilestonePopoverOpen] = useState(false);
+  const [contactAccordionState, setContactAccordionState] = useState({ contact: true, project: false, payment: false, deals: true, company: true });
+  const [collapsedDeals, setCollapsedDeals] = useState({});
+  const [collapsedCompanies, setCollapsedCompanies] = useState({});
+  const [dealAccordionState, setDealAccordionState] = useState({ deal: true, project: false, payment: false });
+
+  // Always expand Deal Details by default whenever a deal is opened
+  useEffect(() => {
+    if (detailedDealId) {
+      setDealAccordionState({ deal: true, project: false, payment: false });
+      lastDealScrollTopRef.current = 0;
+    }
+  }, [detailedDealId]);
+
+  // Payment Records Modal State
+  const [showMilestoneModal, setShowMilestoneModal] = useState(false);
+  const [milestoneModalDealId, setMilestoneModalDealId] = useState(null);
+  const [previewAttachment, setPreviewAttachment] = useState(null);
+  const [paymentRecords, setPaymentRecords] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crm_payment_records');
+      if (saved) return JSON.parse(saved);
+    } catch (e) { }
+    return {};
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_payment_records', JSON.stringify(paymentRecords));
+    } catch (e) { }
+  }, [paymentRecords]);
+  const [showAddPaymentForm, setShowAddPaymentForm] = useState(false);
+  const [newPaymentData, setNewPaymentData] = useState({
+    clientName: '', projectName: '', paidAmount: '',
+    paymentMode: 'Bank Transfer', paymentStatus: 'Paid',
+    paymentDate: '', attachmentName: ''
+  });
+  const DEFAULT_PAYMENT_MODES = ['Paypal', 'Bank Transfer', 'Cash', 'UPI', 'QR Code'];
+  const [customPaymentModes, setCustomPaymentModes] = useState([]);
+  const [newCustomMode, setNewCustomMode] = useState('');
+  const [showAddModeInput, setShowAddModeInput] = useState(false);
+  const [attachmentFile, setAttachmentFile] = useState(null);
+  const [milestoneStatuses, setMilestoneStatuses] = useState({});
+  const [activeStatusDropdownId, setActiveStatusDropdownId] = useState(null);
+
+  // Close milestone status pill dropdown on click outside
+  useEffect(() => {
+    if (!activeStatusDropdownId) return;
+    const handleStatusOutsideClick = () => setActiveStatusDropdownId(null);
+    document.addEventListener('click', handleStatusOutsideClick);
+    return () => document.removeEventListener('click', handleStatusOutsideClick);
+  }, [activeStatusDropdownId]);
+
+  // Add Pipeline & Stage Modal States
+  const [showAddPipelineModal, setShowAddPipelineModal] = useState(false);
+  const [addPipelineModalName, setAddPipelineModalName] = useState('');
+  const [showAddStageModal, setShowAddStageModal] = useState(false);
+  const [addStageModalName, setAddStageModalName] = useState('');
+
+  // Contacts Management State
+  const [contacts, setContacts] = useState([]);
+  const [contactStages, setContactStages] = useState(() => {
+    const legacyDummyNames = ['marketing qualified (mql)', 'marketing qualified', 'sales qualified (sql)', 'sales qualified', 'opportunity', 'opportunity stage', 'customer', 'retention & customer'];
+    try {
+      const deleted = JSON.parse(localStorage.getItem('crm_deleted_stages') || '[]');
+      const saved = localStorage.getItem('crm_contact_stages');
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(s =>
+            !deleted.includes((s.name || s.id || '').toLowerCase()) &&
+            !legacyDummyNames.includes((s.name || s.id || '').toLowerCase())
+          );
+        }
+      }
+      return DEFAULT_CONTACT_STAGES.filter(s => !deleted.includes((s.name || s.id || '').toLowerCase()));
+    } catch (e) { }
+    return DEFAULT_CONTACT_STAGES;
+  });
+
+  const effectiveContactStages = useMemo(() => {
+    let deleted = [];
+    try {
+      deleted = JSON.parse(localStorage.getItem('crm_deleted_stages') || '[]')
+        .filter(d => typeof d === 'string' && d.trim().length > 0)
+        .map(d => d.toLowerCase().trim());
+    } catch (e) { }
+
+    let stages = contactStages.filter(s => !deleted.includes((s.name || s.id || '').toLowerCase().trim()));
+    const existingNames = new Set(stages.map(s => (s.name || s.id || '').toLowerCase().trim()));
+
+    // Dynamically include any stage present on existing contacts ONLY if NOT deleted
+    contacts.forEach(c => {
+      const cStage = (c.leadStage || '').trim();
+      if (cStage && !existingNames.has(cStage.toLowerCase()) && !deleted.includes(cStage.toLowerCase())) {
+        existingNames.add(cStage.toLowerCase());
+        stages.push({
+          id: cStage,
+          name: cStage,
+          badgeClass: 'new',
+          isCustom: true
+        });
+      }
+    });
+
+    return stages;
+  }, [contactStages, contacts]);
+  const [draggedContactId, setDraggedContactId] = useState(null);
+  const [dragOverContactColumnId, setDragOverContactColumnId] = useState(null);
+  const [editingContactStageId, setEditingContactStageId] = useState(null);
+  const [editingContactStageName, setEditingContactStageName] = useState('');
+  const [showAddContactStageInput, setShowAddContactStageInput] = useState(false);
+  const [newContactStageName, setNewContactStageName] = useState('');
+
+  const [contactSources, setContactSources] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crm_contact_sources');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) { }
+    return CONTACT_SOURCE_OPTIONS;
+  });
+  const [leadStages, setLeadStages] = useState(() => {
+    try {
+      const deleted = JSON.parse(localStorage.getItem('crm_deleted_stages') || '[]');
+      const saved = localStorage.getItem('crm_lead_stages');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(s => !deleted.includes(String(s).toLowerCase()));
+        }
+      }
+    } catch (e) { }
+    return LEAD_STAGE_OPTIONS;
+  });
+  const [leadStatuses, setLeadStatuses] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crm_lead_statuses');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) { }
+    return LEAD_STATUS_OPTIONS;
+  });
+
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
+  const [contactStageFilter, setContactStageFilter] = useState('all');
+  const [contactStatusFilter, setContactStatusFilter] = useState('all');
+  const [contactOriginFilter, setContactOriginFilter] = useState('all'); // 'all', 'Domestic', 'International'
+  const [contactSourceFilter, setContactSourceFilter] = useState('all');
+  const [contactOwnerFilter, setContactOwnerFilter] = useState('all');
+  const [contactDateFilter, setContactDateFilter] = useState('all');
+  const [customContactDateStart, setCustomContactDateStart] = useState('');
+  const [customContactDateEnd, setCustomContactDateEnd] = useState('');
+  const [contactSortBy, setContactSortBy] = useState('newest'); // 'newest', 'oldest', 'name_asc', 'name_desc', 'company', 'stage', 'status'
+  const [contactViewMode, setContactViewMode] = useState('kanban'); // 'kanban' | 'table'
+
+  const [isContactSortDropdownOpen, setIsContactSortDropdownOpen] = useState(false);
+  const [isContactOwnerDropdownOpen, setIsContactOwnerDropdownOpen] = useState(false);
+  const [isContactStatusDropdownOpen, setIsContactStatusDropdownOpen] = useState(false);
+  const [isContactOriginDropdownOpen, setIsContactOriginDropdownOpen] = useState(false);
+  const [isContactDateDropdownOpen, setIsContactDateDropdownOpen] = useState(false);
+  const [contactOwnerSearchQuery, setContactOwnerSearchQuery] = useState('');
+
+  const [detailedContactId, setDetailedContactId] = useState(null);
+
+  // Close all toolbar filter dropdowns on click outside
+  useEffect(() => {
+    const handleToolbarOutsideClick = () => {
+      setIsSortDropdownOpen(false);
+      setIsOwnerDropdownOpen(false);
+      setIsDealStatusDropdownOpen(false);
+      setIsDealOriginDropdownOpen(false);
+      setIsDateDropdownOpen(false);
+      setIsContactSortDropdownOpen(false);
+      setIsContactOwnerDropdownOpen(false);
+      setIsContactStatusDropdownOpen(false);
+      setIsContactOriginDropdownOpen(false);
+      setIsContactDateDropdownOpen(false);
+      setIsCompanySortDropdownOpen(false);
+      setIsCompanyIndustryDropdownOpen(false);
+      setIsCompanyOwnerDropdownOpen(false);
+      setIsCompanyDateDropdownOpen(false);
+    };
+    document.addEventListener('click', handleToolbarOutsideClick);
+    return () => document.removeEventListener('click', handleToolbarOutsideClick);
+  }, []);
+
+  // Always expand Contact Details by default whenever a contact is opened
+  useEffect(() => {
+    if (detailedContactId) {
+      setContactAccordionState({ contact: true, project: false, payment: false, deals: true, company: true });
+      setCollapsedDeals({});
+      setCollapsedCompanies({});
+      lastContactScrollTopRef.current = 0;
+    }
+  }, [detailedContactId]);
+
+  // Helper to safely parse any currency/numeric string
+  const parsePaymentAmount = useCallback((val) => {
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    if (!val) return 0;
+    const clean = val.toString().replace(/[^0-9.]/g, '');
+    return Number(clean) || 0;
+  }, []);
+
+  // Helper to get all matching payment records for a Deal
+  const getDealPaymentRecords = useCallback((deal, pRecords = paymentRecords) => {
+    if (!deal) return [];
+    const dId = deal._id ? String(deal._id) : '';
+    const dName = (deal.dealName || deal.clientName || '').toLowerCase().trim();
+    const dEmail = (deal.email || deal.clientEmail || '').toLowerCase().trim();
+
+    // 1. Direct key matches
+    const direct = (dId && pRecords[dId]) ? pRecords[dId] : [];
+
+    // 2. Scan all records across all keys
+    const allList = Object.values(pRecords || {}).flat().filter(Boolean);
+    const matched = allList.filter(r => {
+      if (!r) return false;
+      if (dId && r.dealId && String(r.dealId) === dId) return true;
+      if (dEmail && (r.clientEmail || r.clientName || '').toLowerCase().includes(dEmail)) return true;
+      if (dName) {
+        const recClient = (r.clientName || '').toLowerCase();
+        const recProj = (r.projectName || '').toLowerCase();
+        if (recClient.includes(dName) || dName.includes(recClient) || recProj.includes(dName)) return true;
+      }
+      return false;
+    });
+
+    // Deduplicate
+    const seen = new Set();
+    return [...direct, ...matched].filter(r => {
+      const key = r._id || r.id || `${r.srNo}_${r.paidAmount}_${r.paymentDate}_${r.clientName}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [paymentRecords]);
+
+  // Helper to get all matching payment records for a Contact
+  const getContactPaymentRecords = useCallback((contact, allDeals = deals, pRecords = paymentRecords) => {
+    if (!contact) return [];
+    const cId = contact._id ? String(contact._id) : '';
+    const cEmail = (contact.email || '').toLowerCase().trim();
+    const cName = `${contact.firstName || ''} ${contact.lastName || ''}`.trim().toLowerCase();
+    const cCompany = (contact.company || '').toLowerCase().trim();
+
+    const matchedDeal = allDeals.find(d =>
+      (d.contactId && String(d.contactId) === cId) ||
+      (d.clientName && contact.firstName && (
+        d.clientName.toLowerCase().includes(contact.firstName.toLowerCase()) ||
+        contact.firstName.toLowerCase().includes(d.clientName.toLowerCase())
+      )) ||
+      (d.clientName && contact.company && d.clientName.toLowerCase().includes(contact.company.toLowerCase()))
+    );
+
+    const direct = [
+      ...(cId && pRecords[cId] ? pRecords[cId] : []),
+      ...(cId && pRecords[`contact_${cId}`] ? pRecords[`contact_${cId}`] : []),
+      ...(matchedDeal && matchedDeal._id && pRecords[matchedDeal._id] ? pRecords[matchedDeal._id] : [])
+    ];
+
+    const allList = Object.values(pRecords || {}).flat().filter(Boolean);
+    const matched = allList.filter(r => {
+      if (!r) return false;
+      if (cId && r.contactId && String(r.contactId) === cId) return true;
+      if (matchedDeal && matchedDeal._id && r.dealId && String(r.dealId) === String(matchedDeal._id)) return true;
+      if (cEmail && (r.clientEmail || r.clientName || '').toLowerCase().includes(cEmail)) return true;
+      if (cName && (r.clientName || '').toLowerCase().includes(cName)) return true;
+      if (cCompany && (r.clientName || r.projectName || '').toLowerCase().includes(cCompany)) return true;
+      return false;
+    });
+
+    const seen = new Set();
+    return [...direct, ...matched].filter(r => {
+      const key = r._id || r.id || `${r.srNo}_${r.paidAmount}_${r.paymentDate}_${r.clientName}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [paymentRecords, deals]);
+
+  const logActivity = useCallback(async (targetId, activityData, isContact = false) => {
+    if (!targetId) return;
+    const isContactEntity = isContact || (typeof targetId === 'string' && (targetId.startsWith('contact_') || targetId.startsWith('cont-'))) || (Array.isArray(contacts) && contacts.some(c => c._id === targetId));
+    const authorName = activityData.author || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+    const now = new Date();
+    const formattedDate = formatDateDDMMYYYY(now);
+    const formattedTime = now.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    }).toUpperCase();
+
+    const newActivity = {
+      id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      type: activityData.type || 'activity',
+      title: activityData.title || 'Activity Update',
+      content: activityData.content || '',
+      author: authorName,
+      time: (activityData.time || formattedTime).toUpperCase(),
+      date: activityData.date || formattedDate,
+      createdAt: activityData.createdAt || now.toISOString(),
+      timestamp: Date.now()
+    };
+
+    // 1. Update local dealActivities state
+    setDealActivities(prev => {
+      const currentList = prev[targetId] || [];
+      return {
+        ...prev,
+        [targetId]: [newActivity, ...currentList].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      };
+    });
+
+    // 2. Update entities in state and sync with backend
+    if (isContactEntity) {
+      const cleanContactId = targetId.toString().replace('contact_', '');
+      setContacts(prev => prev.map(c => {
+        if (c._id === cleanContactId || c._id === targetId) {
+          const acts = Array.isArray(c.activities) ? c.activities : [];
+          return { ...c, activities: [newActivity, ...acts].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) };
+        }
+        return c;
+      }));
+      try {
+        if (cleanContactId && !cleanContactId.startsWith('contact-')) {
+          await api.post(`/pipeline-contacts/${cleanContactId}/activities`, newActivity);
+        }
+      } catch (err) {
+        console.warn('API sync contact activity:', err.message);
+      }
+    } else {
+      setDeals(prev => prev.map(d => {
+        if (d._id === targetId) {
+          const acts = Array.isArray(d.activities) ? d.activities : [];
+          return { ...d, activities: [newActivity, ...acts].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) };
+        }
+        return d;
+      }));
+      try {
+        if (targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
+          await api.post(`/deals/${targetId}/activities`, newActivity);
+        }
+      } catch (err) {
+        console.warn('API sync deal activity:', err.message);
+      }
+    }
+
+    return newActivity;
+  }, [contacts, deals, user]);
+
+  // Initial Backend Data Fetching
+  useEffect(() => {
+    let isMounted = true;
+    // Clear legacy mock/static localStorage caches so only live database records are used
+    try {
+      localStorage.removeItem('crm_deals');
+      localStorage.removeItem('crm_contacts');
+    } catch (e) { }
+
+    const fetchAllData = async () => {
+      setIsLoading(true);
+      const startTime = Date.now();
+      let loadedDeals = [];
+      let initialContacts = [];
+      try {
+        const dealsRes = await api.get('/deals');
+        if (isMounted) {
+          const apiDeals = (dealsRes.data && Array.isArray(dealsRes.data)) ? dealsRes.data : [];
+          loadedDeals = apiDeals;
+          setDeals(apiDeals);
+        }
+      } catch (err) {
+        console.warn('Deals API load:', err.message);
+        if (isMounted) setDeals([]);
+      }
+
+      try {
+        const contactsRes = await api.get('/pipeline-contacts');
+        if (isMounted) {
+          const apiContacts = (contactsRes.data && Array.isArray(contactsRes.data)) ? contactsRes.data : [];
+          initialContacts = apiContacts;
+          setContacts(apiContacts);
+        }
+      } catch (err) {
+        console.warn('Pipeline contacts API load:', err.message);
+        if (isMounted) setContacts([]);
+      }
+
+      try {
+        const compRes = await api.get('/pipeline-companies');
+        if (isMounted && compRes.data && Array.isArray(compRes.data)) {
+          setCompanies(compRes.data);
+        }
+      } catch (err) {
+        console.warn('Pipeline companies API load:', err.message);
+      }
+
+      try {
+        const tasksRes = await api.get('/pipeline-tasks');
+        if (isMounted && tasksRes.data && Array.isArray(tasksRes.data)) {
+          setTasks(tasksRes.data);
+        }
+      } catch (err) {
+        console.warn('Pipeline tasks API load:', err.message);
+      }
+
+      try {
+        const empRes = await api.get('/employees');
+        if (isMounted && empRes.data && Array.isArray(empRes.data)) {
+          setEmployees(empRes.data);
+        }
+      } catch (err) {
+        console.warn('Employees API load:', err.message);
+        try {
+          const listRes = await api.get('/employees/list');
+          if (isMounted && listRes.data && Array.isArray(listRes.data)) {
+            setEmployees(listRes.data);
+          }
+        } catch (err2) {
+          console.warn('Employees list fallback load:', err2.message);
+        }
+      }
+
+      try {
+        const payRes = await api.get('/payment-records');
+        if (isMounted && payRes.data && Array.isArray(payRes.data)) {
+          const grouped = {};
+          payRes.data.forEach(r => {
+            const key = r.dealId || r.contactId || 'general';
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push(r);
+          });
+          setPaymentRecords(grouped);
+        }
+      } catch (err) {
+        console.warn('Payment records API load:', err.message);
+      }
+
+      try {
+        const configRes = await api.get('/pipeline-configs');
+        if (isMounted && configRes.data) {
+          const cfg = configRes.data;
+          const deletedStages = Array.isArray(cfg.deletedStages) ? cfg.deletedStages : [];
+          const deletedPipelines = Array.isArray(cfg.deletedPipelines) ? cfg.deletedPipelines : [];
+          if (deletedStages.length > 0) {
+            try { localStorage.setItem('crm_deleted_stages', JSON.stringify(deletedStages)); } catch (e) { }
+          }
+          if (deletedPipelines.length > 0) {
+            try { localStorage.setItem('crm_deleted_pipelines', JSON.stringify(deletedPipelines)); } catch (e) { }
+          }
+          const legacyDummyNames = ['marketing qualified (mql)', 'marketing qualified', 'sales qualified (sql)', 'sales qualified', 'opportunity', 'opportunity stage', 'customer', 'retention & customer'];
+          if (Array.isArray(cfg.contactStages)) {
+            const cleanedContactStages = cfg.contactStages.filter(s =>
+              !deletedStages.includes((s.name || s.id || '').toLowerCase()) &&
+              !legacyDummyNames.includes((s.name || s.id || '').toLowerCase())
+            );
+            setContactStages(cleanedContactStages);
+            try { localStorage.setItem('crm_contact_stages', JSON.stringify(cleanedContactStages)); } catch (e) { }
+          }
+          if (Array.isArray(cfg.leadStages) && cfg.leadStages.length > 0) {
+            const cleanedLeadStages = cfg.leadStages.filter(s => !deletedStages.includes(String(s).toLowerCase()));
+            setLeadStages(cleanedLeadStages);
+            try { localStorage.setItem('crm_lead_stages', JSON.stringify(cleanedLeadStages)); } catch (e) { }
+          }
+          if (Array.isArray(cfg.pipelines) && cfg.pipelines.length > 0) {
+            const cleanedPipelines = cfg.pipelines.filter(p => !deletedPipelines.includes((p.name || p.id || '').toLowerCase()));
+            setPipelines(cleanedPipelines);
+            try { localStorage.setItem('crm_pipelines', JSON.stringify(cleanedPipelines)); } catch (e) { }
+          }
+          if (Array.isArray(cfg.stages) && cfg.stages.length > 0) {
+            setStages(cfg.stages);
+            try { localStorage.setItem('crm_stages', JSON.stringify(cfg.stages)); } catch (e) { }
+          }
+          if (Array.isArray(cfg.pipelineOptions) && cfg.pipelineOptions.length > 0) {
+            const cleanedPipelineOptions = cfg.pipelineOptions.filter(p => !deletedPipelines.includes(String(p).toLowerCase()));
+            setPipelineOptions(cleanedPipelineOptions);
+            try { localStorage.setItem('crm_pipeline_options', JSON.stringify(cleanedPipelineOptions)); } catch (e) { }
+          }
+
+          // Dynamically discover any pipelines and stages from loaded deals
+          if (loadedDeals && loadedDeals.length > 0) {
+            const dealPipelines = Array.from(new Set(loadedDeals.map(d => d.pipeline).filter(Boolean)));
+            setPipelines(prev => {
+              const current = prev || [];
+              const names = new Set(current.map(p => (p.name || p.id || '').toLowerCase()));
+              const toAdd = dealPipelines.filter(dp => !names.has(dp.toLowerCase())).map(dp => ({ id: dp, name: dp }));
+              return toAdd.length > 0 ? [...current, ...toAdd] : current;
+            });
+            setPipelineOptions(prev => {
+              const current = prev || [];
+              const lower = new Set(current.map(p => String(p).toLowerCase()));
+              const toAdd = dealPipelines.filter(dp => !lower.has(dp.toLowerCase()));
+              return toAdd.length > 0 ? [...current, ...toAdd] : current;
+            });
+
+            const dealStages = Array.from(new Set(loadedDeals.map(d => d.stage).filter(Boolean)));
+            setStages(prev => {
+              const current = prev || [];
+              const names = new Set(current.map(s => (s.name || s.id || '').toLowerCase()));
+              const toAdd = dealStages.filter(ds => !names.has(ds.toLowerCase())).map(ds => ({
+                id: ds,
+                name: ds,
+                badgeClass: 'new',
+                isCustom: true
+              }));
+              return toAdd.length > 0 ? [...current, ...toAdd] : current;
+            });
+          }
+
+          // Dynamically discover any contact stages from loaded contacts
+          if (initialContacts && initialContacts.length > 0) {
+            const contactLeadStages = Array.from(new Set(initialContacts.map(c => c.leadStage).filter(Boolean)));
+            setContactStages(prev => {
+              const current = prev || [];
+              const names = new Set(current.map(s => (s.name || s.id || '').toLowerCase()));
+              const toAdd = contactLeadStages
+                .filter(st => !names.has(st.toLowerCase()) && !deletedStages.includes(st.toLowerCase()))
+                .map((st, i) => ({
+                  id: st,
+                  name: st,
+                  badgeClass: ['new', 'hot', 'cold', 'won', 'custom'][i % 5]
+                }));
+              return toAdd.length > 0 ? [...current, ...toAdd] : current;
+            });
+            setLeadStages(prev => {
+              const current = prev || [];
+              const lower = new Set(current.map(s => String(s).toLowerCase()));
+              const toAdd = contactLeadStages.filter(st => !lower.has(st.toLowerCase()) && !deletedStages.includes(st.toLowerCase()));
+              return toAdd.length > 0 ? [...current, ...toAdd] : current;
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Pipeline configs API load:', err.message);
+      } finally {
+        const elapsed = Date.now() - startTime;
+        const delay = Math.max(0, 450 - elapsed);
+        setTimeout(() => {
+          if (isMounted) setIsLoading(false);
+        }, delay);
+      }
+    };
+
+    fetchAllData();
+    return () => { isMounted = false; };
+  }, []);
+
+
+  const detailedContact = useMemo(() => {
+    return contacts.find(c => c._id === detailedContactId) || null;
+  }, [contacts, detailedContactId]);
+
+  const hoveredContact = useMemo(() => {
+    return (contacts || []).find(c => c && c._id === hoveredActivityContactId) || null;
+  }, [contacts, hoveredActivityContactId]);
+
+
+  const [showCreateContactModal, setShowCreateContactModal] = useState(false);
+  const [editingContact, setEditingContact] = useState(null);
+  const [viewingContact, setViewingContact] = useState(null);
+  const [activeContactMenuId, setActiveContactMenuId] = useState(null);
+  const [moveSubmenuContactId, setMoveSubmenuContactId] = useState(null);
+  const [activeContactStatusDropdownId, setActiveContactStatusDropdownId] = useState(null);
+
+  const [isCountryCodeOpen, setIsCountryCodeOpen] = useState(false);
+  const countryCodeRef = useRef(null);
+  const [selectedCountry, setSelectedCountry] = useState(COUNTRY_CODES[0]);
+
+  const [contactFormData, setContactFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    countryCode: '+1',
+    phone: '',
+    origin: 'Domestic',
+    contactSource: '',
+    leadStage: '',
+    leadStatus: '',
+    owner: 'Artiflow',
+    company: ''
+  });
+
+  // Dynamic list of all contact owners (from sales team & existing contacts)
+  const allContactOwners = useMemo(() => {
+    const ownerMap = new Map();
+    (ownerOptions || []).forEach(name => {
+      if (name && name.trim()) {
+        ownerMap.set(name.trim().toLowerCase(), name.trim());
+      }
+    });
+    (contacts || []).forEach(c => {
+      if (c.owner && c.owner.trim()) {
+        const key = c.owner.trim().toLowerCase();
+        if (!ownerMap.has(key)) {
+          ownerMap.set(key, c.owner.trim());
+        }
+      }
+    });
+    return Array.from(ownerMap.values()).sort((a, b) => a.localeCompare(b));
+  }, [ownerOptions, contacts]);
+
+  // Contact counts per owner for badge counts
+  const contactOwnerCounts = useMemo(() => {
+    const counts = {};
+    (contacts || []).forEach(c => {
+      if (!isItemOwnedByUser(c, 'contact')) return;
+      const o = (c.owner || 'Unassigned').trim();
+      counts[o] = (counts[o] || 0) + 1;
+      counts[o.toLowerCase()] = (counts[o.toLowerCase()] || 0) + 1;
+    });
+    return counts;
+  }, [contacts, isItemOwnedByUser]);
+
+  const contactSortLabel = useMemo(() => {
+    switch (contactSortBy) {
+      case 'name_asc': return 'Name: A - Z';
+      case 'name_desc': return 'Name: Z - A';
+      case 'company': return 'Company: A - Z';
+      case 'stage': return 'Lead Stage';
+      case 'status': return 'Lead Status';
+      case 'oldest': return 'Oldest first';
+      default: return 'Newest first';
+    }
+  }, [contactSortBy]);
+
+  const contactDateFilterLabel = useMemo(() => {
+    switch (contactDateFilter) {
+      case 'today': return 'Date: Today';
+      case 'this_week': return 'Date: This week';
+      case 'this_month': return 'Date: This month';
+      case 'next_30_days': return 'Date: Next 30 days';
+      case 'this_quarter': return 'Date: This quarter';
+      case 'this_year': return 'Date: This year';
+      case 'custom':
+        if (customContactDateStart && customContactDateEnd) {
+          return `${formatDateDDMMYYYY(customContactDateStart)} to ${formatDateDDMMYYYY(customContactDateEnd)}`;
+        }
+        if (customContactDateStart) return `From ${formatDateDDMMYYYY(customContactDateStart)}`;
+        if (customContactDateEnd) return `Until ${formatDateDDMMYYYY(customContactDateEnd)}`;
+        return 'Date: Custom';
+      default:
+        return 'All dates';
+    }
+  }, [contactDateFilter, customContactDateStart, customContactDateEnd]);
+
+  const contactOriginCounts = useMemo(() => {
+    const counts = { all: 0, domestic: 0, international: 0 };
+    (contacts || []).forEach(c => {
+      if (!isItemOwnedByUser(c, 'contact')) return;
+      counts.all++;
+      const origin = (c.origin || 'Domestic').toLowerCase();
+      if (origin === 'international') {
+        counts.international++;
+      } else {
+        counts.domestic++;
+      }
+    });
+    return counts;
+  }, [contacts, isItemOwnedByUser]);
+
+  const isAnyContactFilterActive = useMemo(() => {
+    return (
+      contactSearchQuery.trim() !== '' ||
+      contactOwnerFilter !== 'all' ||
+      contactStatusFilter !== 'all' ||
+      contactOriginFilter !== 'all' ||
+      contactStageFilter !== 'all' ||
+      contactDateFilter !== 'all' ||
+      contactSortBy !== 'newest'
+    );
+  }, [contactSearchQuery, contactOwnerFilter, contactStatusFilter, contactOriginFilter, contactStageFilter, contactDateFilter, contactSortBy]);
+
+  const handleResetContactFilters = () => {
+    setContactSearchQuery('');
+    setContactOwnerFilter('all');
+    setContactStatusFilter('all');
+    setContactOriginFilter('all');
+    setContactStageFilter('all');
+    setContactDateFilter('all');
+    setCustomContactDateStart('');
+    setCustomContactDateEnd('');
+    setContactSortBy('newest');
+    setIsContactSortDropdownOpen(false);
+    setIsContactOwnerDropdownOpen(false);
+    setIsContactStatusDropdownOpen(false);
+    setIsContactOriginDropdownOpen(false);
+    setIsContactDateDropdownOpen(false);
+    setContactOwnerSearchQuery('');
+  };
+
+  // Filtered Contacts Memo
+  const filteredContacts = useMemo(() => {
+    return contacts
+      .filter(contact => {
+        if (!isItemOwnedByUser(contact, 'contact')) {
+          return false;
+        }
+
+        if (contactSearchQuery.trim()) {
+          const q = contactSearchQuery.toLowerCase();
+          const fullName = `${contact.firstName || ''} ${contact.lastName || ''}`.toLowerCase();
+          const email = (contact.email || '').toLowerCase();
+          const company = (contact.company || '').toLowerCase();
+          const phone = (contact.phone || '').toLowerCase();
+          if (!fullName.includes(q) && !email.includes(q) && !company.includes(q) && !phone.includes(q)) {
+            return false;
+          }
+        }
+
+        if (contactOwnerFilter !== 'all') {
+          const cOwner = (contact.owner || '').trim().toLowerCase();
+          const fOwner = contactOwnerFilter.trim().toLowerCase();
+          if (cOwner !== fOwner && !cOwner.includes(fOwner)) {
+            return false;
+          }
+        }
+
+        if (contactStageFilter !== 'all') {
+          const filterLower = contactStageFilter.toLowerCase();
+          const contactStageLower = (contact.leadStage || '').toLowerCase();
+          const matchedStage = effectiveContactStages.find(s => (s.name || '').toLowerCase() === filterLower || (s.id || '').toLowerCase() === filterLower);
+          if (matchedStage) {
+            const matchesStage = contactStageLower === (matchedStage.name || '').toLowerCase() || contactStageLower === (matchedStage.id || '').toLowerCase();
+            if (!matchesStage) return false;
+          } else if (contactStageLower !== filterLower) {
+            return false;
+          }
+        }
+
+        if (contactStatusFilter !== 'all' && (contact.leadStatus || '').toLowerCase() !== contactStatusFilter.toLowerCase()) {
+          return false;
+        }
+
+        if (contactOriginFilter !== 'all') {
+          const cOrig = (contact.origin || 'Domestic').toLowerCase();
+          if (cOrig !== contactOriginFilter.toLowerCase()) return false;
+        }
+
+        if (contactSourceFilter !== 'all' && (contact.contactSource || '').toLowerCase() !== contactSourceFilter.toLowerCase()) {
+          return false;
+        }
+
+        if (contactDateFilter !== 'all') {
+          const contactDate = parseDealDate(contact.createdAt) || parseDealDate(contact.createdDate) || parseDealDate(contact.date);
+          if (!contactDate) return false;
+          const now = new Date();
+          const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+          if (contactDateFilter === 'today') {
+            if (contactDate < startOfToday || contactDate > endOfToday) return false;
+          } else if (contactDateFilter === 'this_week') {
+            const firstDayOfWeek = new Date(startOfToday);
+            const day = firstDayOfWeek.getDay();
+            const diff = firstDayOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+            firstDayOfWeek.setDate(diff);
+            const lastDayOfWeek = new Date(firstDayOfWeek);
+            lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
+            lastDayOfWeek.setHours(23, 59, 59, 999);
+            if (contactDate < firstDayOfWeek || contactDate > lastDayOfWeek) return false;
+          } else if (contactDateFilter === 'this_month') {
+            if (contactDate.getMonth() !== now.getMonth() || contactDate.getFullYear() !== now.getFullYear()) return false;
+          } else if (contactDateFilter === 'next_30_days') {
+            const in30Days = new Date(startOfToday);
+            in30Days.setDate(in30Days.getDate() + 30);
+            in30Days.setHours(23, 59, 59, 999);
+            if (contactDate < startOfToday || contactDate > in30Days) return false;
+          } else if (contactDateFilter === 'this_quarter') {
+            const currentQuarter = Math.floor(now.getMonth() / 3);
+            const contactQuarter = Math.floor(contactDate.getMonth() / 3);
+            if (contactQuarter !== currentQuarter || contactDate.getFullYear() !== now.getFullYear()) return false;
+          } else if (contactDateFilter === 'this_year') {
+            if (contactDate.getFullYear() !== now.getFullYear()) return false;
+          } else if (contactDateFilter === 'custom') {
+            if (customContactDateStart) {
+              const start = new Date(customContactDateStart);
+              start.setHours(0, 0, 0, 0);
+              if (contactDate < start) return false;
+            }
+            if (customContactDateEnd) {
+              const end = new Date(customContactDateEnd);
+              end.setHours(23, 59, 59, 999);
+              if (contactDate > end) return false;
+            }
+          }
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (contactSortBy === 'name_asc') {
+          const nameA = `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email || '';
+          const nameB = `${b.firstName || ''} ${b.lastName || ''}`.trim() || b.email || '';
+          return nameA.localeCompare(nameB);
+        }
+        if (contactSortBy === 'name_desc') {
+          const nameA = `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email || '';
+          const nameB = `${b.firstName || ''} ${b.lastName || ''}`.trim() || b.email || '';
+          return nameB.localeCompare(nameA);
+        }
+        if (contactSortBy === 'company') {
+          return (a.company || '').localeCompare(b.company || '');
+        }
+        if (contactSortBy === 'stage') {
+          return (a.leadStage || '').localeCompare(b.leadStage || '');
+        }
+        if (contactSortBy === 'status') {
+          return (a.leadStatus || '').localeCompare(b.leadStatus || '');
+        }
+        if (contactSortBy === 'oldest') {
+          const da = parseDealDate(a.createdAt) || parseDealDate(a.createdDate) || parseDealDate(a.date) || new Date(0);
+          const db = parseDealDate(b.createdAt) || parseDealDate(b.createdDate) || parseDealDate(b.date) || new Date(0);
+          return da - db;
+        }
+        // newest
+        const da = parseDealDate(a.createdAt) || parseDealDate(a.createdDate) || parseDealDate(a.date) || new Date(0);
+        const db = parseDealDate(b.createdAt) || parseDealDate(b.createdDate) || parseDealDate(b.date) || new Date(0);
+        return db - da;
+      });
+  }, [contacts, contactSearchQuery, contactOwnerFilter, contactStageFilter, contactStatusFilter, contactOriginFilter, contactSourceFilter, contactDateFilter, customContactDateStart, customContactDateEnd, contactSortBy, effectiveContactStages, isItemOwnedByUser]);
+
+  // Companies Management State
+  const [companies, setCompanies] = useState(INITIAL_SAMPLE_COMPANIES);
+  const [industryOptions, setIndustryOptions] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crm_industry_options');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) { }
+    return INDUSTRY_OPTIONS;
+  });
+  const [countryListOptions, setCountryListOptions] = useState(COUNTRY_OPTIONS);
+  const [companySearchQuery, setCompanySearchQuery] = useState('');
+  const [companyIndustryFilter, setCompanyIndustryFilter] = useState('all');
+  const [isCompanyIndustryDropdownOpen, setIsCompanyIndustryDropdownOpen] = useState(false);
+  const [companyOwnerFilter, setCompanyOwnerFilter] = useState('all');
+  const [isCompanyOwnerDropdownOpen, setIsCompanyOwnerDropdownOpen] = useState(false);
+  const [companyOwnerSearchQuery, setCompanyOwnerSearchQuery] = useState('');
+  const [companyDateFilter, setCompanyDateFilter] = useState('all');
+  const [customCompanyDateStart, setCustomCompanyDateStart] = useState('');
+  const [customCompanyDateEnd, setCustomCompanyDateEnd] = useState('');
+  const [isCompanyDateDropdownOpen, setIsCompanyDateDropdownOpen] = useState(false);
+  const [companySortBy, setCompanySortBy] = useState('newest'); // 'newest', 'oldest', 'name_asc', 'name_desc', 'industry', 'country'
+  const [isCompanySortDropdownOpen, setIsCompanySortDropdownOpen] = useState(false);
+  const [companyViewMode, setCompanyViewMode] = useState('grid'); // 'grid' | 'list'
+  const [showCreateCompanyModal, setShowCreateCompanyModal] = useState(false);
+  const [editingCompany, setEditingCompany] = useState(null);
+  const [viewingCompany, setViewingCompany] = useState(null);
+  const [activeCompanyMenuId, setActiveCompanyMenuId] = useState(null);
+
+  // Dynamic list of all company owners (from sales team & existing companies)
+  const allCompanyOwners = useMemo(() => {
+    const ownerMap = new Map();
+    (ownerOptions || []).forEach(name => {
+      if (name && name.trim()) {
+        ownerMap.set(name.trim().toLowerCase(), name.trim());
+      }
+    });
+    (companies || []).forEach(c => {
+      const ownerVal = Array.isArray(c.owner) ? c.owner.join(', ') : (c.owner || '');
+      if (ownerVal && ownerVal.trim()) {
+        ownerVal.split(',').map(s => s.trim()).filter(Boolean).forEach(o => {
+          const key = o.toLowerCase();
+          if (!ownerMap.has(key)) {
+            ownerMap.set(key, o);
+          }
+        });
+      }
+    });
+    return Array.from(ownerMap.values()).sort((a, b) => a.localeCompare(b));
+  }, [ownerOptions, companies]);
+
+  // Company counts per owner for badge counts
+  const companyOwnerCounts = useMemo(() => {
+    const counts = {};
+    (companies || []).forEach(c => {
+      if (!isItemOwnedByUser(c, 'company')) return;
+      const ownerVal = Array.isArray(c.owner) ? c.owner.join(', ') : (c.owner || 'Unassigned');
+      ownerVal.split(',').map(s => s.trim()).filter(Boolean).forEach(o => {
+        counts[o] = (counts[o] || 0) + 1;
+        counts[o.toLowerCase()] = (counts[o.toLowerCase()] || 0) + 1;
+      });
+    });
+    return counts;
+  }, [companies, isItemOwnedByUser]);
+
+  // Company counts per industry for badge counts
+  const companyIndustryCounts = useMemo(() => {
+    const counts = {};
+    (companies || []).forEach(c => {
+      if (!isItemOwnedByUser(c, 'company')) return;
+      const ind = (c.industry || 'Other').trim();
+      counts[ind] = (counts[ind] || 0) + 1;
+      counts[ind.toLowerCase()] = (counts[ind.toLowerCase()] || 0) + 1;
+    });
+    return counts;
+  }, [companies, isItemOwnedByUser]);
+
+  const companySortLabel = useMemo(() => {
+    switch (companySortBy) {
+      case 'name_asc': return 'Name: A - Z';
+      case 'name_desc': return 'Name: Z - A';
+      case 'industry': return 'Industry: A - Z';
+      case 'country': return 'Country: A - Z';
+      case 'oldest': return 'Oldest first';
+      default: return 'Newest first';
+    }
+  }, [companySortBy]);
+
+  const companyDateFilterLabel = useMemo(() => {
+    switch (companyDateFilter) {
+      case 'today': return 'Date: Today';
+      case 'this_week': return 'Date: This week';
+      case 'this_month': return 'Date: This month';
+      case 'next_30_days': return 'Date: Next 30 days';
+      case 'this_quarter': return 'Date: This quarter';
+      case 'this_year': return 'Date: This year';
+      case 'custom':
+        if (customCompanyDateStart && customCompanyDateEnd) {
+          return `${formatDateDDMMYYYY(customCompanyDateStart)} to ${formatDateDDMMYYYY(customCompanyDateEnd)}`;
+        }
+        if (customCompanyDateStart) return `From ${formatDateDDMMYYYY(customCompanyDateStart)}`;
+        if (customCompanyDateEnd) return `Until ${formatDateDDMMYYYY(customCompanyDateEnd)}`;
+        return 'Date: Custom';
+      default:
+        return 'All dates';
+    }
+  }, [companyDateFilter, customCompanyDateStart, customCompanyDateEnd]);
+
+  const isAnyCompanyFilterActive = useMemo(() => {
+    return (
+      companySearchQuery.trim() !== '' ||
+      companyIndustryFilter !== 'all' ||
+      companyOwnerFilter !== 'all' ||
+      companyDateFilter !== 'all' ||
+      companySortBy !== 'newest'
+    );
+  }, [companySearchQuery, companyIndustryFilter, companyOwnerFilter, companyDateFilter, companySortBy]);
+
+  const handleResetCompanyFilters = () => {
+    setCompanySearchQuery('');
+    setCompanyIndustryFilter('all');
+    setCompanyOwnerFilter('all');
+    setCompanyDateFilter('all');
+    setCustomCompanyDateStart('');
+    setCustomCompanyDateEnd('');
+    setCompanySortBy('newest');
+    setIsCompanySortDropdownOpen(false);
+    setIsCompanyIndustryDropdownOpen(false);
+    setIsCompanyOwnerDropdownOpen(false);
+    setIsCompanyDateDropdownOpen(false);
+    setCompanyOwnerSearchQuery('');
+  };
+
+  // Tasks Management State
+  const [tasks, setTasks] = useState(INITIAL_SAMPLE_TASKS);
+  const [taskSearchQuery, setTaskSearchQuery] = useState('');
+  const [taskStatusFilter, setTaskStatusFilter] = useState('all');
+  const [taskPriorityFilter, setTaskPriorityFilter] = useState('all');
+  const [taskTypeFilter, setTaskTypeFilter] = useState('all');
+  const [taskSortBy, setTaskSortBy] = useState('dueDate_asc');
+  const [taskViewMode, setTaskViewMode] = useState('list'); // 'list' | 'kanban'
+  const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  const [taskLockedContext, setTaskLockedContext] = useState({ dealId: null, contactId: null });
+  const [isAssignCustom, setIsAssignCustom] = useState(false);
+  const [taskFormData, setTaskFormData] = useState({
+    title: '',
+    description: '',
+    dueDate: '',
+    priority: 'Medium',
+    status: 'Pending',
+    type: 'Follow-up',
+    assignee: 'Artiflow',
+    associatedDealId: '',
+    associatedDealIds: [],
+    associatedContactId: '',
+    associatedContactIds: []
+  });
+
+  // Helper to extract strictly the contacts associated with a given deal
+  const getDealAssociatedContacts = (targetDealIdOrObj) => {
+    if (!targetDealIdOrObj) return [];
+    const targetDeal = typeof targetDealIdOrObj === 'object'
+      ? targetDealIdOrObj
+      : (deals.find(d => d._id === targetDealIdOrObj) || detailedDeal);
+    if (!targetDeal) return [];
+
+    const matched = [];
+    const seen = new Set();
+    const dealComp = (targetDeal.associatedCompany || targetDeal.clientName || '').trim().toLowerCase();
+
+    // 1. Direct ID
+    if (targetDeal.associatedContactId || targetDeal.contactId) {
+      const dId = targetDeal.associatedContactId || targetDeal.contactId;
+      const found = contacts.find(c => c._id === dId);
+      if (found && !seen.has(found._id)) {
+        matched.push(found);
+        seen.add(found._id);
+      }
+    }
+
+    // 2. Deal raw emails/names
+    const rawTokens = [targetDeal.associatedContact, targetDeal.email, targetDeal.clientEmail, targetDeal.contact]
+      .filter(Boolean)
+      .flatMap(s => typeof s === 'string' ? s.split(',') : [s])
+      .map(s => String(s).trim().toLowerCase())
+      .filter(Boolean);
+
+    // 3. Match from CRM contacts
+    contacts.forEach(c => {
+      const cEmail = (c.email || '').trim().toLowerCase();
+      const cName = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+      const cComp = (c.company || '').trim().toLowerCase();
+
+      const isTokenMatch = rawTokens.some(t => t === cEmail || t === cName || (cEmail && t.includes(cEmail)));
+      const isCompanyMatch = dealComp && cComp && (cComp === dealComp || cComp.includes(dealComp) || dealComp.includes(cComp)) && cComp !== 'direct client';
+
+      if ((isTokenMatch || isCompanyMatch) && !seen.has(c._id)) {
+        matched.push(c);
+        seen.add(c._id);
+      }
+    });
+
+    // 4. If raw email not in contacts db, add synthetic entry
+    rawTokens.forEach(token => {
+      const alreadyHas = matched.some(c => (c.email || '').toLowerCase() === token || `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === token);
+      if (!alreadyHas && token) {
+        const synId = `raw_${token}`;
+        if (!seen.has(synId)) {
+          matched.push({
+            _id: synId,
+            firstName: token.includes('@') ? token.split('@')[0] : token,
+            lastName: '',
+            email: token.includes('@') ? token : '',
+            company: targetDeal.associatedCompany || targetDeal.clientName || ''
+          });
+          seen.add(synId);
+        }
+      }
+    });
+
+    return matched;
+  };
+
+  // Helper to extract strictly the deals associated with a given contact
+  const getContactAssociatedDeals = (targetContactIdOrObj) => {
+    if (!targetContactIdOrObj) return [];
+    const targetContact = typeof targetContactIdOrObj === 'object'
+      ? targetContactIdOrObj
+      : (contacts.find(c => c._id === targetContactIdOrObj) || detailedContact);
+    if (!targetContact) return [];
+
+    const cEmail = (targetContact.email || '').trim().toLowerCase();
+    const cFullName = `${targetContact.firstName || ''} ${targetContact.lastName || ''}`.trim().toLowerCase();
+    const cPhoneClean = (targetContact.phone || '').replace(/\D/g, '');
+    const cCompany = (targetContact.company || '').trim().toLowerCase();
+
+    const found = deals.filter(d => {
+      if (!d) return false;
+      const dAssocContact = (d.associatedContact || '').trim().toLowerCase();
+      const dEmail = (d.email || '').trim().toLowerCase();
+      const dClientName = (d.clientName || '').trim().toLowerCase();
+      const dDealName = (d.dealName || '').trim().toLowerCase();
+      const dPhoneClean = (d.phone || '').replace(/\D/g, '');
+      const dCompany = (d.associatedCompany || '').trim().toLowerCase();
+
+      const matchesDirectId = (Array.isArray(targetContact.associatedDeals) && targetContact.associatedDeals.includes(d._id)) ||
+        d.associatedContactId === targetContact._id || d.contactId === targetContact._id;
+      const matchesEmail = cEmail && (dAssocContact === cEmail || dEmail === cEmail || dAssocContact.includes(cEmail) || dEmail.includes(cEmail));
+      const matchesName = cFullName && (dClientName === cFullName || dAssocContact === cFullName || dDealName.includes(cFullName) || dClientName.includes(cFullName) || cFullName.includes(dClientName));
+      const matchesPhone = cPhoneClean && cPhoneClean.length >= 7 && dPhoneClean && (dPhoneClean.endsWith(cPhoneClean) || cPhoneClean.endsWith(dPhoneClean));
+      const matchesCompany = cCompany && cCompany !== 'direct client' && dCompany && (dCompany === cCompany || dCompany.includes(cCompany) || cCompany.includes(dCompany));
+
+      return matchesDirectId || matchesEmail || matchesName || matchesPhone || matchesCompany;
+    });
+
+    const seen = new Set();
+    return found.filter(d => {
+      if (seen.has(d._id)) return false;
+      seen.add(d._id);
+      return true;
+    });
+  };
+
+  const filteredTasks = useMemo(() => {
+    return tasks
+      .filter(t => {
+        if (!isItemOwnedByUser(t, 'task')) {
+          return false;
+        }
+
+        if (taskSearchQuery.trim()) {
+          const q = taskSearchQuery.toLowerCase();
+          const title = (t.title || '').toLowerCase();
+          const desc = (t.description || '').toLowerCase();
+          const deal = (t.associatedDealName || '').toLowerCase();
+          const contact = (t.associatedContactName || '').toLowerCase();
+          const assignee = (t.assignee || '').toLowerCase();
+          if (!title.includes(q) && !desc.includes(q) && !deal.includes(q) && !contact.includes(q) && !assignee.includes(q)) {
+            return false;
+          }
+        }
+        if (taskStatusFilter !== 'all') {
+          if (taskStatusFilter === 'Completed' && !t.completed && t.status !== 'Completed') return false;
+          if (taskStatusFilter === 'Pending' && (t.completed || t.status === 'Completed' || t.status === 'In Progress')) return false;
+          if (taskStatusFilter === 'In Progress' && (t.completed || t.status !== 'In Progress')) return false;
+        }
+        if (taskPriorityFilter !== 'all' && (t.priority || '').toLowerCase() !== taskPriorityFilter.toLowerCase()) {
+          return false;
+        }
+        if (taskTypeFilter !== 'all' && (t.type || '').toLowerCase() !== taskTypeFilter.toLowerCase()) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (taskSortBy === 'dueDate_asc') {
+          return (a.dueDate || '9999').localeCompare(b.dueDate || '9999');
+        }
+        if (taskSortBy === 'dueDate_desc') {
+          return (b.dueDate || '0000').localeCompare(a.dueDate || '0000');
+        }
+        if (taskSortBy === 'priority') {
+          const pOrder = { High: 1, Medium: 2, Low: 3 };
+          return (pOrder[a.priority] || 4) - (pOrder[b.priority] || 4);
+        }
+        return 0;
+      });
+  }, [tasks, taskSearchQuery, taskStatusFilter, taskPriorityFilter, taskTypeFilter, taskSortBy, isItemOwnedByUser]);
+
+  const dealSpecificTasks = useMemo(() => {
+    if (!detailedDeal) return [];
+    return tasks.filter(
+      t =>
+        t.associatedDealId === detailedDeal._id ||
+        (t.associatedDealName && (t.associatedDealName.toLowerCase() === (detailedDeal.dealName || '').toLowerCase() || t.associatedDealName.toLowerCase() === (detailedDeal.clientName || '').toLowerCase()))
+    );
+  }, [detailedDeal, tasks]);
+
+  const contactSpecificTasks = useMemo(() => {
+    if (!detailedContact) return [];
+    const contactFullName = `${detailedContact.firstName || ''} ${detailedContact.lastName || ''}`.trim().toLowerCase();
+    return tasks.filter(
+      t =>
+        t.associatedContactId === detailedContact._id ||
+        (t.associatedContactName && t.associatedContactName.toLowerCase() === contactFullName)
+    );
+  }, [detailedContact, tasks]);
+
+  const currentDealActivities = useMemo(() => {
+    if (!detailedDeal) return [];
+    const custom = dealActivities[detailedDeal._id] || [];
+    const backendActivities = Array.isArray(detailedDeal.activities) ? detailedDeal.activities : [];
+
+    // Synthesize tasks associated with this deal into activity timeline items
+    const taskActs = dealSpecificTasks.map(t => {
+      const taskDateStr = t.dueDate || t.createdAt || new Date();
+      let taskTime = '12:00 PM';
+      try {
+        const dt = new Date(t.createdAt || new Date());
+        if (!isNaN(dt.getTime())) {
+          taskTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+        }
+      } catch (e) { }
+      return {
+        id: `task-act-${t._id}`,
+        type: 'task',
+        author: t.assignee || detailedDeal.salesOwner || 'Sales Specialist',
+        title: `Task: ${t.title}`,
+        content: `${t.completed ? 'Completed' : (t.status || 'Pending')} task • Due: ${t.dueDate ? formatDateDDMMYYYY(t.dueDate) : 'No due date'} • Priority: ${t.priority || 'Medium'}${t.description ? ` • ${t.description}` : ''}`,
+        time: taskTime,
+        date: formatDateDDMMYYYY(taskDateStr),
+        createdAt: t.createdAt || new Date()
+      };
+    });
+
+    // Baseline system events for this deal if not already present
+    const baseActs = [];
+    const hasDealCreated = [...custom, ...backendActivities].some(a => a.type === 'deal' && (a.title === 'Deal Created' || (a.title && a.title.toLowerCase().includes('created'))));
+    if (!hasDealCreated) {
+      const createDateStr = detailedDeal.createdAt || detailedDeal.createdDate || detailedDeal.date || new Date();
+      const formattedDate = formatDateDDMMYYYY(createDateStr);
+      let formattedTime = '01:05 PM';
+      try {
+        const dt = new Date(createDateStr);
+        if (!isNaN(dt.getTime())) {
+          formattedTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+        }
+      } catch (e) { }
+
+      baseActs.push({
+        id: `deal-created-${detailedDeal._id}`,
+        type: 'deal',
+        title: 'Deal Created',
+        author: detailedDeal.addedBy || 'Admin System',
+        content: `Created deal "${detailedDeal.dealName || detailedDeal.clientName}" in stage "${detailedDeal.stage || 'New'}" with value ${detailedDeal.currency || '₹'} ${Number(detailedDeal.dealValue || 0).toLocaleString()}. Assigned to ${detailedDeal.salesOwner || 'Sales Specialist'}.`,
+        time: formattedTime,
+        date: formattedDate,
+        createdAt: createDateStr
+      });
+    }
+
+    // Baseline contact association if present and not already logged
+    const contactEmail = detailedDeal.associatedContact || detailedDeal.email;
+    const hasContactLinked = [...custom, ...backendActivities].some(a => a.type === 'contact' || (a.title && a.title.toLowerCase().includes('contact')));
+    if (contactEmail && !hasContactLinked) {
+      const linkDateStr = detailedDeal.createdAt || new Date();
+      let linkTime = '01:05 PM';
+      try {
+        const dt = new Date(linkDateStr);
+        if (!isNaN(dt.getTime())) {
+          linkTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+        }
+      } catch (e) { }
+
+      baseActs.push({
+        id: `contact-linked-${detailedDeal._id}`,
+        type: 'contact',
+        title: 'Associated Contact Linked',
+        author: detailedDeal.addedBy || 'Admin System',
+        content: `Linked contact ${contactEmail} with this deal.`,
+        time: linkTime,
+        date: formatDateDDMMYYYY(linkDateStr),
+        createdAt: linkDateStr
+      });
+    }
+
+    // Baseline company association if present and not already logged
+    const companyName = detailedDeal.associatedCompany || (detailedDeal.company && detailedDeal.company !== 'Direct Client' ? detailedDeal.company : '');
+    const hasCompanyLinked = [...custom, ...backendActivities].some(a => a.type === 'company' || (a.title && a.title.toLowerCase().includes('company')));
+    if (companyName && !hasCompanyLinked) {
+      const linkDateStr = detailedDeal.createdAt || new Date();
+      let linkTime = '01:05 PM';
+      try {
+        const dt = new Date(linkDateStr);
+        if (!isNaN(dt.getTime())) {
+          linkTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+        }
+      } catch (e) { }
+
+      baseActs.push({
+        id: `company-linked-${detailedDeal._id}`,
+        type: 'company',
+        title: 'Associated Company Linked',
+        author: detailedDeal.addedBy || 'Admin System',
+        content: `Linked company "${companyName}" with this deal.`,
+        time: linkTime,
+        date: formatDateDDMMYYYY(linkDateStr),
+        createdAt: linkDateStr
+      });
+    }
+
+    // Synthesize payment records associated with this deal into activity timeline items
+    const paymentActs = getDealPaymentRecords(detailedDeal).map((p, pIdx) => {
+      const pDateStr = p.recordedOnDate || p.paymentDate || p.createdAt || new Date();
+      let pTime = p.recordedOnTime || '12:00 PM';
+      try {
+        if (!p.recordedOnTime && p.createdAt) {
+          const dt = new Date(p.createdAt);
+          if (!isNaN(dt.getTime())) {
+            pTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        }
+      } catch (e) { }
+      const pMode = p.paymentMode || 'Bank Transfer';
+      const pStatus = p.paymentStatus || 'Paid';
+      const pAmount = p.paidAmount || '₹0';
+      const authorName = (p.createdBy && (p.createdBy.firstName || p.createdBy.name))
+        ? `${p.createdBy.firstName || ''} ${p.createdBy.lastName || ''}`.trim()
+        : (detailedDeal.addedBy || detailedDeal.salesOwner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System');
+
+      return {
+        id: `payment-act-${p._id || p.id || pIdx}`,
+        type: 'payment',
+        author: authorName,
+        title: 'Payment Recorded',
+        content: `Payment of ${pAmount} recorded via ${pMode}. Status: ${pStatus}.${p.attachmentName ? ` (Attachment: ${p.attachmentName})` : ''}`,
+        time: pTime,
+        date: p.paymentDate || (typeof pDateStr === 'string' && pDateStr.includes('-') ? pDateStr : formatDateDDMMYYYY(pDateStr)),
+        createdAt: p.createdAt || new Date(),
+        attachmentName: p.attachmentName || '',
+        attachmentUrl: p.attachmentUrl || ''
+      };
+    });
+
+    const all = [...custom, ...backendActivities, ...taskActs, ...paymentActs, ...baseActs];
+    const seen = new Set();
+    const unique = all.filter(a => {
+      if (!a) return false;
+      const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
+      if (seen.has(contentKey)) return false;
+      seen.add(contentKey);
+      return true;
+    });
+
+    const typePriority = {
+      payment: 11,
+      task: 10,
+      deal: 9,
+      note: 8,
+      email: 7,
+      message: 6,
+      company: 5,
+      activity: 4,
+      contact: 1
+    };
+
+    return unique.sort((a, b) => {
+      const ta = parseActivityTimestamp(a);
+      const tb = parseActivityTimestamp(b);
+      if (tb !== ta) {
+        return tb - ta;
+      }
+      const pA = typePriority[a.type] || (a.title && a.title.includes('Company') ? 5 : 4);
+      const pB = typePriority[b.type] || (b.title && b.title.includes('Company') ? 5 : 4);
+      return pB - pA;
+    });
+  }, [detailedDeal, dealActivities, dealSpecificTasks, getDealPaymentRecords, user]);
+
+  const matchedDealsForContact = useMemo(() => {
+    if (!detailedContact) return [];
+    const cEmail = (detailedContact.email || '').trim().toLowerCase();
+    const cFullName = `${detailedContact.firstName || ''} ${detailedContact.lastName || ''}`.trim().toLowerCase();
+    const cPhoneClean = (detailedContact.phone || '').replace(/\D/g, '');
+
+    const found = deals.filter(d => {
+      if (!d) return false;
+      const dAssocContact = (d.associatedContact || '').trim().toLowerCase();
+      const dEmail = (d.email || '').trim().toLowerCase();
+      const dClientName = (d.clientName || '').trim().toLowerCase();
+      const dDealName = (d.dealName || '').trim().toLowerCase();
+      const dPhoneClean = (d.phone || '').replace(/\D/g, '');
+
+      const matchesEmail = cEmail && (dAssocContact === cEmail || dEmail === cEmail || dAssocContact.includes(cEmail) || dEmail.includes(cEmail));
+      const matchesName = cFullName && (dClientName === cFullName || dAssocContact === cFullName || dDealName.includes(cFullName) || dClientName.includes(cFullName) || cFullName.includes(dClientName));
+      const matchesPhone = cPhoneClean && cPhoneClean.length >= 7 && dPhoneClean && (dPhoneClean.endsWith(cPhoneClean) || cPhoneClean.endsWith(dPhoneClean));
+      const matchesDirectId = Array.isArray(detailedContact.associatedDeals) && detailedContact.associatedDeals.includes(d._id);
+
+      return matchesEmail || matchesName || matchesPhone || matchesDirectId;
+    });
+
+    const seen = new Set();
+    return found.filter(d => {
+      if (seen.has(d._id)) return false;
+      seen.add(d._id);
+      return true;
+    });
+  }, [deals, detailedContact]);
+
+  const matchedDealForContact = useMemo(() => {
+    return matchedDealsForContact[0] || null;
+  }, [matchedDealsForContact]);
+
+  const currentContactActivities = useMemo(() => {
+    if (!detailedContact) return [];
+    const custom = dealActivities[detailedContact._id] || [];
+    const backendActivities = Array.isArray(detailedContact.activities) ? detailedContact.activities : [];
+
+    // Synthesize contact-specific tasks into activity timeline items
+    const taskActs = contactSpecificTasks.map(t => {
+      const taskDateStr = t.dueDate || t.createdAt || new Date();
+      let taskTime = '12:00 PM';
+      try {
+        const dt = new Date(t.createdAt || new Date());
+        if (!isNaN(dt.getTime())) {
+          taskTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+        }
+      } catch (e) { }
+      return {
+        id: `task-contact-act-${t._id}`,
+        type: 'task',
+        author: t.assignee || detailedContact.owner || 'Sales Specialist',
+        title: `Task: ${t.title}`,
+        content: `${t.completed ? 'Completed' : (t.status || 'Pending')} task • Due: ${t.dueDate ? formatDateDDMMYYYY(t.dueDate) : 'No due date'} • Priority: ${t.priority || 'Medium'}${t.description ? ` • ${t.description}` : ''}`,
+        time: taskTime,
+        date: formatDateDDMMYYYY(taskDateStr),
+        createdAt: t.createdAt || new Date()
+      };
+    });
+
+    // Baseline contact created event
+    const baseActs = [];
+    const hasContactCreated = [...custom, ...backendActivities].some(a => a.type === 'contact' && (a.title === 'Contact Created' || (a.title && a.title.toLowerCase().includes('created'))));
+    if (!hasContactCreated) {
+      const createDateStr = detailedContact.createdAt || detailedContact.createdDate || new Date();
+      let formattedTime = '01:05 PM';
+      try {
+        const dt = new Date(createDateStr);
+        if (!isNaN(dt.getTime())) {
+          formattedTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+        }
+      } catch (e) { }
+
+      baseActs.push({
+        id: `contact-created-${detailedContact._id}`,
+        type: 'contact',
+        title: 'Contact Created',
+        author: detailedContact.addedBy || detailedContact.owner || 'Admin System',
+        content: `Contact "${detailedContact.firstName} ${detailedContact.lastName}" created with status "${detailedContact.leadStatus || 'New'}" in stage "${detailedContact.leadStage || 'Lead'}".`,
+        time: formattedTime,
+        date: formatDateDDMMYYYY(createDateStr),
+        createdAt: createDateStr,
+        timestamp: parseActivityTimestamp({ date: formatDateDDMMYYYY(createDateStr), time: formattedTime, createdAt: createDateStr })
+      });
+    }
+
+    const isRealCompany = (companies || []).some(c => c && c.name && c.name.trim().toLowerCase() === detailedContact.company.trim().toLowerCase());
+    if (detailedContact.company && detailedContact.company !== 'Direct Client' && isRealCompany) {
+      const hasCompanyLinked = [...custom, ...backendActivities].some(a => a.type === 'company' || (a.title && a.title.toLowerCase().includes('company')));
+      if (!hasCompanyLinked) {
+        const linkDateStr = detailedContact.createdAt || new Date();
+        let linkTime = '01:05 PM';
+        try {
+          const dt = new Date(linkDateStr);
+          if (!isNaN(dt.getTime())) {
+            linkTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        } catch (e) { }
+
+        baseActs.push({
+          id: `company-contact-linked-${detailedContact._id}`,
+          type: 'company',
+          title: 'Company Registered & Linked',
+          author: detailedContact.addedBy || detailedContact.owner || 'Admin System',
+          content: `Company "${detailedContact.company}" registered and linked with contact.`,
+          time: linkTime,
+          date: formatDateDDMMYYYY(linkDateStr),
+          createdAt: linkDateStr,
+          timestamp: parseActivityTimestamp({ date: formatDateDDMMYYYY(linkDateStr), time: linkTime, createdAt: linkDateStr }) + 1000
+        });
+      }
+    }
+
+    // Baseline associated deals linked / created events
+    (matchedDealsForContact || []).forEach(deal => {
+      const dealTitle = deal.dealName || deal.clientName || 'Associated Deal';
+      const hasDealAct = [...custom, ...backendActivities].some(a =>
+        a.type === 'deal' &&
+        (a.id === `deal-contact-linked-${deal._id}` || (a.content && a.content.includes(dealTitle)))
+      );
+      if (!hasDealAct) {
+        const dealDateStr = deal.createdAt || deal.createdDate || deal.date || detailedContact.createdAt || new Date();
+        let dealTime = '01:10 PM';
+        try {
+          const dt = new Date(dealDateStr);
+          if (!isNaN(dt.getTime())) {
+            dealTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        } catch (e) { }
+
+        baseActs.push({
+          id: `deal-contact-linked-${deal._id}`,
+          type: 'deal',
+          title: 'Deal Registered & Linked',
+          author: deal.salesOwner || deal.addedBy || detailedContact.addedBy || detailedContact.owner || 'Sales Specialist',
+          content: `Deal "${dealTitle}" (${deal.currency || '₹'}${Number(deal.dealValue || 0).toLocaleString()} • ${deal.stage || 'New'}) registered and linked with contact.`,
+          time: dealTime,
+          date: formatDateDDMMYYYY(dealDateStr),
+          createdAt: dealDateStr,
+          timestamp: parseActivityTimestamp({ date: formatDateDDMMYYYY(dealDateStr), time: dealTime, createdAt: dealDateStr }) + 2000
+        });
+      }
+    });
+
+    // Synthesize payment records associated with this contact into activity timeline items
+    const paymentActs = getContactPaymentRecords(detailedContact).map((p, pIdx) => {
+      const pDateStr = p.recordedOnDate || p.paymentDate || p.createdAt || new Date();
+      let pTime = p.recordedOnTime || '12:00 PM';
+      try {
+        if (!p.recordedOnTime && p.createdAt) {
+          const dt = new Date(p.createdAt);
+          if (!isNaN(dt.getTime())) {
+            pTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        }
+      } catch (e) { }
+      const pMode = p.paymentMode || 'Bank Transfer';
+      const pStatus = p.paymentStatus || 'Paid';
+      const pAmount = p.paidAmount || '₹0';
+      const authorName = (p.createdBy && (p.createdBy.firstName || p.createdBy.name))
+        ? `${p.createdBy.firstName || ''} ${p.createdBy.lastName || ''}`.trim()
+        : (detailedContact.addedBy || detailedContact.owner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System');
+
+      return {
+        id: `payment-contact-act-${p._id || p.id || pIdx}`,
+        type: 'payment',
+        author: authorName,
+        title: 'Payment Recorded',
+        content: `Payment of ${pAmount} recorded via ${pMode}. Status: ${pStatus}.${p.attachmentName ? ` (Attachment: ${p.attachmentName})` : ''}`,
+        time: pTime,
+        date: p.paymentDate || (typeof pDateStr === 'string' && pDateStr.includes('-') ? pDateStr : formatDateDDMMYYYY(pDateStr)),
+        createdAt: p.createdAt || new Date(),
+        attachmentName: p.attachmentName || '',
+        attachmentUrl: p.attachmentUrl || ''
+      };
+    });
+
+    const all = [...custom, ...backendActivities, ...taskActs, ...paymentActs, ...baseActs];
+    const seen = new Set();
+    const unique = all.filter(a => {
+      if (!a) return false;
+      const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
+      if (seen.has(contentKey)) return false;
+      seen.add(contentKey);
+      return true;
+    });
+
+    const typePriority = {
+      payment: 11,
+      task: 10,
+      deal: 9,
+      note: 8,
+      email: 7,
+      message: 6,
+      company: 5,
+      activity: 4,
+      contact: 1
+    };
+
+    return unique.sort((a, b) => {
+      const ta = parseActivityTimestamp(a);
+      const tb = parseActivityTimestamp(b);
+      if (tb !== ta) {
+        return tb - ta;
+      }
+      const pA = typePriority[a.type] || (a.title && a.title.includes('Company') ? 5 : 4);
+      const pB = typePriority[b.type] || (b.title && b.title.includes('Company') ? 5 : 4);
+      return pB - pA;
+    });
+  }, [detailedContact, dealActivities, contactSpecificTasks, matchedDealsForContact, getContactPaymentRecords, user]);
+
+  // Dynamic activities for hovered deal / contact in Activity Popover
+  const hoveredActivities = useMemo(() => {
+    if (hoveredDeal) {
+      const custom = dealActivities[hoveredDeal._id] || [];
+      const backendActivities = Array.isArray(hoveredDeal.activities) ? hoveredDeal.activities : [];
+      const dealTasks = tasks.filter(
+        t =>
+          t.associatedDealId === hoveredDeal._id ||
+          (t.associatedDealName && (
+            t.associatedDealName.toLowerCase() === (hoveredDeal.dealName || '').toLowerCase() ||
+            t.associatedDealName.toLowerCase() === (hoveredDeal.clientName || '').toLowerCase()
+          ))
+      );
+
+      const taskActs = dealTasks.map(t => {
+        const taskDateStr = t.dueDate || t.createdAt || new Date();
+        let taskTime = '12:00 PM';
+        try {
+          const dt = new Date(t.createdAt || new Date());
+          if (!isNaN(dt.getTime())) {
+            taskTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        } catch (e) { }
+        return {
+          id: `task-act-${t._id}`,
+          type: 'task',
+          author: t.assignee || hoveredDeal.salesOwner || 'Sales Specialist',
+          title: `Task: ${t.title}`,
+          content: `${t.completed ? 'Completed' : (t.status || 'Pending')} task • Priority: ${t.priority || 'Medium'}${t.description ? ` • ${t.description}` : ''}`,
+          time: taskTime,
+          date: formatDateDDMMYYYY(taskDateStr),
+          createdAt: t.createdAt || new Date()
+        };
+      });
+
+      const baseActs = [];
+      const hasDealCreated = [...custom, ...backendActivities].some(a => a.type === 'deal' && (a.title === 'Deal Created' || (a.title && a.title.toLowerCase().includes('created'))));
+      if (!hasDealCreated) {
+        const createDateStr = hoveredDeal.createdAt || hoveredDeal.createdDate || hoveredDeal.date || new Date();
+        const formattedDate = formatDateDDMMYYYY(createDateStr);
+        let formattedTime = '01:05 PM';
+        try {
+          const dt = new Date(createDateStr);
+          if (!isNaN(dt.getTime())) {
+            formattedTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        } catch (e) { }
+        baseActs.push({
+          id: `deal-created-${hoveredDeal._id}`,
+          type: 'deal',
+          title: 'Deal Created',
+          author: hoveredDeal.addedBy || hoveredDeal.salesOwner || 'Admin System',
+          content: `Created deal "${hoveredDeal.dealName || hoveredDeal.clientName}" in stage "${hoveredDeal.stage || 'New'}" with value ${hoveredDeal.currency || '₹'} ${Number(hoveredDeal.dealValue || 0).toLocaleString()}.`,
+          time: formattedTime,
+          date: formattedDate,
+          createdAt: createDateStr
+        });
+      }
+
+      const contactEmail = hoveredDeal.associatedContact || hoveredDeal.email;
+      const hasContactLinked = [...custom, ...backendActivities].some(a => a.type === 'contact' || (a.title && a.title.toLowerCase().includes('contact')));
+      if (contactEmail && !hasContactLinked) {
+        const linkDateStr = hoveredDeal.createdAt || new Date();
+        let linkTime = '01:05 PM';
+        try {
+          const dt = new Date(linkDateStr);
+          if (!isNaN(dt.getTime())) {
+            linkTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        } catch (e) { }
+        baseActs.push({
+          id: `contact-linked-${hoveredDeal._id}`,
+          type: 'contact',
+          title: 'Associated Contact Linked',
+          author: hoveredDeal.addedBy || 'Admin System',
+          content: `Linked contact ${contactEmail} with this deal.`,
+          time: linkTime,
+          date: formatDateDDMMYYYY(linkDateStr),
+          createdAt: linkDateStr
+        });
+      }
+
+      const companyName = hoveredDeal.associatedCompany || (hoveredDeal.company && hoveredDeal.company !== 'Direct Client' ? hoveredDeal.company : '');
+      const hasCompanyLinked = [...custom, ...backendActivities].some(a => a.type === 'company' || (a.title && a.title.toLowerCase().includes('company')));
+      if (companyName && !hasCompanyLinked) {
+        const linkDateStr = hoveredDeal.createdAt || new Date();
+        let linkTime = '01:05 PM';
+        try {
+          const dt = new Date(linkDateStr);
+          if (!isNaN(dt.getTime())) {
+            linkTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        } catch (e) { }
+        baseActs.push({
+          id: `company-linked-${hoveredDeal._id}`,
+          type: 'company',
+          title: 'Associated Company Linked',
+          author: hoveredDeal.addedBy || 'Admin System',
+          content: `Linked company "${companyName}" with this deal.`,
+          time: linkTime,
+          date: formatDateDDMMYYYY(linkDateStr),
+          createdAt: linkDateStr
+        });
+      }
+
+      // Synthesize payment records associated with this deal into activity timeline items
+      const paymentActs = getDealPaymentRecords(hoveredDeal).map((p, pIdx) => {
+        const pDateStr = p.recordedOnDate || p.paymentDate || p.createdAt || new Date();
+        let pTime = p.recordedOnTime || '12:00 PM';
+        try {
+          if (!p.recordedOnTime && p.createdAt) {
+            const dt = new Date(p.createdAt);
+            if (!isNaN(dt.getTime())) {
+              pTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+            }
+          }
+        } catch (e) { }
+        const pMode = p.paymentMode || 'Bank Transfer';
+        const pStatus = p.paymentStatus || 'Paid';
+        const pAmount = p.paidAmount || '₹0';
+        const authorName = (p.createdBy && (p.createdBy.firstName || p.createdBy.name))
+          ? `${p.createdBy.firstName || ''} ${p.createdBy.lastName || ''}`.trim()
+          : (hoveredDeal.addedBy || hoveredDeal.salesOwner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System');
+
+        return {
+          id: `payment-act-${p._id || p.id || pIdx}`,
+          type: 'payment',
+          author: authorName,
+          title: 'Payment Recorded',
+          content: `Payment of ${pAmount} recorded via ${pMode}. Status: ${pStatus}.${p.attachmentName ? ` (Attachment: ${p.attachmentName})` : ''}`,
+          time: pTime,
+          date: p.paymentDate || (typeof pDateStr === 'string' && pDateStr.includes('-') ? pDateStr : formatDateDDMMYYYY(pDateStr)),
+          createdAt: p.createdAt || new Date(),
+          attachmentName: p.attachmentName || '',
+          attachmentUrl: p.attachmentUrl || ''
+        };
+      });
+
+      const all = [...custom, ...backendActivities, ...taskActs, ...paymentActs, ...baseActs];
+      const seen = new Set();
+      const unique = all.filter(a => {
+        if (!a) return false;
+        const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
+        if (seen.has(contentKey)) return false;
+        seen.add(contentKey);
+        return true;
+      });
+
+      const typePriority = {
+        payment: 11,
+        task: 10,
+        deal: 9,
+        note: 8,
+        email: 7,
+        message: 6,
+        company: 5,
+        activity: 4,
+        contact: 1
+      };
+
+      return unique.sort((a, b) => {
+        const ta = parseActivityTimestamp(a);
+        const tb = parseActivityTimestamp(b);
+        if (tb !== ta) {
+          return tb - ta;
+        }
+        const pA = typePriority[a.type] || (a.title && a.title.includes('Company') ? 5 : 4);
+        const pB = typePriority[b.type] || (b.title && b.title.includes('Company') ? 5 : 4);
+        return pB - pA;
+      });
+    }
+
+    if (hoveredContact) {
+      const custom = dealActivities[hoveredContact._id] || [];
+      const backendActivities = Array.isArray(hoveredContact.activities) ? hoveredContact.activities : [];
+      const contactFullName = `${hoveredContact.firstName || ''} ${hoveredContact.lastName || ''}`.trim().toLowerCase();
+      const contactTasks = tasks.filter(
+        t =>
+          t.associatedContactId === hoveredContact._id ||
+          (t.associatedContactName && t.associatedContactName.toLowerCase() === contactFullName)
+      );
+
+      const taskActs = contactTasks.map(t => {
+        const taskDateStr = t.dueDate || t.createdAt || new Date();
+        let taskTime = '12:00 PM';
+        try {
+          const dt = new Date(t.createdAt || new Date());
+          if (!isNaN(dt.getTime())) {
+            taskTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        } catch (e) { }
+        return {
+          id: `task-contact-act-${t._id}`,
+          type: 'task',
+          author: t.assignee || hoveredContact.owner || 'Sales Specialist',
+          title: `Task: ${t.title}`,
+          content: `${t.completed ? 'Completed' : (t.status || 'Pending')} task • Priority: ${t.priority || 'Medium'}${t.description ? ` • ${t.description}` : ''}`,
+          time: taskTime,
+          date: formatDateDDMMYYYY(taskDateStr),
+          createdAt: t.createdAt || new Date()
+        };
+      });
+
+      const baseActs = [];
+      const hasContactCreated = [...custom, ...backendActivities].some(a => a.type === 'contact' && (a.title === 'Contact Created' || (a.title && a.title.toLowerCase().includes('created'))));
+      if (!hasContactCreated) {
+        const createDateStr = hoveredContact.createdAt || hoveredContact.createdDate || new Date();
+        let formattedTime = '01:05 PM';
+        try {
+          const dt = new Date(createDateStr);
+          if (!isNaN(dt.getTime())) {
+            formattedTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+          }
+        } catch (e) { }
+        baseActs.push({
+          id: `contact-created-${hoveredContact._id}`,
+          type: 'contact',
+          title: 'Contact Created',
+          author: hoveredContact.addedBy || hoveredContact.owner || 'Admin System',
+          content: `Contact "${hoveredContact.firstName} ${hoveredContact.lastName}" created with status "${hoveredContact.leadStatus || 'New'}" in stage "${hoveredContact.leadStage || 'Lead'}".`,
+          time: formattedTime,
+          date: formatDateDDMMYYYY(createDateStr),
+          createdAt: createDateStr,
+          timestamp: parseActivityTimestamp({ date: formatDateDDMMYYYY(createDateStr), time: formattedTime, createdAt: createDateStr })
+        });
+      }
+
+      const isRealCompanyHover = (companies || []).some(c => c && c.name && c.name.trim().toLowerCase() === hoveredContact.company.trim().toLowerCase());
+      if (hoveredContact.company && hoveredContact.company !== 'Direct Client' && isRealCompanyHover) {
+        const hasCompanyLinked = [...custom, ...backendActivities].some(a => a.type === 'company' || (a.title && a.title.toLowerCase().includes('company')));
+        if (!hasCompanyLinked) {
+          const linkDateStr = hoveredContact.createdAt || new Date();
+          let linkTime = '01:05 PM';
+          try {
+            const dt = new Date(linkDateStr);
+            if (!isNaN(dt.getTime())) {
+              linkTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+            }
+          } catch (e) { }
+          baseActs.push({
+            id: `company-contact-linked-${hoveredContact._id}`,
+            type: 'company',
+            title: 'Company Registered & Linked',
+            author: hoveredContact.addedBy || hoveredContact.owner || 'Admin System',
+            content: `Company "${hoveredContact.company}" registered and linked with contact.`,
+            time: linkTime,
+            date: formatDateDDMMYYYY(linkDateStr),
+            createdAt: linkDateStr,
+            timestamp: parseActivityTimestamp({ date: formatDateDDMMYYYY(linkDateStr), time: linkTime, createdAt: linkDateStr }) + 1000
+          });
+        }
+      }
+
+      // Associated Deals
+      const cEmail = (hoveredContact.email || '').trim().toLowerCase();
+      const cPhoneClean = (hoveredContact.phone || '').replace(/\D/g, '');
+      const matchedDeals = deals.filter(d => {
+        if (!d) return false;
+        const dAssoc = (d.associatedContact || '').trim().toLowerCase();
+        const dEmail = (d.email || '').trim().toLowerCase();
+        const dClient = (d.clientName || '').trim().toLowerCase();
+        const dPhone = (d.phone || '').replace(/\D/g, '');
+        const matchesEmail = cEmail && (dAssoc === cEmail || dEmail === cEmail || dAssoc.includes(cEmail) || dEmail.includes(cEmail));
+        const matchesName = contactFullName && (dClient === contactFullName || dAssoc === contactFullName || dClient.includes(contactFullName) || contactFullName.includes(dClient));
+        const matchesPhone = cPhoneClean && cPhoneClean.length >= 7 && dPhone && (dPhone.endsWith(cPhoneClean) || cPhoneClean.endsWith(dPhone));
+        const matchesDirect = Array.isArray(hoveredContact.associatedDeals) && hoveredContact.associatedDeals.includes(d._id);
+        return matchesEmail || matchesName || matchesPhone || matchesDirect;
+      });
+
+      matchedDeals.forEach(deal => {
+        const dealTitle = deal.dealName || deal.clientName || 'Associated Deal';
+        const hasDealAct = [...custom, ...backendActivities].some(a =>
+          a.type === 'deal' && (a.id === `deal-contact-linked-${deal._id}` || (a.content && a.content.includes(dealTitle)))
+        );
+        if (!hasDealAct) {
+          const dealDateStr = deal.createdAt || deal.createdDate || deal.date || hoveredContact.createdAt || new Date();
+          let dealTime = '01:10 PM';
+          try {
+            const dt = new Date(dealDateStr);
+            if (!isNaN(dt.getTime())) {
+              dealTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+            }
+          } catch (e) { }
+          baseActs.push({
+            id: `deal-contact-linked-${deal._id}`,
+            type: 'deal',
+            title: 'Deal Registered & Linked',
+            author: deal.salesOwner || deal.addedBy || hoveredContact.addedBy || 'Sales Specialist',
+            content: `Deal "${dealTitle}" (${deal.currency || '₹'}${Number(deal.dealValue || 0).toLocaleString()} • ${deal.stage || 'New'}) registered and linked with contact.`,
+            time: dealTime,
+            date: formatDateDDMMYYYY(dealDateStr),
+            createdAt: dealDateStr,
+            timestamp: parseActivityTimestamp({ date: formatDateDDMMYYYY(dealDateStr), time: dealTime, createdAt: dealDateStr }) + 2000
+          });
+        }
+      });
+
+      // Synthesize payment records associated with this contact into activity timeline items
+      const paymentActs = getContactPaymentRecords(hoveredContact).map((p, pIdx) => {
+        const pDateStr = p.recordedOnDate || p.paymentDate || p.createdAt || new Date();
+        let pTime = p.recordedOnTime || '12:00 PM';
+        try {
+          if (!p.recordedOnTime && p.createdAt) {
+            const dt = new Date(p.createdAt);
+            if (!isNaN(dt.getTime())) {
+              pTime = dt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+            }
+          }
+        } catch (e) { }
+        const pMode = p.paymentMode || 'Bank Transfer';
+        const pStatus = p.paymentStatus || 'Paid';
+        const pAmount = p.paidAmount || '₹0';
+        const authorName = (p.createdBy && (p.createdBy.firstName || p.createdBy.name))
+          ? `${p.createdBy.firstName || ''} ${p.createdBy.lastName || ''}`.trim()
+          : (hoveredContact.addedBy || hoveredContact.owner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System');
+
+        return {
+          id: `payment-contact-act-${p._id || p.id || pIdx}`,
+          type: 'payment',
+          author: authorName,
+          title: 'Payment Recorded',
+          content: `Payment of ${pAmount} recorded via ${pMode}. Status: ${pStatus}.${p.attachmentName ? ` (Attachment: ${p.attachmentName})` : ''}`,
+          time: pTime,
+          date: p.paymentDate || (typeof pDateStr === 'string' && pDateStr.includes('-') ? pDateStr : formatDateDDMMYYYY(pDateStr)),
+          createdAt: p.createdAt || new Date(),
+          attachmentName: p.attachmentName || '',
+          attachmentUrl: p.attachmentUrl || ''
+        };
+      });
+
+      const all = [...custom, ...backendActivities, ...taskActs, ...paymentActs, ...baseActs];
+      const seen = new Set();
+      const unique = all.filter(a => {
+        if (!a) return false;
+        const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
+        if (seen.has(contentKey)) return false;
+        seen.add(contentKey);
+        return true;
+      });
+
+      const typePriority = {
+        payment: 11,
+        task: 10,
+        deal: 9,
+        note: 8,
+        email: 7,
+        message: 6,
+        company: 5,
+        activity: 4,
+        contact: 1
+      };
+
+      return unique.sort((a, b) => {
+        const ta = parseActivityTimestamp(a);
+        const tb = parseActivityTimestamp(b);
+        if (tb !== ta) {
+          return tb - ta;
+        }
+        const pA = typePriority[a.type] || (a.title && a.title.includes('Company') ? 5 : 4);
+        const pB = typePriority[b.type] || (b.title && b.title.includes('Company') ? 5 : 4);
+        return pB - pA;
+      });
+    }
+
+    return [];
+  }, [hoveredDeal, hoveredContact, dealActivities, tasks, deals, getDealPaymentRecords, getContactPaymentRecords, user]);
+
+  // Upcoming next step tasks for hovered item
+  const hoveredUpcomingTasks = useMemo(() => {
+    if (hoveredDeal) {
+      return tasks.filter(
+        t =>
+          !t.completed &&
+          (t.associatedDealId === hoveredDeal._id ||
+            (t.associatedDealName && (
+              t.associatedDealName.toLowerCase() === (hoveredDeal.dealName || '').toLowerCase() ||
+              t.associatedDealName.toLowerCase() === (hoveredDeal.clientName || '').toLowerCase()
+            )))
+      );
+    }
+    if (hoveredContact) {
+      const contactFullName = `${hoveredContact.firstName || ''} ${hoveredContact.lastName || ''}`.trim().toLowerCase();
+      return tasks.filter(
+        t =>
+          !t.completed &&
+          (t.associatedContactId === hoveredContact._id ||
+            (t.associatedContactName && t.associatedContactName.toLowerCase() === contactFullName))
+      );
+    }
+    return [];
+  }, [hoveredDeal, hoveredContact, tasks]);
+
+  const matchedContactForDeal = useMemo(() => {
+    if (!detailedDeal) return null;
+    const directMatch = contacts.find(
+      c =>
+        (c.email && detailedDeal.associatedContact && c.email.toLowerCase() === detailedDeal.associatedContact.toLowerCase()) ||
+        (c.email && detailedDeal.email && c.email.toLowerCase() === detailedDeal.email.toLowerCase()) ||
+        (`${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === (detailedDeal.clientName || '').toLowerCase()) ||
+        (detailedDeal.associatedContact && `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === detailedDeal.associatedContact.toLowerCase())
+    );
+    if (directMatch) return directMatch;
+    const contactEmail = (detailedDeal.associatedContact || detailedDeal.email || '').trim();
+    const clientName = (detailedDeal.clientName || '').trim();
+    if (!contactEmail && !clientName) return null;
+    let fName = 'Contact';
+    let lName = '';
+    if (clientName && !clientName.includes('@')) {
+      const parts = clientName.split(/\s+/);
+      fName = parts[0] || 'Contact';
+      lName = parts.slice(1).join(' ') || '';
+    } else if (contactEmail && contactEmail.includes('@')) {
+      const userPart = contactEmail.split('@')[0];
+      const parts = userPart.split(/[._-]/);
+      fName = parts[0] ? parts[0].charAt(0).toUpperCase() + parts[0].slice(1) : 'Contact';
+      lName = parts.slice(1).join(' ') || '';
+    }
+    return {
+      _id: `contact-deal-${detailedDeal._id || 'temp'}`,
+      firstName: fName,
+      lastName: lName,
+      email: (contactEmail && contactEmail.includes('@')) ? contactEmail : (detailedDeal.email || `${fName.toLowerCase()}@example.com`),
+      countryCode: '+91',
+      phone: detailedDeal.phone || '+91 8218880152',
+      contactSource: 'Direct Reference',
+      leadStage: 'Lead',
+      leadStatus: 'New',
+      owner: detailedDeal.salesOwner || 'Tejaswi Yadav',
+      company: detailedDeal.associatedCompany || ''
+    };
+  }, [contacts, detailedDeal]);
+
+  const matchedCompanyForDeal = useMemo(() => {
+    if (!detailedDeal) return null;
+    const targetComp = detailedDeal.associatedCompany || detailedDeal.company || (matchedContactForDeal ? matchedContactForDeal.company : '');
+    if (!targetComp || targetComp === 'Direct Client') return null;
+    return companies.find(c => c.name && c.name.toLowerCase() === targetComp.toLowerCase()) || null;
+  }, [companies, detailedDeal, matchedContactForDeal]);
+
+  const dealDisplayLocation = useMemo(() => {
+    if (!detailedDeal) return '-';
+    if (matchedCompanyForDeal?.city || matchedCompanyForDeal?.state || matchedCompanyForDeal?.country) {
+      return [matchedCompanyForDeal.city, matchedCompanyForDeal.state, matchedCompanyForDeal.country].filter(Boolean).join(', ');
+    }
+    const loc = (detailedDeal.location || '').trim();
+    if (loc && loc !== 'Pembroke Pines' && loc !== 'Pune, India' && loc !== 'solar panel comp') {
+      return loc;
+    }
+    return '-';
+  }, [detailedDeal, matchedCompanyForDeal]);
+
+  const getDealCompany = useCallback((deal) => {
+    if (!deal) return '';
+    if (deal.associatedCompany && deal.associatedCompany !== 'Direct Client') return deal.associatedCompany;
+    if (deal.company && deal.company !== 'Direct Client') return deal.company;
+    if (deal.companyName && deal.companyName !== 'Direct Client') return deal.companyName;
+
+    const targetEmail = (deal.associatedContact || deal.email || '').trim().toLowerCase();
+    const targetName = (deal.clientName || '').trim().toLowerCase();
+    const matchedContact = (contacts || []).find(c => {
+      if (deal.contactId && c._id === deal.contactId) return true;
+      const ce = (c.email || '').trim().toLowerCase();
+      if (targetEmail && ce && ce === targetEmail) return true;
+      const cn = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+      return cn && (cn === targetEmail || cn === targetName);
+    });
+    if (matchedContact?.company && matchedContact.company !== 'Direct Client') {
+      return matchedContact.company;
+    }
+
+    if (deal.companyId) {
+      const comp = (companies || []).find(c => c._id === deal.companyId);
+      if (comp?.name && comp.name !== 'Direct Client') return comp.name;
+    }
+    return '';
+  }, [contacts, companies]);
+
+  const getDealContactOrigin = useCallback((deal) => {
+    if (!deal) return null;
+    if (deal.origin) return deal.origin;
+    const targetEmail = (deal.associatedContact || deal.email || '').trim().toLowerCase();
+    const targetPhone = (deal.phone || '').replace(/\D/g, '');
+    const targetName = (deal.clientName || '').trim().toLowerCase();
+    const targetAssoc = (deal.associatedContact || '').trim().toLowerCase();
+
+    const matchedContact = (contacts || []).find(c => {
+      if (!c) return false;
+      if (deal.contactId && c._id === deal.contactId) return true;
+      const cEmail = (c.email || '').trim().toLowerCase();
+      if (targetEmail && cEmail && cEmail === targetEmail) return true;
+      if (targetAssoc && cEmail && cEmail === targetAssoc) return true;
+      const cFullName = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+      if (targetName && cFullName && cFullName === targetName) return true;
+      if (targetAssoc && cFullName && cFullName === targetAssoc) return true;
+      const cPhone = (c.phone || '').replace(/\D/g, '');
+      if (targetPhone && cPhone && targetPhone.length >= 7 && (targetPhone.includes(cPhone) || cPhone.includes(targetPhone))) return true;
+      return false;
+    });
+
+    if (matchedContact) {
+      return matchedContact.origin || 'Domestic';
+    }
+    return null;
+  }, [contacts]);
+
+  // Professional Skeleton Shimmer Helpers
+  const renderKanbanSkeleton = (colCount = 4, isContact = false) => (
+    <div className="pipeline-kanban-board">
+      {Array.from({ length: colCount }).map((_, colIdx) => (
+        <div key={colIdx} className="pipeline-skeleton-column">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid #e2e8f0' }}>
+            <div className="pipeline-skeleton" style={{ width: 110, height: 18, borderRadius: 6 }} />
+            <div className="pipeline-skeleton" style={{ width: 26, height: 20, borderRadius: 12 }} />
+          </div>
+          {[1, 2, 3].map(cardIdx => (
+            <div key={cardIdx} className="pipeline-skeleton-card">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <div className="pipeline-skeleton" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div className="pipeline-skeleton" style={{ width: '75%', height: 14, borderRadius: 4, marginBottom: 6 }} />
+                  <div className="pipeline-skeleton" style={{ width: '55%', height: 11, borderRadius: 4, marginBottom: isContact ? 6 : 0 }} />
+                  {isContact && <div className="pipeline-skeleton" style={{ width: '40%', height: 14, borderRadius: 999 }} />}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div className="pipeline-skeleton" style={{ width: 60, height: 11, borderRadius: 4 }} />
+                  <div className="pipeline-skeleton" style={{ width: 55, height: 12, borderRadius: 4 }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div className="pipeline-skeleton" style={{ width: 80, height: 11, borderRadius: 4 }} />
+                  <div className="pipeline-skeleton" style={{ width: 70, height: 11, borderRadius: 4 }} />
+                </div>
+                {!isContact && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <div className="pipeline-skeleton" style={{ width: 65, height: 11, borderRadius: 4 }} />
+                    <div className="pipeline-skeleton" style={{ width: 90, height: 11, borderRadius: 4 }} />
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <div className="pipeline-skeleton" style={{ width: 22, height: 22, borderRadius: '50%' }} />
+                  <div className="pipeline-skeleton" style={{ width: 22, height: 22, borderRadius: '50%' }} />
+                </div>
+                <div className="pipeline-skeleton" style={{ width: 72, height: 22, borderRadius: 6 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderTableSkeleton = (rowCount = 7) => (
+    <div className="pipeline-table-view">
+      <div className="pipeline-table-card">
+        {Array.from({ length: rowCount }).map((_, r) => (
+          <div key={r} className="pipeline-skeleton-table-row">
+            <div className="pipeline-skeleton" style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0 }} />
+            <div className="pipeline-skeleton" style={{ width: 140, height: 14, borderRadius: 4 }} />
+            <div className="pipeline-skeleton" style={{ width: 120, height: 14, borderRadius: 4 }} />
+            <div className="pipeline-skeleton" style={{ width: 90, height: 14, borderRadius: 4 }} />
+            <div className="pipeline-skeleton" style={{ width: 80, height: 14, borderRadius: 4 }} />
+            <div className="pipeline-skeleton" style={{ width: 100, height: 14, borderRadius: 4 }} />
+            <div className="pipeline-skeleton" style={{ width: 90, height: 22, borderRadius: 12 }} />
+            <div className="pipeline-skeleton" style={{ width: 60, height: 22, borderRadius: 12 }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderCompanyGridSkeleton = (cardCount = 8) => (
+    <div className="pipeline-company-body" style={{ padding: '20px 24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+        {Array.from({ length: cardCount }).map((_, i) => (
+          <div key={i} className="pipeline-skeleton-grid-card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div className="pipeline-skeleton" style={{ width: 42, height: 42, borderRadius: 10, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div className="pipeline-skeleton" style={{ width: '70%', height: 15, borderRadius: 4, marginBottom: 6 }} />
+                <div className="pipeline-skeleton" style={{ width: '50%', height: 12, borderRadius: 4 }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div className="pipeline-skeleton" style={{ width: 50, height: 11, borderRadius: 4 }} />
+                <div className="pipeline-skeleton" style={{ width: 80, height: 11, borderRadius: 4 }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div className="pipeline-skeleton" style={{ width: 60, height: 11, borderRadius: 4 }} />
+                <div className="pipeline-skeleton" style={{ width: 100, height: 11, borderRadius: 4 }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
+              <div className="pipeline-skeleton" style={{ width: 70, height: 20, borderRadius: 6 }} />
+              <div className="pipeline-skeleton" style={{ width: 24, height: 24, borderRadius: '50%' }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderTaskListSkeleton = (rowCount = 7) => (
+    <div className="pipeline-tasks-container" style={{ padding: '20px 24px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {Array.from({ length: rowCount }).map((_, i) => (
+          <div key={i} className="pipeline-skeleton-card" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
+              <div className="pipeline-skeleton" style={{ width: 18, height: 18, borderRadius: 4, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div className="pipeline-skeleton" style={{ width: `${40 + (i % 3) * 15}%`, height: 14, borderRadius: 4, marginBottom: 6 }} />
+                <div className="pipeline-skeleton" style={{ width: `${60 + (i % 2) * 20}%`, height: 11, borderRadius: 4 }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div className="pipeline-skeleton" style={{ width: 90, height: 12, borderRadius: 4 }} />
+              <div className="pipeline-skeleton" style={{ width: 60, height: 20, borderRadius: 999 }} />
+              <div className="pipeline-skeleton" style={{ width: 70, height: 20, borderRadius: 999 }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderDetailSkeleton = () => (
+    <div className="pipeline-detail-view-container">
+      <div className="pipeline-detail-top-nav">
+        <div className="pipeline-detail-nav-left">
+          <div className="pipeline-skeleton" style={{ width: 130, height: 36, borderRadius: 8 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="pipeline-skeleton" style={{ width: 40, height: 40, borderRadius: 10 }} />
+            <div>
+              <div className="pipeline-skeleton" style={{ width: 180, height: 20, borderRadius: 4, marginBottom: 6 }} />
+              <div className="pipeline-skeleton" style={{ width: 220, height: 13, borderRadius: 4 }} />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="pipeline-detail-split-body three-sections">
+        <div className="pipeline-detail-col-deal">
+          <div className="pipeline-detail-card-panel">
+            <div className="pipeline-skeleton" style={{ width: 140, height: 20, borderRadius: 4, marginBottom: 16 }} />
+            {[1, 2, 3, 4, 5, 6].map(i => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div className="pipeline-skeleton" style={{ width: 90, height: 14, borderRadius: 4 }} />
+                <div className="pipeline-skeleton" style={{ width: 120, height: 14, borderRadius: 4 }} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="pipeline-detail-col-activities">
+          <div className="pipeline-detail-actions-card">
+            <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+              {[1, 2, 3, 4, 5].map(i => (
+                <div key={i} className="pipeline-skeleton" style={{ width: 85, height: 32, borderRadius: 8 }} />
+              ))}
+            </div>
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="pipeline-skeleton-card" style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div className="pipeline-skeleton" style={{ width: 36, height: 36, borderRadius: 10 }} />
+                  <div style={{ flex: 1 }}>
+                    <div className="pipeline-skeleton" style={{ width: 140, height: 14, borderRadius: 4, marginBottom: 6 }} />
+                    <div className="pipeline-skeleton" style={{ width: 200, height: 12, borderRadius: 4 }} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="pipeline-detail-col-assoc">
+          <div className="pipeline-detail-card-panel">
+            <div className="pipeline-skeleton" style={{ width: 150, height: 20, borderRadius: 4, marginBottom: 16 }} />
+            {[1, 2, 3].map(i => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div className="pipeline-skeleton" style={{ width: 80, height: 14, borderRadius: 4 }} />
+                <div className="pipeline-skeleton" style={{ width: 110, height: 14, borderRadius: 4 }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const matchedOwnerEmployee = useMemo(() => {
+    if (!detailedDeal) return null;
+    const ownerName = (detailedDeal.salesOwner || '').trim().toLowerCase();
+
+    // 1. Priority 1: Match by deal owner name (salesOwner) in employees list
+    if (employees && employees.length > 0 && ownerName) {
+      // 1a. Exact full name / email match
+      const matchByName = employees.find(emp => {
+        if (!emp) return false;
+        const empFullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+        const empName = (emp.name || '').trim().toLowerCase();
+        const empEmail = (emp.email || '').trim().toLowerCase();
+        const empOfficialEmail = (emp.officialEmail || '').trim().toLowerCase();
+        return (
+          empFullName === ownerName ||
+          empName === ownerName ||
+          empEmail === ownerName ||
+          empOfficialEmail === ownerName
+        );
+      });
+      if (matchByName) return matchByName;
+
+      // 1b. Split name match (first name + last name)
+      const ownerParts = ownerName.split(/\s+/).filter(Boolean);
+      if (ownerParts.length >= 2) {
+        const matchSplit = employees.find(emp => {
+          if (!emp) return false;
+          const f = (emp.firstName || '').trim().toLowerCase();
+          const l = (emp.lastName || '').trim().toLowerCase();
+          return f === ownerParts[0] && l === ownerParts[1];
+        });
+        if (matchSplit) return matchSplit;
+      }
+
+      // 1c. Partial / Substring match in employees
+      const matchPartial = employees.find(emp => {
+        if (!emp) return false;
+        const empFullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+        const f = (emp.firstName || '').trim().toLowerCase();
+        const empEmail = (emp.email || '').trim().toLowerCase();
+        return (
+          (empFullName && (empFullName.includes(ownerName) || ownerName.includes(empFullName))) ||
+          (f && f.length >= 3 && ownerName.includes(f)) ||
+          (empEmail && ownerParts[0] && empEmail.startsWith(ownerParts[0]))
+        );
+      });
+      if (matchPartial) return matchPartial;
+    }
+
+    // 2. Priority 2: Check detailedDeal.assignedTo ONLY IF it actually matches ownerName or ownerName is empty
+    if (detailedDeal.assignedTo) {
+      if (typeof detailedDeal.assignedTo === 'object' && detailedDeal.assignedTo !== null) {
+        const assignedFullName = `${detailedDeal.assignedTo.firstName || ''} ${detailedDeal.assignedTo.lastName || ''}`.trim().toLowerCase();
+        const assignedEmail = (detailedDeal.assignedTo.email || '').trim().toLowerCase();
+        const matchesOwner = !ownerName || assignedFullName === ownerName || assignedEmail === ownerName ||
+          (assignedFullName && (assignedFullName.includes(ownerName) || ownerName.includes(assignedFullName)));
+
+        if (matchesOwner) {
+          const matchInEmp = (employees || []).find(e =>
+            (e._id && detailedDeal.assignedTo._id && e._id.toString() === detailedDeal.assignedTo._id.toString()) ||
+            (e.email && detailedDeal.assignedTo.email && e.email.toLowerCase() === detailedDeal.assignedTo.email.toLowerCase())
+          );
+          if (matchInEmp) return { ...detailedDeal.assignedTo, ...matchInEmp };
+          return detailedDeal.assignedTo;
+        }
+      } else if (typeof detailedDeal.assignedTo === 'string' && employees && employees.length > 0) {
+        const matchById = employees.find(e => e._id && e._id.toString() === detailedDeal.assignedTo.toString());
+        if (matchById) {
+          const empFullName = `${matchById.firstName || ''} ${matchById.lastName || ''}`.trim().toLowerCase();
+          if (!ownerName || empFullName === ownerName || empFullName.includes(ownerName) || ownerName.includes(empFullName)) {
+            return matchById;
+          }
+        }
+      }
+    }
+
+    // 3. Priority 3: Match with logged-in user ONLY IF user's actual name matches ownerName
+    if (user && ownerName) {
+      const currentUserName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+      const userName = (user.name || '').trim().toLowerCase();
+      const userEmail = (user.email || '').trim().toLowerCase();
+      if (
+        (currentUserName && currentUserName === ownerName) ||
+        (userName && userName === ownerName) ||
+        (userEmail && userEmail === ownerName)
+      ) {
+        return user;
+      }
+    }
+
+    return null;
+  }, [detailedDeal, employees, user]);
+
+  const getAddedByEmployee = (name) => {
+    if (!name) return null;
+    const cleanName = name.trim().toLowerCase();
+    if (employees && employees.length > 0) {
+      const matchByName = employees.find(emp => {
+        if (!emp) return false;
+        const empFullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+        const empName = (emp.name || '').trim().toLowerCase();
+        const empEmail = (emp.email || '').trim().toLowerCase();
+        const empOfficialEmail = (emp.officialEmail || '').trim().toLowerCase();
+        return (
+          empFullName === cleanName ||
+          empName === cleanName ||
+          empEmail === cleanName ||
+          empOfficialEmail === cleanName
+        );
+      });
+      if (matchByName) return matchByName;
+
+      const parts = cleanName.split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) {
+        const matchSplit = employees.find(emp => {
+          if (!emp) return false;
+          const f = (emp.firstName || '').trim().toLowerCase();
+          const l = (emp.lastName || '').trim().toLowerCase();
+          return f === parts[0] && l === parts[1];
+        });
+        if (matchSplit) return matchSplit;
+      }
+
+      const matchPartial = employees.find(emp => {
+        if (!emp) return false;
+        const empFullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+        const f = (emp.firstName || '').trim().toLowerCase();
+        return (
+          (empFullName && (empFullName.includes(cleanName) || cleanName.includes(empFullName))) ||
+          (f && f.length >= 3 && cleanName.includes(f))
+        );
+      });
+      if (matchPartial) return matchPartial;
+    }
+
+    if (user) {
+      const currentUserName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+      const userName = (user.name || '').trim().toLowerCase();
+      const userEmail = (user.email || '').trim().toLowerCase();
+      if (
+        (currentUserName && currentUserName === cleanName) ||
+        (userName && userName === cleanName) ||
+        (userEmail && userEmail === cleanName)
+      ) {
+        return user;
+      }
+    }
+
+    return null;
+  };
+
+  const matchedCompaniesForContact = useMemo(() => {
+    if (!detailedContact || !companies || companies.length === 0) return [];
+    const results = [];
+    const seen = new Set();
+
+    const addCompanyByName = (compName, sourceLabel = '') => {
+      if (!compName || compName === 'Direct Client' || compName.trim() === '' || compName.trim() === '-') return;
+      const cleanName = compName.trim();
+      const lower = cleanName.toLowerCase();
+      if (seen.has(lower)) return;
+
+      const found = companies.find(c => c && c.name && c.name.trim().toLowerCase() === lower);
+      if (found) {
+        seen.add(lower);
+        results.push({ ...found, sourceLabel: sourceLabel || 'Associated' });
+      }
+    };
+
+    // 1. Direct company on contact
+    if (detailedContact.company && detailedContact.company !== 'Direct Client') {
+      const fullCompany = detailedContact.company.trim();
+      const directFound = companies.find(c => c && c.name && c.name.trim().toLowerCase() === fullCompany.toLowerCase());
+      if (directFound) {
+        addCompanyByName(fullCompany, 'Direct Company');
+      } else if (fullCompany.includes(',')) {
+        const parts = fullCompany.split(',').map(s => s.trim()).filter(Boolean);
+        parts.forEach(p => addCompanyByName(p, 'Direct Company'));
+      }
+    }
+
+    // 2. Companies from all associated deals
+    matchedDealsForContact.forEach(deal => {
+      const dealComp = deal.associatedCompany || deal.company;
+      if (dealComp && dealComp !== 'Direct Client') {
+        const dealTitle = deal.dealName || deal.clientName || 'Deal';
+        addCompanyByName(dealComp, `Via Deal: ${dealTitle}`);
+      }
+    });
+
+    // 3. Domain match from contact email
+    if (detailedContact.email && detailedContact.email.includes('@')) {
+      const emailDomain = detailedContact.email.split('@')[1]?.toLowerCase();
+      if (emailDomain && !['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'example.com'].includes(emailDomain)) {
+        companies.forEach(c => {
+          if (!c || !c.domain) return;
+          const cleanDom = c.domain.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+          if (cleanDom === emailDomain) {
+            addCompanyByName(c.name, 'Domain Match');
+          }
+        });
+      }
+    }
+
+    return results;
+  }, [companies, detailedContact, matchedDealsForContact]);
+
+  const matchedCompanyForContact = useMemo(() => {
+    return matchedCompaniesForContact[0] || null;
+  }, [matchedCompaniesForContact]);
+
+  // Dynamically sync options from existing contacts, companies, deals (placed after state declarations)
+  useEffect(() => {
+    if (contacts && contacts.length > 0) {
+      let deletedStages = [];
+      try {
+        deletedStages = JSON.parse(localStorage.getItem('crm_deleted_stages') || '[]');
+      } catch (e) { }
+
+      const existingSources = Array.from(new Set(contacts.map(c => c.contactSource).filter(Boolean)));
+      const existingStages = Array.from(new Set(contacts.map(c => c.leadStage).filter(Boolean)))
+        .filter(s => !deletedStages.includes(s.toLowerCase()));
+      const existingStatuses = Array.from(new Set(contacts.map(c => c.leadStatus).filter(Boolean)));
+
+      if (existingSources.length > 0) {
+        setContactSources(prev => Array.from(new Set([...prev, ...existingSources])));
+      }
+      if (existingStages.length > 0) {
+        setLeadStages(prev => Array.from(new Set([...prev, ...existingStages])));
+        setContactStages(prev => {
+          const current = prev || [];
+          const names = new Set(current.map(s => (s.name || s.id || '').toLowerCase()));
+          const toAdd = existingStages
+            .filter(st => !names.has(st.toLowerCase()))
+            .map((st, i) => ({
+              id: st,
+              name: st,
+              badgeClass: ['new', 'hot', 'cold', 'won', 'custom'][i % 5],
+              isCustom: true
+            }));
+          return toAdd.length > 0 ? [...current, ...toAdd] : current;
+        });
+      }
+      if (existingStatuses.length > 0) {
+        setLeadStatuses(prev => Array.from(new Set([...prev, ...existingStatuses])));
+      }
+    }
+  }, [contacts]);
+
+  useEffect(() => {
+    if (companies && companies.length > 0) {
+      const existingIndustries = Array.from(new Set(companies.map(c => c.industry).filter(Boolean)));
+      if (existingIndustries.length > 0) {
+        setIndustryOptions(prev => Array.from(new Set([...prev, ...existingIndustries])));
+      }
+    }
+  }, [companies]);
+
+  useEffect(() => {
+    if (deals && deals.length > 0) {
+      const existingTypes = Array.from(new Set(deals.map(d => d.dealType).filter(Boolean)));
+      if (existingTypes.length > 0) {
+        setDealTypes(prev => Array.from(new Set([...prev, ...existingTypes])));
+      }
+    }
+  }, [deals]);
+
+  // Persist pipeline configurations across page refreshes
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_pipelines', JSON.stringify(pipelines));
+    } catch (e) { }
+  }, [pipelines]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_pipeline_options', JSON.stringify(pipelineOptions));
+    } catch (e) { }
+  }, [pipelineOptions]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_stages', JSON.stringify(stages));
+    } catch (e) { }
+  }, [stages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_contact_stages', JSON.stringify(contactStages));
+    } catch (e) { }
+  }, [contactStages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_lead_stages', JSON.stringify(leadStages));
+    } catch (e) { }
+  }, [leadStages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_contact_sources', JSON.stringify(contactSources));
+    } catch (e) { }
+  }, [contactSources]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_lead_statuses', JSON.stringify(leadStatuses));
+    } catch (e) { }
+  }, [leadStatuses]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_industry_options', JSON.stringify(industryOptions));
+    } catch (e) { }
+  }, [industryOptions]);
+
+  const contactStageOptions = useMemo(() => {
+    const stageNames = (effectiveContactStages || []).map(s => typeof s === 'string' ? s : (s.name || s.id)).filter(Boolean);
+    const fromLeadStages = (leadStages || []).filter(Boolean);
+    const fromContacts = (contacts || []).map(c => c.leadStage).filter(Boolean);
+    const combined = Array.from(new Set([...stageNames, ...fromLeadStages, ...fromContacts]));
+    return combined.length > 0 ? combined : ['Lead'];
+  }, [effectiveContactStages, leadStages, contacts]);
+
+
+  const handleToggleTaskComplete = async (taskId, e) => {
+    if (e) e.stopPropagation();
+    const task = tasks.find(t => t._id === taskId);
+    if (!task) return;
+    const nextCompleted = !task.completed;
+    const nextStatus = nextCompleted ? 'Completed' : 'Pending';
+
+    try {
+      if (taskId && !taskId.toString().startsWith('task-')) {
+        await api.put(`/pipeline-tasks/${taskId}`, { completed: nextCompleted, status: nextStatus });
+      }
+    } catch (err) {
+      console.warn('Toggle task API sync:', err.message);
+    }
+
+    setTasks(prev =>
+      prev.map(t => (t._id === taskId ? { ...t, completed: nextCompleted, status: nextStatus } : t))
+    );
+
+    if (task.associatedDealId) {
+      logActivity(task.associatedDealId, {
+        type: 'task',
+        title: nextCompleted ? 'Task Completed' : 'Task Reopened',
+        content: `Marked task "${task.title}" as ${nextCompleted ? 'Completed' : 'Pending'}.`
+      });
+    }
+    if (task.associatedContactId) {
+      logActivity(task.associatedContactId, {
+        type: 'task',
+        title: nextCompleted ? 'Task Completed' : 'Task Reopened',
+        content: `Marked task "${task.title}" as ${nextCompleted ? 'Completed' : 'Pending'}.`
+      }, true);
+    }
+  };
+
+  const handleOpenCreateTask = (presetDealId = '', presetContactId = '') => {
+    setEditingTask(null);
+    setIsAssignCustom(false);
+
+    const effectiveDealId = presetDealId || detailedDealId || (detailedDeal ? detailedDeal._id : '');
+    const matchedDeal = deals.find(d => d._id === effectiveDealId);
+
+    const effectiveContactId = presetContactId || detailedContactId || (detailedContact ? detailedContact._id : '');
+    const matchedContact = contacts.find(c => c._id === effectiveContactId);
+
+    // Get strictly the associated contacts of this deal (if deal is primary)
+    const dealAssocContacts = effectiveDealId ? getDealAssociatedContacts(matchedDeal || effectiveDealId) : [];
+
+    // Get strictly the associated deals of this contact (if contact is primary)
+    const contactAssocDeals = effectiveContactId ? getContactAssociatedDeals(matchedContact || effectiveContactId) : [];
+
+    let initialContactIds = [];
+    if (effectiveContactId) {
+      initialContactIds = [effectiveContactId];
+    } else if (dealAssocContacts.length > 0) {
+      initialContactIds = dealAssocContacts.map(c => c._id);
+    }
+
+    let initialDealIds = [];
+    if (effectiveDealId) {
+      initialDealIds = [effectiveDealId];
+    } else if (contactAssocDeals.length > 0) {
+      initialDealIds = contactAssocDeals.map(d => d._id);
+    }
+
+    setTaskLockedContext({
+      dealId: effectiveDealId || null,
+      contactId: presetContactId || detailedContactId || (detailedContact ? detailedContact._id : null)
+    });
+
+    const defaultAssignee = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || (matchedDeal ? matchedDeal.salesOwner : (detailedDeal ? detailedDeal.salesOwner : '')) || 'Admin System';
+
+    setTaskFormData({
+      title: '',
+      description: '',
+      dueDate: new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10),
+      priority: 'Medium',
+      status: 'Pending',
+      type: 'Follow-up',
+      assignee: defaultAssignee,
+      associatedDealId: initialDealIds[0] || effectiveDealId || '',
+      associatedDealIds: initialDealIds,
+      associatedContactId: initialContactIds[0] || '',
+      associatedContactIds: initialContactIds
+    });
+    setShowCreateTaskModal(true);
+  };
+
+  const handleOpenEditTask = (task, e) => {
+    if (e) e.stopPropagation();
+    setEditingTask(task);
+    setTaskLockedContext({
+      dealId: task.associatedDealId || (detailedDealId ? detailedDealId : null),
+      contactId: task.associatedContactId || (detailedContactId ? detailedContactId : null)
+    });
+    const currentUser = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+    const hasCustomAssignee = Boolean(task.assignee && task.assignee !== currentUser && task.assignee !== 'Artiflow' && task.assignee !== 'Admin System');
+    setIsAssignCustom(hasCustomAssignee);
+
+    const contactIds = task.associatedContactIds && Array.isArray(task.associatedContactIds) && task.associatedContactIds.length > 0
+      ? task.associatedContactIds
+      : (task.associatedContactId ? [task.associatedContactId] : []);
+
+    const dealIds = task.associatedDealIds && Array.isArray(task.associatedDealIds) && task.associatedDealIds.length > 0
+      ? task.associatedDealIds
+      : (task.associatedDealId ? [task.associatedDealId] : []);
+
+    setTaskFormData({
+      title: task.title || '',
+      description: task.description || '',
+      dueDate: task.dueDate || '',
+      priority: task.priority || 'Medium',
+      status: task.status || (task.completed ? 'Completed' : 'Pending'),
+      type: task.type || 'Follow-up',
+      assignee: task.assignee || currentUser,
+      associatedDealId: task.associatedDealId || (dealIds[0] || ''),
+      associatedDealIds: dealIds,
+      associatedContactId: task.associatedContactId || (contactIds[0] || ''),
+      associatedContactIds: contactIds
+    });
+    setShowCreateTaskModal(true);
+  };
+
+  const handleDeleteTask = async (taskId, e) => {
+    if (e) e.stopPropagation();
+    if (!canDelete) {
+      alert('You do not have permission to delete tasks.');
+      return;
+    }
+    const taskToDelete = tasks.find(t => t._id === taskId);
+    if (window.confirm('Are you sure you want to delete this task?')) {
+      try {
+        if (taskId && !taskId.toString().startsWith('task-')) {
+          await api.delete(`/pipeline-tasks/${taskId}`);
+        }
+      } catch (err) {
+        console.warn('Delete task API sync:', err.message);
+      }
+      setTasks(prev => prev.filter(t => t._id !== taskId));
+
+      if (taskToDelete && taskToDelete.associatedDealId) {
+        logActivity(taskToDelete.associatedDealId, {
+          type: 'task',
+          title: 'Task Deleted',
+          content: `Deleted task "${taskToDelete.title}".`
+        });
+      }
+      if (taskToDelete && taskToDelete.associatedContactId) {
+        logActivity(taskToDelete.associatedContactId, {
+          type: 'task',
+          title: 'Task Deleted',
+          content: `Deleted task "${taskToDelete.title}".`
+        }, true);
+      }
+    }
+  };
+
+  const handleTaskSubmit = async (e) => {
+    e.preventDefault();
+    if (!taskFormData.title.trim()) {
+      alert('Please enter a task title');
+      return;
+    }
+
+    const effectiveDealId = taskFormData.associatedDealId || (detailedDeal ? detailedDeal._id : '');
+    const linkedDeal = deals.find(d => d._id === effectiveDealId);
+
+    let selectedContactIds = taskFormData.associatedContactIds && taskFormData.associatedContactIds.length > 0
+      ? taskFormData.associatedContactIds
+      : (taskFormData.associatedContactId ? [taskFormData.associatedContactId] : []);
+
+    let selectedDealIds = taskFormData.associatedDealIds && taskFormData.associatedDealIds.length > 0
+      ? taskFormData.associatedDealIds
+      : (taskFormData.associatedDealId ? [taskFormData.associatedDealId] : []);
+
+    if (selectedContactIds.length === 0 && effectiveDealId) {
+      const dealAssoc = getDealAssociatedContacts(linkedDeal || effectiveDealId);
+      if (dealAssoc.length > 0) {
+        selectedContactIds = dealAssoc.map(c => c._id);
+      }
+    }
+
+    if (selectedDealIds.length === 0 && selectedContactIds[0]) {
+      const contactAssoc = getContactAssociatedDeals(selectedContactIds[0]);
+      if (contactAssoc.length > 0) {
+        selectedDealIds = contactAssoc.map(d => d._id);
+      }
+    }
+
+    const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+
+    if (editingTask) {
+      const primaryCId = selectedContactIds[0] || '';
+      const primaryDId = selectedDealIds[0] || effectiveDealId || '';
+      const primaryContact = contacts.find(c => c._id === primaryCId);
+      const primaryDeal = deals.find(d => d._id === primaryDId);
+
+      const payload = {
+        title: taskFormData.title.trim(),
+        description: taskFormData.description.trim(),
+        dueDate: taskFormData.dueDate,
+        priority: taskFormData.priority,
+        status: taskFormData.status,
+        completed: taskFormData.status === 'Completed',
+        type: taskFormData.type,
+        assignee: taskFormData.assignee || authorName,
+        associatedDealId: primaryDId || '',
+        associatedDealIds: selectedDealIds,
+        associatedDealName: primaryDeal ? (primaryDeal.dealName || primaryDeal.clientName) : '',
+        associatedContactId: (primaryCId && !primaryCId.startsWith('raw_')) ? primaryCId : '',
+        associatedContactIds: selectedContactIds,
+        associatedContactName: primaryContact ? `${primaryContact.firstName || ''} ${primaryContact.lastName || ''}`.trim() : ''
+      };
+
+      try {
+        if (editingTask._id && !editingTask._id.toString().startsWith('task-')) {
+          const res = await api.put(`/pipeline-tasks/${editingTask._id}`, payload);
+          if (res.data) {
+            setTasks(prev => prev.map(t => (t._id === editingTask._id ? res.data : t)));
+          }
+        }
+      } catch (err) {
+        console.warn('Update task API error:', err.message);
+      }
+
+      setTasks(prev =>
+        prev.map(t =>
+          t._id === editingTask._id ? { ...t, ...payload } : t
+        )
+      );
+
+      if (payload.associatedDealId) {
+        logActivity(payload.associatedDealId, {
+          type: 'task',
+          title: 'Task Updated',
+          content: `Updated task: "${payload.title}" (Due: ${payload.dueDate ? formatDateDDMMYYYY(payload.dueDate) : 'No due date'}, Priority: ${payload.priority}, Assigned to: ${payload.assignee}).${payload.description ? ` Details: ${payload.description}` : ''}`,
+          author: authorName
+        });
+      }
+      for (const cId of selectedContactIds) {
+        if (cId && !cId.startsWith('raw_')) {
+          logActivity(cId, {
+            type: 'task',
+            title: 'Task Updated',
+            content: `Updated task: "${payload.title}" (Due: ${payload.dueDate ? formatDateDDMMYYYY(payload.dueDate) : 'No due date'}, Priority: ${payload.priority}, Assigned to: ${payload.assignee}).`,
+            author: authorName
+          }, true);
+        }
+      }
+    } else {
+      const newTasksList = [];
+
+      // Determine multiple creation: multiple deals vs multiple contacts
+      if (selectedDealIds.length > 1 && selectedContactIds.length <= 1) {
+        const contactId = selectedContactIds[0] || '';
+        const contactObj = contacts.find(c => c._id === contactId) || (contactId ? { firstName: contactId.replace('raw_', ''), lastName: '', email: contactId.replace('raw_', '') } : null);
+        const contactDisplayName = contactObj ? `${contactObj.firstName || ''} ${contactObj.lastName || ''}`.trim() || contactObj.email || contactObj.company : '';
+
+        for (const dId of selectedDealIds) {
+          const currentDeal = deals.find(d => d._id === dId);
+          const dealTitle = currentDeal ? (currentDeal.dealName || currentDeal.clientName) : '';
+
+          const payload = {
+            title: taskFormData.title.trim(),
+            description: taskFormData.description.trim(),
+            dueDate: taskFormData.dueDate,
+            priority: taskFormData.priority,
+            status: taskFormData.status,
+            completed: taskFormData.status === 'Completed',
+            type: taskFormData.type,
+            assignee: taskFormData.assignee || authorName,
+            associatedDealId: dId,
+            associatedDealIds: [dId],
+            associatedDealName: dealTitle,
+            associatedContactId: (contactId && !contactId.startsWith('raw_')) ? contactId : '',
+            associatedContactIds: [contactId].filter(Boolean),
+            associatedContactName: contactDisplayName
+          };
+
+          let savedTask = null;
+          try {
+            const res = await api.post('/pipeline-tasks', payload);
+            if (res.data) {
+              savedTask = res.data;
+              newTasksList.push(res.data);
+            }
+          } catch (err) {
+            console.warn('Create task API error:', err.message);
+          }
+
+          if (!savedTask) {
+            const newTask = {
+              _id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              ...payload,
+              createdDate: formatDateDDMMYYYY(new Date())
+            };
+            newTasksList.push(newTask);
+          }
+
+          logActivity(dId, {
+            type: 'task',
+            title: 'Task Created',
+            content: `Created task: "${payload.title}" (Due: ${payload.dueDate ? formatDateDDMMYYYY(payload.dueDate) : 'No due date'}, Priority: ${payload.priority}, Assigned to: ${payload.assignee}).`,
+            author: authorName
+          });
+        }
+
+        if (contactId && !contactId.startsWith('raw_')) {
+          logActivity(contactId, {
+            type: 'task',
+            title: `${selectedDealIds.length} Tasks Created`,
+            content: `Created tasks for ${selectedDealIds.length} associated deals: "${taskFormData.title.trim()}".`,
+            author: authorName
+          }, true);
+        }
+      } else {
+        // Targets: multiple contacts (or 1 deal + 1 contact)
+        const targets = selectedContactIds.length > 0 ? selectedContactIds : [''];
+        const primaryDealId = selectedDealIds[0] || effectiveDealId || '';
+        const currentDeal = deals.find(d => d._id === primaryDealId);
+        const dealTitle = currentDeal ? (currentDeal.dealName || currentDeal.clientName) : '';
+
+        for (const cId of targets) {
+          const contactObj = contacts.find(c => c._id === cId) || (cId ? { firstName: cId.replace('raw_', ''), lastName: '', email: cId.replace('raw_', '') } : null);
+          const contactDisplayName = contactObj ? `${contactObj.firstName || ''} ${contactObj.lastName || ''}`.trim() || contactObj.email || contactObj.company : '';
+
+          const payload = {
+            title: taskFormData.title.trim(),
+            description: taskFormData.description.trim(),
+            dueDate: taskFormData.dueDate,
+            priority: taskFormData.priority,
+            status: taskFormData.status,
+            completed: taskFormData.status === 'Completed',
+            type: taskFormData.type,
+            assignee: taskFormData.assignee || authorName,
+            associatedDealId: primaryDealId,
+            associatedDealIds: [primaryDealId].filter(Boolean),
+            associatedDealName: dealTitle,
+            associatedContactId: (cId && !cId.startsWith('raw_')) ? cId : '',
+            associatedContactIds: [cId].filter(Boolean),
+            associatedContactName: contactDisplayName
+          };
+
+          let savedTask = null;
+          try {
+            const res = await api.post('/pipeline-tasks', payload);
+            if (res.data) {
+              savedTask = res.data;
+              newTasksList.push(res.data);
+            }
+          } catch (err) {
+            console.warn('Create task API error:', err.message);
+          }
+
+          if (!savedTask) {
+            const newTask = {
+              _id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              ...payload,
+              createdDate: formatDateDDMMYYYY(new Date())
+            };
+            newTasksList.push(newTask);
+          }
+
+          if (payload.associatedContactId) {
+            logActivity(payload.associatedContactId, {
+              type: 'task',
+              title: 'Task Created',
+              content: `Created new task: "${payload.title}" (Due: ${payload.dueDate ? formatDateDDMMYYYY(payload.dueDate) : 'No due date'}, Priority: ${payload.priority}, Assigned to: ${payload.assignee}).`,
+              author: authorName
+            }, true);
+          }
+        }
+
+        if (primaryDealId) {
+          logActivity(primaryDealId, {
+            type: 'task',
+            title: targets.length > 1 ? `${targets.length} Tasks Created` : 'Task Created',
+            content: targets.length > 1
+              ? `Created tasks for ${targets.length} associated contacts: "${taskFormData.title.trim()}" (Due: ${taskFormData.dueDate ? formatDateDDMMYYYY(taskFormData.dueDate) : 'No due date'}).`
+              : `Created new task: "${taskFormData.title.trim()}" (Due: ${taskFormData.dueDate ? formatDateDDMMYYYY(taskFormData.dueDate) : 'No due date'}, Priority: ${taskFormData.priority}, Assigned to: ${taskFormData.assignee}).${taskFormData.description ? ` Details: ${taskFormData.description}` : ''}`,
+            author: authorName
+          });
+        }
+      }
+
+      setTasks(prev => [...newTasksList, ...prev]);
+    }
+
+    setShowCreateTaskModal(false);
+    setEditingTask(null);
+  };
+
+  const handleAddActivity = async (e) => {
+    e.preventDefault();
+    if (!newActivityContent.trim()) return;
+
+    const isContactAct = activeTab === 'contacts' || (!detailedDealId && !!detailedContactId);
+    const targetId = isContactAct ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : (detailedContact ? detailedContact._id : null));
+    if (!targetId) return;
+
+    const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+
+    const titleDefault = newActivityType === 'note'
+      ? 'Internal Note'
+      : newActivityType === 'email'
+        ? (newActivitySubject.trim() || 'Email Logged')
+        : 'Message Logged';
+
+    await logActivity(targetId, {
+      type: newActivityType,
+      title: titleDefault,
+      content: newActivityContent.trim(),
+      author: authorName
+    }, isContactAct);
+
+    setNewActivityContent('');
+    setNewActivitySubject('');
+    setIsComposingActivity(false);
+  };
+
+  const [companyFormData, setCompanyFormData] = useState({
+    name: '',
+    domain: '',
+    owner: [],
+    industry: '',
+    country: '',
+    state: '',
+    city: '',
+    postalCode: ''
+  });
+
+  const [showValidDomainMsg, setShowValidDomainMsg] = useState(false);
+
+  useEffect(() => {
+    if (companyFormData.domain && companyFormData.domain.trim() && isValidCompanyDomain(companyFormData.domain)) {
+      setShowValidDomainMsg(true);
+      const timer = setTimeout(() => {
+        setShowValidDomainMsg(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowValidDomainMsg(false);
+    }
+  }, [companyFormData.domain]);
+
+  // Dynamic States/Regions Filtered by Selected Country
+  const availableCompanyStates = useMemo(() => {
+    if (!companyFormData.country) return [];
+    return COUNTRY_STATE_MAP[companyFormData.country] || [];
+  }, [companyFormData.country]);
+
+  // Filtered Companies Memo
+  const filteredCompanies = useMemo(() => {
+    return companies
+      .filter(company => {
+        if (!isItemOwnedByUser(company, 'company')) {
+          return false;
+        }
+
+        if (companySearchQuery.trim()) {
+          const q = companySearchQuery.toLowerCase();
+          const name = (company.name || '').toLowerCase();
+          const domain = (company.domain || '').toLowerCase();
+          const industry = (company.industry || '').toLowerCase();
+          const city = (company.city || '').toLowerCase();
+          const state = (company.state || '').toLowerCase();
+          const country = (company.country || '').toLowerCase();
+          const ownerVal = Array.isArray(company.owner) ? company.owner.join(' ').toLowerCase() : (company.owner || '').toLowerCase();
+          if (
+            !name.includes(q) &&
+            !domain.includes(q) &&
+            !industry.includes(q) &&
+            !city.includes(q) &&
+            !state.includes(q) &&
+            !country.includes(q) &&
+            !ownerVal.includes(q)
+          ) {
+            return false;
+          }
+        }
+
+        if (companyIndustryFilter !== 'all') {
+          const ind = (company.industry || '').toLowerCase();
+          if (ind !== companyIndustryFilter.toLowerCase()) {
+            return false;
+          }
+        }
+
+        if (companyOwnerFilter !== 'all') {
+          const fOwner = companyOwnerFilter.trim().toLowerCase();
+          const cOwner = (Array.isArray(company.owner) ? company.owner.join(' ') : (company.owner || '')).trim().toLowerCase();
+          if (!cOwner.includes(fOwner) && cOwner !== fOwner) {
+            return false;
+          }
+        }
+
+        if (companyDateFilter !== 'all') {
+          const compDate = parseDealDate(company.createdAt) || parseDealDate(company.createdDate) || parseDealDate(company.date);
+          if (!compDate) return false;
+          const now = new Date();
+          const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+          if (companyDateFilter === 'today') {
+            if (compDate < startOfToday || compDate > endOfToday) return false;
+          } else if (companyDateFilter === 'this_week') {
+            const firstDayOfWeek = new Date(startOfToday);
+            const day = firstDayOfWeek.getDay();
+            const diff = firstDayOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+            firstDayOfWeek.setDate(diff);
+            const lastDayOfWeek = new Date(firstDayOfWeek);
+            lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
+            lastDayOfWeek.setHours(23, 59, 59, 999);
+            if (compDate < firstDayOfWeek || compDate > lastDayOfWeek) return false;
+          } else if (companyDateFilter === 'this_month') {
+            if (compDate.getMonth() !== now.getMonth() || compDate.getFullYear() !== now.getFullYear()) return false;
+          } else if (companyDateFilter === 'next_30_days') {
+            const in30Days = new Date(startOfToday);
+            in30Days.setDate(in30Days.getDate() + 30);
+            in30Days.setHours(23, 59, 59, 999);
+            if (compDate < startOfToday || compDate > in30Days) return false;
+          } else if (companyDateFilter === 'this_quarter') {
+            const currentQuarter = Math.floor(now.getMonth() / 3);
+            const compQuarter = Math.floor(compDate.getMonth() / 3);
+            if (compQuarter !== currentQuarter || compDate.getFullYear() !== now.getFullYear()) return false;
+          } else if (companyDateFilter === 'this_year') {
+            if (compDate.getFullYear() !== now.getFullYear()) return false;
+          } else if (companyDateFilter === 'custom') {
+            if (customCompanyDateStart) {
+              const start = new Date(customCompanyDateStart);
+              start.setHours(0, 0, 0, 0);
+              if (compDate < start) return false;
+            }
+            if (customCompanyDateEnd) {
+              const end = new Date(customCompanyDateEnd);
+              end.setHours(23, 59, 59, 999);
+              if (compDate > end) return false;
+            }
+          }
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (companySortBy === 'name_asc') {
+          return (a.name || '').localeCompare(b.name || '');
+        }
+        if (companySortBy === 'name_desc') {
+          return (b.name || '').localeCompare(a.name || '');
+        }
+        if (companySortBy === 'industry') {
+          return (a.industry || '').localeCompare(b.industry || '');
+        }
+        if (companySortBy === 'country') {
+          return (a.country || '').localeCompare(b.country || '');
+        }
+        if (companySortBy === 'oldest') {
+          const da = parseDealDate(a.createdAt) || parseDealDate(a.createdDate) || parseDealDate(a.date) || new Date(0);
+          const db = parseDealDate(b.createdAt) || parseDealDate(b.createdDate) || parseDealDate(b.date) || new Date(0);
+          return da - db;
+        }
+        // newest
+        const da = parseDealDate(a.createdAt) || parseDealDate(a.createdDate) || parseDealDate(a.date) || new Date(0);
+        const db = parseDealDate(b.createdAt) || parseDealDate(b.createdDate) || parseDealDate(b.date) || new Date(0);
+        return db - da;
+      });
+  }, [companies, companySearchQuery, companyIndustryFilter, companyOwnerFilter, companyDateFilter, customCompanyDateStart, customCompanyDateEnd, companySortBy, isItemOwnedByUser]);
+
+  // Associated Contact and Company matching for Detailed Deal View
+  const matchedContact = useMemo(() => {
+    if (!detailedDeal) return null;
+    return (
+      contacts.find(
+        c =>
+          c.email === detailedDeal.associatedContact ||
+          c.email === detailedDeal.email ||
+          `${c.firstName} ${c.lastName}`.trim().toLowerCase() === (detailedDeal.clientName || '').toLowerCase()
+      ) || {
+        firstName: (detailedDeal.clientName || 'Client').split(' ')[0] || 'Client',
+        lastName: (detailedDeal.clientName || '').split(' ').slice(1).join(' ') || '',
+        email: detailedDeal.associatedContact || detailedDeal.email || 'contact@example.com',
+        phone: detailedDeal.phone || '+91 98765 43210',
+        countryCode: '+91',
+        leadStage: 'Lead',
+        leadStatus: 'Active',
+        contactSource: 'Direct Reference',
+        owner: detailedDeal.salesOwner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Tejaswi Yadav') || 'Tejaswi Yadav'
+      }
+    );
+  }, [detailedDeal, contacts]);
+
+  const matchedCompany = useMemo(() => {
+    if (!detailedDeal) return null;
+    return (
+      companies.find(
+        comp =>
+          comp.name === detailedDeal.associatedCompany ||
+          comp._id === detailedDeal.associatedCompany ||
+          comp.name.toLowerCase() === (detailedDeal.company || '').toLowerCase()
+      ) || {
+        name: detailedDeal.associatedCompany || 'Bhoomi Tech Enterprises',
+        domain: 'bhoomi.com',
+        owner: detailedDeal.salesOwner || 'Sahil Singh',
+        industry: 'Software & Technology',
+        country: 'India',
+        state: 'Maharashtra',
+        city: detailedDeal.location || 'Pune',
+        postalCode: '411001'
+      }
+    );
+  }, [detailedDeal, companies]);
+
+  const handleAddPipeline = async (customName) => {
+    const trimmed = (typeof customName === 'string' ? customName : (addPipelineModalName || newPipelineName)).trim();
+    if (!trimmed) return;
+    if (pipelines.some(p => p.name.toLowerCase() === trimmed.toLowerCase())) {
+      alert('A pipeline with this name already exists');
+      return;
+    }
+    const badgeClasses = ['new', 'hot', 'cold', 'won', 'old', 'custom'];
+    const randomBadge = badgeClasses[pipelines.length % badgeClasses.length];
+    const newP = { id: trimmed, name: trimmed, badgeClass: randomBadge };
+    const nextPipelines = [...pipelines, newP];
+    const nextOptions = pipelineOptions.includes(trimmed) ? pipelineOptions : [...pipelineOptions, trimmed];
+
+    let deletedPipelines = [];
+    try {
+      deletedPipelines = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || '[]');
+      deletedPipelines = deletedPipelines.filter(d => d !== trimmed.toLowerCase());
+      localStorage.setItem('crm_deleted_pipelines', JSON.stringify(deletedPipelines));
+    } catch (e) { }
+
+    setPipelines(nextPipelines);
+    setPipelineOptions(nextOptions);
+    setNewPipelineName('');
+    setAddPipelineModalName('');
+    setShowAddPipelineModal(false);
+    setShowAddPipelineInput(false);
+
+    try {
+      localStorage.setItem('crm_pipelines', JSON.stringify(nextPipelines));
+      localStorage.setItem('crm_pipeline_options', JSON.stringify(nextOptions));
+      await api.post('/pipeline-configs/save', {
+        pipelines: nextPipelines,
+        pipelineOptions: nextOptions,
+        deletedPipelines
+      });
+    } catch (err) {
+      console.warn('Save pipeline to backend error:', err.message);
+    }
+  };
+
+  const handleStartEditPipeline = (pipeline, e) => {
+    if (e) e.stopPropagation();
+    setEditingPipelineId(pipeline.id);
+    setEditingPipelineName(pipeline.name);
+    setActiveColMenuId(null);
+  };
+
+  const handleSaveEditPipeline = async (pipelineId) => {
+    const trimmed = editingPipelineName.trim();
+    if (!trimmed) {
+      setEditingPipelineId(null);
+      return;
+    }
+    const oldPipeline = pipelines.find(p => p.id === pipelineId);
+    const oldName = oldPipeline ? oldPipeline.name : pipelineId;
+
+    const nextPipelines = pipelines.map(p => (p.id === pipelineId ? { ...p, name: trimmed, id: trimmed } : p));
+    const nextOptions = pipelineOptions.map(p => (p === oldName ? trimmed : p));
+
+    setPipelines(nextPipelines);
+    setPipelineOptions(nextOptions);
+    setDeals(prev => prev.map(d => (d.pipeline === oldName || d.pipeline === pipelineId ? { ...d, pipeline: trimmed } : d)));
+    setEditingPipelineId(null);
+    setEditingPipelineName('');
+
+    try {
+      localStorage.setItem('crm_pipelines', JSON.stringify(nextPipelines));
+      localStorage.setItem('crm_pipeline_options', JSON.stringify(nextOptions));
+
+      const affected = deals.filter(d => d.pipeline === oldName || d.pipeline === pipelineId);
+      for (const d of affected) {
+        if (d._id && !d._id.toString().startsWith('deal-')) {
+          await api.put(`/deals/${d._id}`, { pipeline: trimmed });
+        }
+      }
+
+      await api.post('/pipeline-configs/save', {
+        pipelines: nextPipelines,
+        pipelineOptions: nextOptions
+      });
+    } catch (err) {
+      console.warn('Save edited pipeline to backend:', err.message);
+    }
+  };
+
+  const handleDeletePipeline = async (pipelineId, e) => {
+    if (e) e.stopPropagation();
+    if (!canDelete) {
+      alert('You do not have permission to delete stages.');
+      return;
+    }
+    const pipeline = pipelines.find(p => p.id === pipelineId);
+    const pipelineName = pipeline ? pipeline.name : pipelineId;
+
+    if (window.confirm(`Are you sure you want to delete the "${pipelineName}" stage?`)) {
+      const remaining = pipelines.filter(p => p.id !== pipelineId && p.name !== pipelineName);
+      const remainingOptions = pipelineOptions.filter(p => p !== pipelineName && p !== pipelineId);
+      setPipelines(remaining);
+      setPipelineOptions(remainingOptions);
+
+      let deletedPipelines = [];
+      try {
+        deletedPipelines = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || '[]');
+      } catch (err) { }
+      deletedPipelines.push(pipelineName.toLowerCase());
+      deletedPipelines.push(pipelineId.toLowerCase());
+      const uniqueDeleted = Array.from(new Set(deletedPipelines));
+
+      try {
+        localStorage.setItem('crm_pipelines', JSON.stringify(remaining));
+        localStorage.setItem('crm_pipeline_options', JSON.stringify(remainingOptions));
+        localStorage.setItem('crm_deleted_pipelines', JSON.stringify(uniqueDeleted));
+      } catch (err) { }
+
+      const fallbackPipeline = remaining.length > 0 ? remaining[0].name : '';
+      setDeals(prev => prev.map(d => (d.pipeline === pipelineName || d.pipeline === pipelineId ? { ...d, pipeline: fallbackPipeline } : d)));
+      setActiveColMenuId(null);
+
+      // Persist fallback pipeline to backend for affected deals & sync deletedPipelines to database
+      try {
+        const affected = deals.filter(d => d.pipeline === pipelineName || d.pipeline === pipelineId);
+        for (const d of affected) {
+          if (d._id && !d._id.toString().startsWith('deal-')) {
+            await api.put(`/deals/${d._id}`, { pipeline: fallbackPipeline });
+          }
+        }
+
+        await api.post('/pipeline-configs/save', {
+          pipelines: remaining,
+          pipelineOptions: remainingOptions,
+          deletedPipelines: uniqueDeleted
+        });
+      } catch (err) {
+        console.warn('Sync deleted pipeline to backend:', err.message);
+      }
+    }
+  };
+
+  // Contact Stage Handlers
+  const handleAddContactStage = async (customName) => {
+    const trimmed = (typeof customName === 'string' ? customName : (addStageModalName || newContactStageName)).trim();
+    if (!trimmed) return;
+    if (contactStages.some(s => s.name.toLowerCase() === trimmed.toLowerCase())) {
+      alert('A stage with this name already exists');
+      return;
+    }
+    const badgeClasses = ['new', 'hot', 'cold', 'won', 'custom'];
+    const randomBadge = badgeClasses[contactStages.length % badgeClasses.length];
+    const newStage = { id: trimmed, name: trimmed, badgeClass: randomBadge };
+    const nextStages = [...contactStages, newStage];
+    const nextLeadStages = leadStages.includes(trimmed) ? leadStages : [...leadStages, trimmed];
+
+    let deletedStages = [];
+    try {
+      deletedStages = JSON.parse(localStorage.getItem('crm_deleted_stages') || '[]');
+      deletedStages = deletedStages.filter(d => d !== trimmed.toLowerCase());
+      localStorage.setItem('crm_deleted_stages', JSON.stringify(deletedStages));
+    } catch (e) { }
+
+    setContactStages(nextStages);
+    setLeadStages(nextLeadStages);
+    setNewContactStageName('');
+    setAddStageModalName('');
+    setShowAddStageModal(false);
+    setShowAddContactStageInput(false);
+
+    try {
+      localStorage.setItem('crm_contact_stages', JSON.stringify(nextStages));
+      localStorage.setItem('crm_lead_stages', JSON.stringify(nextLeadStages));
+      await api.post('/pipeline-configs/save', {
+        contactStages: nextStages,
+        leadStages: nextLeadStages,
+        deletedStages
+      });
+    } catch (err) {
+      console.warn('Save contact stage to backend:', err.message);
+    }
+  };
+
+  const handleStartEditContactStage = (stage, e) => {
+    if (e) e.stopPropagation();
+    setEditingContactStageId(stage.id);
+    setEditingContactStageName(stage.name);
+    setActiveColMenuId(null);
+  };
+
+  const handleSaveEditContactStage = async (stageId) => {
+    const trimmed = editingContactStageName.trim();
+    if (!trimmed) {
+      setEditingContactStageId(null);
+      return;
+    }
+    const oldStage = contactStages.find(s => s.id === stageId);
+    const oldName = oldStage ? oldStage.name : stageId;
+
+    const nextStages = contactStages.map(s => (s.id === stageId ? { ...s, name: trimmed, id: trimmed } : s));
+    const nextLeadStages = leadStages.map(s => (s === oldName ? trimmed : s));
+
+    setContactStages(nextStages);
+    setLeadStages(nextLeadStages);
+    setContacts(prev => prev.map(c => ((c.leadStage || '').toLowerCase() === oldName.toLowerCase() ? { ...c, leadStage: trimmed } : c)));
+    setEditingContactStageId(null);
+    setEditingContactStageName('');
+
+    try {
+      localStorage.setItem('crm_contact_stages', JSON.stringify(nextStages));
+      localStorage.setItem('crm_lead_stages', JSON.stringify(nextLeadStages));
+
+      const affected = contacts.filter(c => (c.leadStage || '').toLowerCase() === oldName.toLowerCase());
+      for (const c of affected) {
+        if (c._id && !c._id.toString().startsWith('contact-')) {
+          await api.put(`/pipeline-contacts/${c._id}`, { leadStage: trimmed });
+        }
+      }
+
+      await api.post('/pipeline-configs/save', {
+        contactStages: nextStages,
+        leadStages: nextLeadStages
+      });
+    } catch (err) {
+      console.warn('Save edited contact stage to backend:', err.message);
+    }
+  };
+
+  const handleDeleteContactStage = async (stageId, e) => {
+    if (e) e.stopPropagation();
+    if (!canDelete) {
+      alert('You do not have permission to delete stages.');
+      return;
+    }
+    const cleanId = String(stageId || '').trim();
+    const stageToDelete = contactStages.find(s => (s.id || '').toLowerCase() === cleanId.toLowerCase() || (s.name || '').toLowerCase() === cleanId.toLowerCase());
+    const stageName = stageToDelete ? stageToDelete.name : cleanId;
+
+    if (window.confirm(`Are you sure you want to delete stage "${stageName}"?`)) {
+      const remaining = contactStages.filter(s =>
+        (s.id || '').toLowerCase() !== cleanId.toLowerCase() &&
+        (s.name || '').toLowerCase() !== stageName.toLowerCase()
+      );
+      const remainingLeadStages = leadStages.filter(s =>
+        String(s).toLowerCase() !== cleanId.toLowerCase() &&
+        String(s).toLowerCase() !== stageName.toLowerCase()
+      );
+
+      setContactStages(remaining);
+      setLeadStages(remainingLeadStages);
+
+      let deletedStages = [];
+      try {
+        deletedStages = JSON.parse(localStorage.getItem('crm_deleted_stages') || '[]');
+      } catch (err) { }
+      deletedStages.push(stageName.toLowerCase().trim());
+      deletedStages.push(cleanId.toLowerCase().trim());
+      const uniqueDeleted = Array.from(new Set(deletedStages.filter(Boolean)));
+
+      try {
+        localStorage.setItem('crm_contact_stages', JSON.stringify(remaining));
+        localStorage.setItem('crm_lead_stages', JSON.stringify(remainingLeadStages));
+        localStorage.setItem('crm_deleted_stages', JSON.stringify(uniqueDeleted));
+      } catch (err) { }
+
+      const fallbackStage = remaining.length > 0 ? (remaining[0].name || remaining[0].id) : '';
+      setContacts(prev => {
+        const next = prev.map(c => {
+          const cStage = (c.leadStage || '').toLowerCase().trim();
+          if (cStage === stageName.toLowerCase() || cStage === cleanId.toLowerCase()) {
+            return { ...c, leadStage: fallbackStage };
+          }
+          return c;
+        });
+        return next;
+      });
+      setActiveColMenuId(null);
+
+      // Persist fallback stage to backend for affected contacts & save config to DB
+      try {
+        const affected = contacts.filter(c => {
+          const cStage = (c.leadStage || '').toLowerCase().trim();
+          return cStage === stageName.toLowerCase() || cStage === cleanId.toLowerCase();
+        });
+        for (const c of affected) {
+          if (c._id && !c._id.toString().startsWith('contact-')) {
+            await api.put(`/pipeline-contacts/${c._id}`, { leadStage: fallbackStage });
+          }
+        }
+
+        await api.post('/pipeline-configs/save', {
+          contactStages: remaining,
+          leadStages: remainingLeadStages,
+          deletedStages: uniqueDeleted
+        });
+      } catch (err) {
+        console.warn('Sync deleted stage to backend:', err.message);
+      }
+    }
+  };
+
+  const handleCreateStageOption = async (newStage) => {
+    const stageName = (newStage || '').trim();
+    if (!stageName) return;
+    if (!stages.some(s => (s.id || '').toLowerCase() === stageName.toLowerCase() || (s.name || '').toLowerCase() === stageName.toLowerCase())) {
+      const badgeClasses = ['custom', 'new', 'hot', 'cold', 'won'];
+      const randomBadge = badgeClasses[stages.length % badgeClasses.length];
+      const newStageObj = { id: stageName, name: stageName, badgeClass: randomBadge, isCustom: true };
+      const nextStages = [...stages, newStageObj];
+      setStages(nextStages);
+      try {
+        localStorage.setItem('crm_stages', JSON.stringify(nextStages));
+        await api.post('/pipeline-configs/save', { stages: nextStages });
+      } catch (e) {
+        console.warn('Save stage config error:', e.message);
+      }
+    }
+  };
+
+  const handleCreateDealTypeOption = (newType) => {
+    const typeName = (newType || '').trim();
+    if (!typeName) return;
+    if (!dealTypes.some(t => t.toLowerCase() === typeName.toLowerCase())) {
+      setDealTypes(prev => [...prev, typeName]);
+    }
+  };
+
+  const handleCreatePipelineOption = async (newPipeline) => {
+    const pName = (newPipeline || '').trim();
+    if (!pName) return;
+    let nextOptions = pipelineOptions;
+    if (!pipelineOptions.some(p => p.toLowerCase() === pName.toLowerCase())) {
+      nextOptions = [...pipelineOptions, pName];
+      setPipelineOptions(nextOptions);
+    }
+    let nextPipelines = pipelines;
+    if (!pipelines.some(p => (p.name || p.id || '').toLowerCase() === pName.toLowerCase())) {
+      const badgeClasses = ['new', 'hot', 'cold', 'won', 'old', 'custom'];
+      const randomBadge = badgeClasses[pipelines.length % badgeClasses.length];
+      nextPipelines = [...pipelines, { id: pName, name: pName, badgeClass: randomBadge }];
+      setPipelines(nextPipelines);
+    }
+    let deletedPipelines = [];
+    try {
+      deletedPipelines = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || '[]');
+      deletedPipelines = deletedPipelines.filter(d => d !== pName.toLowerCase());
+      localStorage.setItem('crm_deleted_pipelines', JSON.stringify(deletedPipelines));
+    } catch (e) { }
+
+    try {
+      localStorage.setItem('crm_pipelines', JSON.stringify(nextPipelines));
+      localStorage.setItem('crm_pipeline_options', JSON.stringify(nextOptions));
+      await api.post('/pipeline-configs/save', {
+        pipelines: nextPipelines,
+        pipelineOptions: nextOptions,
+        deletedPipelines
+      });
+    } catch (err) {
+      console.warn('Save pipeline option to backend error:', err.message);
+    }
+  };
+
+  const handleCreateOwnerOption = (newOwner) => {
+    const oName = (newOwner || '').trim();
+    if (!oName) return;
+    if (!customOwners.some(o => o.toLowerCase() === oName.toLowerCase())) {
+      setCustomOwners(prev => [...prev, oName]);
+    }
+  };
+
+  // Active Sales Employees for Task & Activity Assignment
+  const activeSalesEmployees = useMemo(() => {
+    if (!employees || employees.length === 0) return [];
+    return employees.filter(emp => {
+      if (!emp) return false;
+      if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive') return false;
+
+      const roleName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
+      const department = (emp.department || '').toLowerCase().trim();
+      const designation = (emp.designation || '').toLowerCase().trim();
+
+      const isSales =
+        roleName === 'sales' ||
+        roleName.includes('sales') ||
+        roleName.includes('business development') ||
+        roleName.includes('bde') ||
+        department === 'sales' ||
+        department.includes('sales') ||
+        designation.includes('sales') ||
+        designation.includes('bde');
+
+      return isSales;
+    });
+  }, [employees]);
+
+  // Dynamic Available Employees for Deal Owner Dropdown (Active + Sales role only)
+  const availableAssignEmployees = useMemo(() => {
+    let list = [];
+    if (employees && employees.length > 0) {
+      list = employees.filter(emp => {
+        if (!emp) return false;
+        // Must be Active
+        if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive') {
+          return false;
+        }
+
+        const roleName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
+        const department = (emp.department || '').toLowerCase().trim();
+        const designation = (emp.designation || '').toLowerCase().trim();
+
+        const isSales =
+          roleName === 'sales' ||
+          roleName.includes('sales') ||
+          roleName.includes('business development') ||
+          roleName.includes('bde') ||
+          department === 'sales' ||
+          department.includes('sales') ||
+          designation.includes('sales') ||
+          designation.includes('bde');
+
+        return isSales;
+      });
+
+      // Ensure current deal owner is included if active
+      if (detailedDeal?.salesOwner) {
+        const curOwnerName = detailedDeal.salesOwner.trim().toLowerCase();
+        const alreadyIncluded = list.some(emp => {
+          const fn = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+          return fn === curOwnerName || (emp.name || '').trim().toLowerCase() === curOwnerName;
+        });
+        if (!alreadyIncluded) {
+          const matchedCur = employees.find(emp => {
+            if (!emp || emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive') return false;
+            const fn = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+            return fn === curOwnerName || (emp.name || '').trim().toLowerCase() === curOwnerName;
+          });
+          if (matchedCur) {
+            list.unshift(matchedCur);
+          }
+        }
+      }
+    }
+
+    // Fallback to ownerOptions if list is empty
+    if (list.length === 0 && ownerOptions && ownerOptions.length > 0) {
+      list = ownerOptions.map((name, i) => ({
+        _id: `owner-opt-${i}`,
+        firstName: name,
+        lastName: '',
+        designation: 'Sales Specialist',
+        department: 'Sales'
+      }));
+    }
+
+    if (!dealerSearchQuery.trim()) return list;
+
+    const q = dealerSearchQuery.trim().toLowerCase();
+    return list.filter(emp => {
+      const fName = `${emp.firstName || ''} ${emp.lastName || ''}`.toLowerCase();
+      const n = (emp.name || '').toLowerCase();
+      const des = (emp.designation || '').toLowerCase();
+      const dep = (emp.department || '').toLowerCase();
+      const em = (emp.email || '').toLowerCase();
+      return fName.includes(q) || n.includes(q) || des.includes(q) || dep.includes(q) || em.includes(q);
+    });
+  }, [employees, ownerOptions, dealerSearchQuery, detailedDeal?.salesOwner]);
+
+  // Dynamic Contact Options for Deal Association: Name with Email (or Phone if no email)
+  const contactOptions = useMemo(() => {
+    const map = new Map();
+
+    // Helper to sanitize placeholder values like '----', '---', '-', '—'
+    const sanitizeField = (str) => {
+      if (!str) return '';
+      const trimmed = String(str).trim();
+      if (/^[-—_.\s]+$/.test(trimmed)) return '';
+      // Also trim trailing or leading dashes/symbols if entered as "Bipin ----"
+      return trimmed.replace(/^[-—_.\s]+|[-—_.\s]+$/g, '').trim();
+    };
+
+    // 1. From Contacts list
+    (contacts || []).forEach(c => {
+      if (!c) return;
+      const firstName = sanitizeField(c.firstName);
+      const lastName = sanitizeField(c.lastName);
+      const rawFullName = sanitizeField(`${firstName} ${lastName}`);
+      const fallbackName = sanitizeField(c.name || c.clientName);
+      const name = rawFullName || fallbackName || '-';
+
+      const email = sanitizeField(c.email);
+      const phoneRaw = sanitizeField(c.phone);
+      const countryCode = sanitizeField(c.countryCode);
+      const phone = phoneRaw ? `${countryCode ? `${countryCode} ` : ''}${phoneRaw}`.trim() : '';
+
+      // If has email show email; if not, show phone; if neither show '-'
+      const contactInfo = email || phone || '-';
+      const label = `${name} - ${contactInfo}`;
+      const id = email || (phone ? phone : (c._id || label));
+
+      const uniqueKey = `${name.toLowerCase()}_${contactInfo.toLowerCase()}`;
+      if (!map.has(uniqueKey)) {
+        map.set(uniqueKey, {
+          id: id,
+          label: label,
+          contactId: c._id,
+          name: name !== '-' ? name : '',
+          email: email,
+          phone: phone,
+          rawContact: c
+        });
+      }
+    });
+
+    // 2. From Deals contacts (if any deal has a contact not already in contacts)
+    (deals || []).forEach(d => {
+      const email = sanitizeField(d.email || d.associatedContact);
+      const name = sanitizeField(d.clientName) || '-';
+      const phone = sanitizeField(d.phone);
+
+      const contactInfo = email || phone || '-';
+      if (name !== '-' || contactInfo !== '-') {
+        const uniqueKey = `${name.toLowerCase()}_${contactInfo.toLowerCase()}`;
+        if (!map.has(uniqueKey)) {
+          const existingByEmail = Array.from(map.values()).find(o => o.email && email && o.email.toLowerCase() === email.toLowerCase());
+          if (!existingByEmail) {
+            const label = `${name} - ${contactInfo}`;
+            const id = email || (phone ? phone : (d.associatedContact || label));
+            map.set(uniqueKey, {
+              id: id,
+              label: label,
+              name: name !== '-' ? name : '',
+              email: email,
+              phone: phone
+            });
+          }
+        }
+      }
+    });
+
+    return Array.from(map.values());
+  }, [contacts, deals]);
+
+  // Dynamic Contact Email Options for Company Owner Multi-Select with Badges (CRM Contacts ONLY)
+  const contactEmailOptions = useMemo(() => {
+    const map = new Map();
+
+    // 1. From Contacts
+    (contacts || []).forEach(c => {
+      if (!c) return;
+      const email = (c.email || '').trim();
+      const name = `${c.firstName || ''} ${c.lastName || ''}`.trim();
+      if (email) {
+        const lower = email.toLowerCase();
+        if (!map.has(lower)) {
+          map.set(lower, {
+            id: email,
+            email: email,
+            name: name || email.split('@')[0] || 'Contact',
+            company: c.company || '',
+            phone: c.phone || '',
+            contactId: c._id,
+            type: 'Contact'
+          });
+        }
+      }
+    });
+
+    // 2. From Deals contacts (client email or associated contact email)
+    (deals || []).forEach(d => {
+      const email = (d.email || d.associatedContact || '').trim();
+      if (email && email.includes('@')) {
+        const lower = email.toLowerCase();
+        if (!map.has(lower)) {
+          map.set(lower, {
+            id: email,
+            email: email,
+            name: d.clientName || email.split('@')[0] || 'Contact',
+            company: d.associatedCompany || d.dealName || '',
+            phone: d.phone || '',
+            type: 'Contact'
+          });
+        }
+      }
+    });
+
+    return Array.from(map.values());
+  }, [contacts, deals]);
+
+  // Dynamic Company Options for Deal Association
+  const companyOptions = useMemo(() => {
+    const compSet = new Set();
+    companies.forEach(c => {
+      if (c.name && c.name.trim()) compSet.add(c.name.trim());
+    });
+    contacts.forEach(c => {
+      if (c.company && c.company.trim() && c.company !== 'Direct Client') {
+        compSet.add(c.company.trim());
+      }
+    });
+    deals.forEach(d => {
+      if (d.associatedCompany && d.associatedCompany.trim()) compSet.add(d.associatedCompany.trim());
+      if (d.location && d.location.trim()) compSet.add(d.location.trim());
+    });
+    return Array.from(compSet);
+  }, [companies, contacts, deals]);
+
+  // New Deal Form State
+  const [formData, setFormData] = useState({
+    clientName: '',
+    pipeline: 'Initial',
+    stage: 'New',
+    dealType: 'New Business',
+    currency: '$',
+    expectedCloseDate: '',
+    dealValue: '',
+    salesOwner: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Artiflow' : 'Artiflow',
+    location: '',
+    dealName: '',
+    email: '',
+    phone: '',
+    associatedContact: '',
+    associatedCompany: ''
+  });
+
+
+
+  // Close menus on outer click
+  useEffect(() => {
+    const closeMenu = () => {
+      setActiveMenuId(null);
+      setMoveSubmenuDealId(null);
+      setActiveContactMenuId(null);
+      setMoveSubmenuContactId(null);
+      setActiveContactStatusDropdownId(null);
+      setIsDealsToolbarMenuOpen(false);
+      setIsSortDropdownOpen(false);
+      setIsOwnerDropdownOpen(false);
+      setIsDealStatusDropdownOpen(false);
+      setIsDateDropdownOpen(false);
+      setOwnerSearchQuery('');
+      setIsContactsToolbarMenuOpen(false);
+      setIsContactSortDropdownOpen(false);
+      setIsContactOwnerDropdownOpen(false);
+      setIsContactStatusDropdownOpen(false);
+      setIsContactDateDropdownOpen(false);
+      setContactOwnerSearchQuery('');
+      setActiveColMenuId(null);
+      setIsDealDetailsMenuOpen(false);
+      setIsContactDetailsMenuOpen(false);
+      setIsPipelineDropdownOpen(false);
+      setIsStageDropdownOpen(false);
+      setIsDealerDropdownOpen(false);
+      setDealerSearchQuery('');
+      setIsContactLeadStageDropdownOpen(false);
+      setIsContactLeadStatusDropdownOpen(false);
+      setIsMilestonePopoverOpen(false);
+      setIsContactAddedByPopoverOpen(false);
+      setIsDealAddedByPopoverOpen(false);
+    };
+    const handleClickOutsideCurrency = (e) => {
+      if (currencyRef.current && !currencyRef.current.contains(e.target)) {
+        setIsCurrencyOpen(false);
+      }
+    };
+    window.addEventListener('click', closeMenu);
+    document.addEventListener('mousedown', handleClickOutsideCurrency);
+    return () => {
+      window.removeEventListener('click', closeMenu);
+      document.removeEventListener('mousedown', handleClickOutsideCurrency);
+    };
+  }, []);
+
+  // Dynamic list of all deal owners (from sales team & existing deals)
+  const allDealOwners = useMemo(() => {
+    const ownerMap = new Map();
+    (ownerOptions || []).forEach(name => {
+      if (name && name.trim()) {
+        ownerMap.set(name.trim().toLowerCase(), name.trim());
+      }
+    });
+    (deals || []).forEach(d => {
+      if (d.salesOwner && d.salesOwner.trim()) {
+        const key = d.salesOwner.trim().toLowerCase();
+        if (!ownerMap.has(key)) {
+          ownerMap.set(key, d.salesOwner.trim());
+        }
+      }
+    });
+    return Array.from(ownerMap.values()).sort((a, b) => a.localeCompare(b));
+  }, [ownerOptions, deals]);
+
+  // Deal counts per owner for badge counts
+  const dealOwnerCounts = useMemo(() => {
+    const counts = {};
+    (deals || []).forEach(d => {
+      if (!isItemOwnedByUser(d, 'deal')) return;
+      const o = (d.salesOwner || 'Unassigned').trim();
+      counts[o] = (counts[o] || 0) + 1;
+      counts[o.toLowerCase()] = (counts[o.toLowerCase()] || 0) + 1;
+    });
+    return counts;
+  }, [deals, isItemOwnedByUser]);
+
+  const sortLabel = useMemo(() => {
+    switch (sortBy) {
+      case 'value_high': return 'Value: High to Low';
+      case 'value_low': return 'Value: Low to High';
+      case 'name_asc': case 'name': return 'Name: A - Z';
+      case 'name_desc': return 'Name: Z - A';
+      case 'date_asc': return 'Close Date: Earliest';
+      case 'date_desc': return 'Close Date: Latest';
+      case 'oldest': return 'Oldest first';
+      default: return 'Newest first';
+    }
+  }, [sortBy]);
+
+  const dateFilterLabel = useMemo(() => {
+    switch (dateFilter) {
+      case 'today': return 'Date: Today';
+      case 'this_week': return 'Date: This week';
+      case 'this_month': return 'Date: This month';
+      case 'next_30_days': return 'Date: Next 30 days';
+      case 'this_quarter': return 'Date: This quarter';
+      case 'this_year': return 'Date: This year';
+      case 'custom':
+        if (customDateStart && customDateEnd) {
+          return `${formatDateDDMMYYYY(customDateStart)} to ${formatDateDDMMYYYY(customDateEnd)}`;
+        }
+        if (customDateStart) return `From ${formatDateDDMMYYYY(customDateStart)}`;
+        if (customDateEnd) return `Until ${formatDateDDMMYYYY(customDateEnd)}`;
+        return 'Date: Custom';
+      default:
+        return 'All dates';
+    }
+  }, [dateFilter, customDateStart, customDateEnd]);
+
+  // Dynamic list of all deal statuses / stages for the status dropdown
+  const allDealStatuses = useMemo(() => {
+    const set = new Set();
+    (stages || []).forEach(s => {
+      const name = typeof s === 'string' ? s : (s.name || s.id);
+      if (name && name.trim()) set.add(name.trim());
+    });
+    (pipelines || []).forEach(p => {
+      const name = typeof p === 'string' ? p : (p.name || p.id);
+      if (name && name.trim()) set.add(name.trim());
+    });
+    (deals || []).forEach(d => {
+      if (d.stage && d.stage.trim()) set.add(d.stage.trim());
+      if (d.pipeline && d.pipeline.trim()) set.add(d.pipeline.trim());
+      if (d.status && d.status.trim()) set.add(d.status.trim());
+    });
+    return Array.from(set).filter(Boolean);
+  }, [stages, pipelines, deals]);
+
+  const dealOriginCounts = useMemo(() => {
+    const counts = { all: 0, domestic: 0, international: 0 };
+    (deals || []).forEach(d => {
+      if (!isItemOwnedByUser(d, 'deal')) return;
+      counts.all++;
+      const origin = (getDealContactOrigin(d) || 'Domestic').toLowerCase();
+      if (origin === 'international') {
+        counts.international++;
+      } else {
+        counts.domestic++;
+      }
+    });
+    return counts;
+  }, [deals, getDealContactOrigin, isItemOwnedByUser]);
+
+  const isAnyDealFilterActive = useMemo(() => {
+    return dealSearchQuery.trim() !== '' || ownerFilter !== 'all' || dealStatusFilter !== 'all' || dealOriginFilter !== 'all' || dateFilter !== 'all' || sortBy !== 'newest';
+  }, [dealSearchQuery, ownerFilter, dealStatusFilter, dealOriginFilter, dateFilter, sortBy]);
+
+  const handleResetDealFilters = () => {
+    setDealSearchQuery('');
+    setOwnerFilter('all');
+    setDealStatusFilter('all');
+    setDealOriginFilter('all');
+    setDateFilter('all');
+    setCustomDateStart('');
+    setCustomDateEnd('');
+    setSortBy('newest');
+    setIsSortDropdownOpen(false);
+    setIsOwnerDropdownOpen(false);
+    setIsDealStatusDropdownOpen(false);
+    setIsDealOriginDropdownOpen(false);
+    setIsDateDropdownOpen(false);
+  };
+
+  // Filter deals based on selected stage, owner, date criteria and sort criteria
+  const filteredDeals = useMemo(() => {
+    return deals.filter(deal => {
+      if (!isItemOwnedByUser(deal, 'deal')) {
+        return false;
+      }
+      if (dealSearchQuery.trim()) {
+        const q = dealSearchQuery.toLowerCase();
+        const clientName = (deal.clientName || '').toLowerCase();
+        const dealName = (deal.dealName || '').toLowerCase();
+        const email = (deal.email || '').toLowerCase();
+        const phone = (deal.phone || '').toLowerCase();
+        const location = (deal.location || '').toLowerCase();
+        const assocComp = (deal.associatedCompany || '').toLowerCase();
+        const assocCont = (deal.associatedContact || '').toLowerCase();
+        const salesOwner = (deal.salesOwner || '').toLowerCase();
+        if (
+          !clientName.includes(q) &&
+          !dealName.includes(q) &&
+          !email.includes(q) &&
+          !phone.includes(q) &&
+          !location.includes(q) &&
+          !assocComp.includes(q) &&
+          !assocCont.includes(q) &&
+          !salesOwner.includes(q)
+        ) {
+          return false;
+        }
+      }
+      if (ownerFilter !== 'all') {
+        const dOwner = (deal.salesOwner || '').trim().toLowerCase();
+        const fOwner = ownerFilter.trim().toLowerCase();
+        if (dOwner !== fOwner && !dOwner.includes(fOwner)) {
+          return false;
+        }
+      }
+      if (dealStatusFilter !== 'all') {
+        const sFilter = dealStatusFilter.toLowerCase();
+        const dStage = (deal.stage || '').toLowerCase();
+        const dPipe = (deal.pipeline || '').toLowerCase();
+        const dStatus = (deal.status || '').toLowerCase();
+        if (dStage !== sFilter && dPipe !== sFilter && dStatus !== sFilter) {
+          return false;
+        }
+      }
+      if (dealOriginFilter !== 'all') {
+        const dOrigin = (getDealContactOrigin(deal) || 'Domestic').toLowerCase();
+        if (dOrigin !== dealOriginFilter.toLowerCase()) {
+          return false;
+        }
+      }
+      if (selectedStageFilter !== 'all') {
+        const sFilter = selectedStageFilter.toLowerCase();
+        const dStage = (deal.stage || '').toLowerCase();
+        const dPipe = (deal.pipeline || '').toLowerCase();
+        if (dStage !== sFilter && dPipe !== sFilter) {
+          return false;
+        }
+      }
+      if (dateFilter !== 'all') {
+        const dealDate = parseDealDate(deal.expectedCloseDate) || parseDealDate(deal.createdAt) || parseDealDate(deal.date);
+        if (!dealDate) return false;
+        const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+        if (dateFilter === 'today') {
+          if (dealDate < startOfToday || dealDate > endOfToday) return false;
+        } else if (dateFilter === 'this_week') {
+          const firstDayOfWeek = new Date(startOfToday);
+          const day = firstDayOfWeek.getDay();
+          const diff = firstDayOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+          firstDayOfWeek.setDate(diff);
+          const lastDayOfWeek = new Date(firstDayOfWeek);
+          lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
+          lastDayOfWeek.setHours(23, 59, 59, 999);
+          if (dealDate < firstDayOfWeek || dealDate > lastDayOfWeek) return false;
+        } else if (dateFilter === 'this_month') {
+          if (dealDate.getMonth() !== now.getMonth() || dealDate.getFullYear() !== now.getFullYear()) return false;
+        } else if (dateFilter === 'next_30_days') {
+          const in30Days = new Date(startOfToday);
+          in30Days.setDate(in30Days.getDate() + 30);
+          in30Days.setHours(23, 59, 59, 999);
+          if (dealDate < startOfToday || dealDate > in30Days) return false;
+        } else if (dateFilter === 'this_quarter') {
+          const currentQuarter = Math.floor(now.getMonth() / 3);
+          const dealQuarter = Math.floor(dealDate.getMonth() / 3);
+          if (dealQuarter !== currentQuarter || dealDate.getFullYear() !== now.getFullYear()) return false;
+        } else if (dateFilter === 'this_year') {
+          if (dealDate.getFullYear() !== now.getFullYear()) return false;
+        } else if (dateFilter === 'custom') {
+          if (customDateStart) {
+            const start = new Date(customDateStart);
+            start.setHours(0, 0, 0, 0);
+            if (dealDate < start) return false;
+          }
+          if (customDateEnd) {
+            const end = new Date(customDateEnd);
+            end.setHours(23, 59, 59, 999);
+            if (dealDate > end) return false;
+          }
+        }
+      }
+      return true;
+    }).sort((a, b) => {
+      if (sortBy === 'value_high') return (Number(b.dealValue) || 0) - (Number(a.dealValue) || 0);
+      if (sortBy === 'value_low') return (Number(a.dealValue) || 0) - (Number(b.dealValue) || 0);
+      if (sortBy === 'name' || sortBy === 'name_asc') return (a.clientName || a.dealName || '').localeCompare(b.clientName || b.dealName || '');
+      if (sortBy === 'name_desc') return (b.clientName || b.dealName || '').localeCompare(a.clientName || a.dealName || '');
+      if (sortBy === 'date_asc') {
+        const da = parseDealDate(a.expectedCloseDate) || parseDealDate(a.createdAt) || new Date(0);
+        const db = parseDealDate(b.expectedCloseDate) || parseDealDate(b.createdAt) || new Date(0);
+        return da - db;
+      }
+      if (sortBy === 'date_desc') {
+        const da = parseDealDate(a.expectedCloseDate) || parseDealDate(a.createdAt) || new Date(0);
+        const db = parseDealDate(b.expectedCloseDate) || parseDealDate(b.createdAt) || new Date(0);
+        return db - da;
+      }
+      if (sortBy === 'oldest') {
+        const da = parseDealDate(a.createdAt) || parseDealDate(a.date) || new Date(0);
+        const db = parseDealDate(b.createdAt) || parseDealDate(b.date) || new Date(0);
+        return da - db;
+      }
+      // default: newest
+      const da = parseDealDate(a.createdAt) || parseDealDate(a.date) || new Date(0);
+      const db = parseDealDate(b.createdAt) || parseDealDate(b.date) || new Date(0);
+      return db - da;
+    });
+  }, [deals, selectedStageFilter, sortBy, ownerFilter, dealStatusFilter, dealOriginFilter, getDealContactOrigin, dateFilter, customDateStart, customDateEnd, dealSearchQuery, isItemOwnedByUser]);
+
+  // Dynamic badge counts for left navigation menu tabs
+  const activeDealsCount = useMemo(() => {
+    return deals.filter(d => isItemOwnedByUser(d, 'deal')).length;
+  }, [deals, isItemOwnedByUser]);
+
+  const activeContactsCount = useMemo(() => {
+    return contacts.filter(c => isItemOwnedByUser(c, 'contact')).length;
+  }, [contacts, isItemOwnedByUser]);
+
+  const activeCompaniesCount = useMemo(() => {
+    return companies.filter(c => isItemOwnedByUser(c, 'company')).length;
+  }, [companies, isItemOwnedByUser]);
+
+  const activeTasksCount = useMemo(() => {
+    return tasks.filter(t => isItemOwnedByUser(t, 'task')).length;
+  }, [tasks, isItemOwnedByUser]);
+
+  // Counts per pipeline
+  const pipelineCounts = useMemo(() => {
+    const counts = {};
+    pipelines.forEach(p => {
+      counts[p.name] = 0;
+      counts[p.id] = 0;
+    });
+    const activePipelineNames = new Set(pipelines.map(p => (p.name || p.id || '').toLowerCase()));
+    filteredDeals.forEach(d => {
+      const dealPipeline = (d.pipeline || '').trim().toLowerCase();
+      const dealStage = (d.stage || '').trim().toLowerCase();
+      const matchedP = pipelines.find(p =>
+        (p.name || '').trim().toLowerCase() === dealPipeline ||
+        (p.id || '').trim().toLowerCase() === dealPipeline ||
+        (p.name || '').trim().toLowerCase() === dealStage ||
+        (p.id || '').trim().toLowerCase() === dealStage
+      );
+      if (matchedP) {
+        counts[matchedP.name] = (counts[matchedP.name] || 0) + 1;
+        if (matchedP.id !== matchedP.name) {
+          counts[matchedP.id] = counts[matchedP.name];
+        }
+      } else if (pipelines.length > 0) {
+        const firstP = pipelines[0];
+        counts[firstP.name] = (counts[firstP.name] || 0) + 1;
+        if (firstP.id !== firstP.name) {
+          counts[firstP.id] = counts[firstP.name];
+        }
+      }
+    });
+    return counts;
+  }, [filteredDeals, pipelines]);
+
+  // Handle pipeline change (move deal to another pipeline)
+  const handleMovePipeline = async (dealId, nextPipeline, e) => {
+    if (e) e.stopPropagation();
+    try {
+      if (dealId && !dealId.toString().startsWith('deal-')) {
+        await api.put(`/deals/${dealId}`, { pipeline: nextPipeline });
+      }
+    } catch (err) {
+      console.warn('Move pipeline API sync:', err.message);
+    }
+    setDeals(prev =>
+      prev.map(d => (d._id === dealId ? { ...d, pipeline: nextPipeline } : d))
+    );
+    logActivity(dealId, {
+      type: 'deal',
+      title: 'Pipeline Moved',
+      content: `Moved deal to pipeline "${nextPipeline}".`
+    });
+    setActiveMenuId(null);
+    setMoveSubmenuDealId(null);
+  };
+
+  // Handle stage change (move deal)
+  const handleMoveStage = async (dealId, nextStage, e) => {
+    if (e) e.stopPropagation();
+    try {
+      if (dealId && !dealId.toString().startsWith('deal-')) {
+        await api.put(`/deals/${dealId}`, { stage: nextStage });
+      }
+    } catch (err) {
+      console.warn('Move stage API sync:', err.message);
+    }
+    setDeals(prev =>
+      prev.map(d => (d._id === dealId ? { ...d, stage: nextStage } : d))
+    );
+    logActivity(dealId, {
+      type: 'deal',
+      title: 'Stage Changed',
+      content: `Moved deal to stage "${nextStage}".`
+    });
+    setActiveMenuId(null);
+    setMoveSubmenuDealId(null);
+  };
+
+  // Handle contact stage change (move contact to another stage column)
+  const handleMoveContactStage = async (contactId, nextStage, e) => {
+    if (e) e.stopPropagation();
+    try {
+      if (contactId && !contactId.toString().startsWith('contact-')) {
+        await api.put(`/pipeline-contacts/${contactId}`, { leadStage: nextStage });
+      }
+    } catch (err) {
+      console.warn('Move contact stage API sync:', err.message);
+    }
+    setContacts(prev =>
+      prev.map(c => (c._id === contactId ? { ...c, leadStage: nextStage } : c))
+    );
+    logActivity(contactId, {
+      type: 'contact',
+      title: 'Stage Changed',
+      content: `Moved contact to stage "${nextStage}".`
+    }, true);
+    setActiveContactMenuId(null);
+    setMoveSubmenuContactId(null);
+  };
+
+  // Handle delete deal
+  const handleDeleteDeal = async (dealId, e) => {
+    if (e) e.stopPropagation();
+    if (!canDelete) {
+      alert('You do not have permission to delete deals.');
+      return;
+    }
+    if (window.confirm('Are you sure you want to delete this deal?')) {
+      const dealToDelete = deals.find(d => d._id === dealId);
+      try {
+        if (dealId && !dealId.toString().startsWith('deal-')) {
+          await api.delete(`/deals/${dealId}`);
+        }
+      } catch (err) {
+        console.warn('Delete deal API sync:', err.message);
+      }
+      setDeals(prev => prev.filter(d => d._id !== dealId));
+
+      if (dealToDelete) {
+        const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+        const matchingContact = contacts.find(c =>
+          (dealToDelete.associatedContact && c.email && c.email.toLowerCase() === dealToDelete.associatedContact.toLowerCase()) ||
+          (c.email && dealToDelete.email && c.email.toLowerCase() === dealToDelete.email.toLowerCase())
+        );
+        if (matchingContact) {
+          logActivity(matchingContact._id, {
+            type: 'deal',
+            title: 'Associated Deal Deleted',
+            content: `Deal "${dealToDelete.dealName || dealToDelete.clientName}" was deleted.`,
+            author: authorName
+          }, true);
+        }
+      }
+    }
+    setActiveMenuId(null);
+    setMoveSubmenuDealId(null);
+  };
+
+  // Drag and Drop handlers to move deals between pipelines
+  const handleDragStart = (e, dealId) => {
+    if (!canUpdate) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.setData('text/plain', dealId);
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedDealId(dealId);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedDealId(null);
+    setDragOverColumnId(null);
+  };
+
+  const handleDragOver = (e, pipelineId) => {
+    if (!canUpdate) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverColumnId !== pipelineId) {
+      setDragOverColumnId(pipelineId);
+    }
+  };
+
+  const handleDragLeave = (e, pipelineId) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    if (dragOverColumnId === pipelineId) {
+      setDragOverColumnId(null);
+    }
+  };
+
+  const handleDrop = async (e, targetPipelineName) => {
+    e.preventDefault();
+    if (!canUpdate) return;
+    const dealId = e.dataTransfer.getData('text/plain') || draggedDealId;
+    if (dealId) {
+      try {
+        if (dealId && !dealId.toString().startsWith('deal-')) {
+          await api.put(`/deals/${dealId}`, { pipeline: targetPipelineName });
+        }
+      } catch (err) {
+        console.warn('Drop move pipeline API sync:', err.message);
+      }
+      setDeals(prev =>
+        prev.map(d => (d._id === dealId ? { ...d, pipeline: targetPipelineName } : d))
+      );
+      logActivity(dealId, {
+        type: 'deal',
+        title: 'Pipeline Moved',
+        content: `Moved deal to pipeline "${targetPipelineName}".`
+      });
+    }
+    setDraggedDealId(null);
+    setDragOverColumnId(null);
+  };
+
+  // Activity popover hover handlers with screen bounds calculation & fixed positioning
+  const handleActivityMouseEnter = (id, type = 'deal', e) => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    if (e && e.currentTarget) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const popoverWidth = 530;
+      const popoverHeight = 250;
+      const fitsRight = rect.right + popoverWidth + 24 <= window.innerWidth;
+      const left = fitsRight ? rect.right + 12 : Math.max(10, rect.left - popoverWidth - 12);
+
+      let top = rect.top - 60;
+      if (top + popoverHeight > window.innerHeight - 20) {
+        top = window.innerHeight - popoverHeight - 20;
+      }
+      if (top < 15) {
+        top = 15;
+      }
+
+      const arrowTop = Math.min(Math.max(18, rect.top - top + 10), popoverHeight - 22);
+
+      setPopoverCoords({
+        top,
+        left,
+        placement: fitsRight ? 'right' : 'left',
+        arrowTop
+      });
+    }
+    if (type === 'contact') {
+      setHoveredActivityDealId(null);
+      setHoveredActivityContactId(id);
+    } else {
+      setHoveredActivityContactId(null);
+      setHoveredActivityDealId(id);
+    }
+  };
+
+  const handleActivityMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredActivityDealId(null);
+      setHoveredActivityContactId(null);
+    }, 250);
+  };
+
+  // View Deal Detail
+  const handleOpenViewDeal = (deal, e) => {
+    if (e) e.stopPropagation();
+    setViewingDeal(deal);
+    setActiveMenuId(null);
+    setMoveSubmenuDealId(null);
+  };
+
+  // Edit Deal
+  const handleOpenEditDeal = (deal, e) => {
+    if (e) e.stopPropagation();
+    setEditingDeal(deal);
+    setModalStage(deal.stage || 'New');
+    setFormData({
+      clientName: deal.clientName || '',
+      pipeline: deal.pipeline || 'Sales Pipeline',
+      stage: deal.stage || 'New',
+      dealType: deal.dealType || 'New Business',
+      currency: deal.currency || '$',
+      expectedCloseDate: formatDateDDMMYYYY(deal.expectedCloseDate),
+      dealValue: deal.dealValue || '',
+      salesOwner: deal.salesOwner || 'Artiflow',
+      location: deal.location || '',
+      dealName: deal.dealName || '',
+      email: deal.email || '',
+      phone: deal.phone || '',
+      associatedContact: deal.associatedContact || deal.clientName || '',
+      associatedCompany: deal.associatedCompany || deal.company || ''
+    });
+    setActiveMenuId(null);
+    setMoveSubmenuDealId(null);
+    setShowCreateModal(true);
+  };
+
+  // Open modal with preselected pipeline / stage
+  const handleOpenAddDeal = (selectedPipeline) => {
+    let targetPipeline = selectedPipeline;
+    if (!targetPipeline || targetPipeline === 'New') {
+      targetPipeline = (pipelines && pipelines.length > 0 && pipelines.some(p => p.name.toLowerCase() === 'initial'))
+        ? 'Initial'
+        : (pipelines && pipelines[0] ? pipelines[0].name : 'Initial');
+    }
+    const dateString = getFutureDateDDMMYYYY(14);
+
+    setEditingDeal(null);
+    setModalStage('New');
+    setFormData({
+      clientName: '',
+      pipeline: targetPipeline || 'Initial',
+      stage: 'New',
+      dealType: 'New Business',
+      currency: '$',
+      expectedCloseDate: dateString,
+      dealValue: '',
+      salesOwner: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Artiflow' : 'Artiflow',
+      location: '',
+      dealName: '',
+      email: '',
+      phone: '',
+      associatedContact: '',
+      associatedCompany: ''
+    });
+    setShowCreateModal(true);
+  };
+
+  // Create deal submit
+  const handleCreateDealSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.clientName || !formData.clientName.trim()) {
+      alert('Please provide a deal name');
+      return;
+    }
+    if (!formData.associatedContact || !formData.associatedContact.trim()) {
+      alert('Please select or provide an associated contact for this deal');
+      return;
+    }
+
+    const selectedStage = (modalStage || formData.stage || 'New').trim();
+    const selectedDealType = (formData.dealType || 'New Business').trim();
+    const selectedPipeline = (formData.pipeline || 'Sales Pipeline').trim();
+    const selectedOwner = (formData.salesOwner || 'Artiflow').trim();
+
+    // Auto add pipeline to pipelines list if new
+    if (!pipelines.some(p => p.name.toLowerCase() === selectedPipeline.toLowerCase())) {
+      const badgeClasses = ['new', 'hot', 'cold', 'won', 'old', 'custom'];
+      const randomBadge = badgeClasses[pipelines.length % badgeClasses.length];
+      setPipelines(prev => [...prev, { id: selectedPipeline, name: selectedPipeline, badgeClass: randomBadge }]);
+    }
+    if (!pipelineOptions.some(p => p.toLowerCase() === selectedPipeline.toLowerCase())) {
+      setPipelineOptions(prev => [...prev, selectedPipeline]);
+    }
+
+    // Auto add stage to stages list if custom
+    if (!stages.some(s => s.id.toLowerCase() === selectedStage.toLowerCase())) {
+      const badgeClasses = ['custom', 'new', 'hot', 'cold', 'won'];
+      const randomBadge = badgeClasses[stages.length % badgeClasses.length];
+      setStages(prev => [...prev, { id: selectedStage, name: selectedStage, badgeClass: randomBadge, isCustom: true }]);
+    }
+
+    // Auto add deal type to dealTypes list if custom
+    if (!dealTypes.some(t => t.toLowerCase() === selectedDealType.toLowerCase())) {
+      setDealTypes(prev => [...prev, selectedDealType]);
+    }
+
+    // Auto add owner to customOwners list if custom
+    if (!ownerOptions.some(o => o.toLowerCase() === selectedOwner.toLowerCase())) {
+      setCustomOwners(prev => [...prev, selectedOwner]);
+    }
+
+    const matchedOwnerEmp = (employees || []).find(emp => {
+      if (!emp) return false;
+      const fName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+      const n = (emp.name || '').trim().toLowerCase();
+      const s = selectedOwner.toLowerCase();
+      return fName === s || n === s || (emp.email && emp.email.toLowerCase() === s);
+    });
+
+    if (editingDeal) {
+      const updatePayload = {
+        clientName: formData.clientName.trim(),
+        dealName: formData.dealName?.trim() || formData.clientName.trim(),
+        location: formData.location || editingDeal.location || '',
+        dealValue: Number(formData.dealValue) || 0,
+        currency: formData.currency || '$',
+        expectedCloseDate: formData.expectedCloseDate ? formatDateDDMMYYYY(formData.expectedCloseDate) : editingDeal.expectedCloseDate,
+        salesOwner: selectedOwner,
+        assignedTo: matchedOwnerEmp?._id || editingDeal.assignedTo || null,
+        pipeline: selectedPipeline,
+        dealType: selectedDealType,
+        stage: selectedStage,
+        email: formData.email || editingDeal.email,
+        phone: formData.phone || editingDeal.phone,
+        associatedContact: formData.associatedContact || '',
+        associatedCompany: formData.associatedCompany || ''
+      };
+
+      const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+      const changes = [];
+      if (editingDeal.stage !== selectedStage) changes.push(`Stage changed from "${editingDeal.stage}" to "${selectedStage}"`);
+      if (editingDeal.pipeline !== selectedPipeline) changes.push(`Pipeline moved to "${selectedPipeline}"`);
+      if (Number(editingDeal.dealValue) !== Number(formData.dealValue)) changes.push(`Deal value updated to ${formData.currency || '$'}${Number(formData.dealValue || 0).toLocaleString()}`);
+      if (editingDeal.salesOwner !== selectedOwner) {
+        if (editingDeal.salesOwner) {
+          changes.push(`Deal owner changed from "${editingDeal.salesOwner}" to "${selectedOwner}"`);
+        } else {
+          changes.push(`Deal assigned to ${selectedOwner}`);
+        }
+      }
+      if (formData.associatedContact && editingDeal.associatedContact !== formData.associatedContact) changes.push(`Associated contact: ${formData.associatedContact}`);
+      if (formData.associatedCompany && editingDeal.associatedCompany !== formData.associatedCompany) changes.push(`Associated company: ${formData.associatedCompany}`);
+      const changeText = changes.length > 0 ? changes.join(' • ') : 'Deal details updated.';
+
+      logActivity(editingDeal._id, {
+        type: 'deal',
+        title: 'Deal Updated',
+        content: changeText,
+        author: authorName
+      });
+
+      try {
+        if (editingDeal._id && !editingDeal._id.toString().startsWith('deal-')) {
+          const res = await api.put(`/deals/${editingDeal._id}`, updatePayload);
+          if (res.data) {
+            setDeals(prev => prev.map(d => (d._id === editingDeal._id ? { ...res.data, assignedTo: matchedOwnerEmp || res.data.assignedTo } : d)));
+            setEditingDeal(null);
+            setShowCreateModal(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Update deal API error:', err.message);
+      }
+
+      setDeals(prev =>
+        prev.map(d =>
+          d._id === editingDeal._id
+            ? {
+              ...d,
+              ...updatePayload,
+              assignedTo: matchedOwnerEmp || d.assignedTo
+            }
+            : d
+        )
+      );
+      setEditingDeal(null);
+      setShowCreateModal(false);
+      return;
+    }
+
+    const newDealPayload = {
+      clientName: formData.clientName.trim(),
+      dealName: formData.dealName?.trim() || formData.clientName.trim(),
+      location: formData.location || '',
+      dealValue: Number(formData.dealValue) || 0,
+      currency: formData.currency || '$',
+      expectedCloseDate: formData.expectedCloseDate ? formatDateDDMMYYYY(formData.expectedCloseDate) : getFutureDateDDMMYYYY(14),
+      salesOwner: selectedOwner,
+      assignedTo: matchedOwnerEmp?._id || null,
+      pipeline: selectedPipeline,
+      dealType: selectedDealType,
+      stage: selectedStage,
+      email: formData.email || `${formData.clientName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
+      phone: formData.phone || '+1 555-0100',
+      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(formData.clientName)}&background=0284c7&color=fff`,
+      type: selectedStage === 'Won' ? 'Won' : selectedStage === 'Lost' ? 'Lost' : 'Open',
+      associatedContact: formData.associatedContact || '',
+      associatedCompany: (formData.associatedCompany && formData.associatedCompany !== 'Direct Client') ? formData.associatedCompany.trim() : '',
+      addedBy: (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System'
+    };
+
+    // Auto-create / link contact if it does not already exist
+    const contactIdentifier = (formData.associatedContact || '').trim();
+    const clientName = (formData.clientName || '').trim();
+    const dealEmail = (formData.email || '').trim();
+
+    const existingContact = contacts.find(c =>
+      (contactIdentifier && c.email && c.email.toLowerCase() === contactIdentifier.toLowerCase()) ||
+      (dealEmail && c.email && c.email.toLowerCase() === dealEmail.toLowerCase()) ||
+      (`${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === clientName.toLowerCase()) ||
+      (contactIdentifier && `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === contactIdentifier.toLowerCase())
+    );
+
+    if (!existingContact && (contactIdentifier || clientName)) {
+      let fName = '';
+      let lName = '';
+      const nameToParse = (contactIdentifier && !contactIdentifier.includes('@')) ? contactIdentifier : clientName;
+      if (nameToParse && !nameToParse.includes('@')) {
+        const parts = nameToParse.split(/\s+/);
+        fName = parts[0] || 'Contact';
+        lName = parts.slice(1).join(' ') || '';
+      } else if (contactIdentifier && contactIdentifier.includes('@')) {
+        const userPart = contactIdentifier.split('@')[0];
+        const parts = userPart.split(/[._-]/);
+        fName = parts[0] ? parts[0].charAt(0).toUpperCase() + parts[0].slice(1) : 'Contact';
+        lName = parts.slice(1).join(' ') || '';
+      } else {
+        fName = 'Contact';
+      }
+
+      const defaultStageName = effectiveContactStages.length > 0
+        ? (typeof effectiveContactStages[0] === 'string' ? effectiveContactStages[0] : (effectiveContactStages[0].name || effectiveContactStages[0].id || 'Lead'))
+        : (leadStages.length > 0 ? leadStages[0] : 'Lead');
+
+      const contactPayload = {
+        firstName: fName,
+        lastName: lName,
+        email: dealEmail || (contactIdentifier.includes('@') ? contactIdentifier : `${fName.toLowerCase()}.${(lName || 'client').toLowerCase()}@example.com`),
+        countryCode: '+1',
+        phone: formData.phone || '+1 555-0100',
+        contactSource: 'Direct Reference',
+        leadStage: defaultStageName,
+        leadStatus: 'New',
+        owner: selectedOwner || 'Artiflow',
+        addedBy: (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System',
+        company: (formData.associatedCompany && formData.associatedCompany.trim() && formData.associatedCompany !== 'Direct Client') ? formData.associatedCompany.trim() : ''
+      };
+
+      try {
+        const resContact = await api.post('/pipeline-contacts', contactPayload);
+        const savedNewContact = resContact.data || {
+          _id: `contact-${Date.now()}`,
+          ...contactPayload,
+          createdDate: formatDateDDMMYYYY(new Date()),
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(fName + ' ' + lName)}&background=0284c7&color=fff`
+        };
+
+        setContacts(prev => [savedNewContact, ...prev.filter(c => c._id !== savedNewContact._id)]);
+      } catch (err) {
+        console.warn('Auto create contact API error:', err.message);
+        const fallbackContact = {
+          _id: `contact-${Date.now()}`,
+          ...contactPayload,
+          createdDate: formatDateDDMMYYYY(new Date()),
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(fName + ' ' + lName)}&background=0284c7&color=fff`
+        };
+        setContacts(prev => [fallbackContact, ...prev.filter(c => c._id !== fallbackContact._id)]);
+      }
+    }
+
+    // Auto-create company if provided and does not exist
+    const compName = (formData.associatedCompany || '').trim();
+    if (compName && compName !== 'Direct Client') {
+      const existingCompany = companies.find(c => c.name && c.name.toLowerCase() === compName.toLowerCase());
+      if (!existingCompany) {
+        const companyPayload = {
+          name: compName,
+          domain: `${compName.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`,
+          owner: selectedOwner || 'Artiflow',
+          industry: 'Software & Tech',
+          country: 'United States',
+          state: '',
+          city: formData.location || '',
+          postalCode: ''
+        };
+        try {
+          const resComp = await api.post('/pipeline-companies', companyPayload);
+          if (resComp.data) {
+            setCompanies(prev => [resComp.data, ...prev]);
+          } else {
+            const fallbackCompany = {
+              _id: `comp-${Date.now()}`,
+              ...companyPayload,
+              createdDate: formatDateDDMMYYYY(new Date())
+            };
+            setCompanies(prev => [fallbackCompany, ...prev]);
+          }
+        } catch (err) {
+          console.warn('Auto create company API error:', err.message);
+          const fallbackCompany = {
+            _id: `comp-${Date.now()}`,
+            ...companyPayload,
+            createdDate: formatDateDDMMYYYY(new Date())
+          };
+          setCompanies(prev => [fallbackCompany, ...prev]);
+        }
+      }
+    }
+
+    let savedDeal = null;
+    try {
+      const res = await api.post('/deals', newDealPayload);
+      if (res.data) {
+        savedDeal = res.data;
+        setDeals(prev => [res.data, ...prev]);
+      }
+    } catch (err) {
+      console.warn('Create deal API error:', err.message);
+    }
+
+    if (!savedDeal) {
+      const fallbackDeal = {
+        _id: `deal-${Date.now()}`,
+        ...newDealPayload
+      };
+      savedDeal = fallbackDeal;
+      setDeals(prev => [fallbackDeal, ...prev]);
+    }
+
+    const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+    const dealTitle = savedDeal.dealName || savedDeal.clientName || 'Associated Deal';
+    logActivity(savedDeal._id, {
+      type: 'deal',
+      title: 'Deal Created',
+      content: `Created deal "${dealTitle}" in stage "${savedDeal.stage || 'New'}" with value ${savedDeal.currency || '₹'} ${Number(savedDeal.dealValue || 0).toLocaleString()}. Assigned to ${savedDeal.salesOwner || 'Sales Specialist'}.`,
+      author: authorName
+    });
+
+    if (savedDeal.associatedContact) {
+      logActivity(savedDeal._id, {
+        type: 'contact',
+        title: 'Associated Contact Linked',
+        content: `Linked contact ${savedDeal.associatedContact} with this deal.`,
+        author: authorName
+      });
+    }
+
+    if (savedDeal.associatedCompany) {
+      logActivity(savedDeal._id, {
+        type: 'company',
+        title: 'Associated Company Linked',
+        content: `Linked company "${savedDeal.associatedCompany}" with this deal.`,
+        author: authorName
+      });
+    }
+
+    const targetContact = detailedContact || contacts.find(c =>
+      (c.email && savedDeal.associatedContact && c.email.toLowerCase() === savedDeal.associatedContact.toLowerCase()) ||
+      (`${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === (savedDeal.clientName || '').toLowerCase()) ||
+      (savedDeal.associatedContact && `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === savedDeal.associatedContact.toLowerCase())
+    );
+
+    if (targetContact && targetContact._id) {
+      logActivity(targetContact._id, {
+        type: 'deal',
+        title: 'Deal Registered & Linked',
+        content: `Deal "${dealTitle}" (${savedDeal.currency || '₹'}${Number(savedDeal.dealValue || 0).toLocaleString()} • ${savedDeal.stage || 'New'}) registered and linked with contact.`,
+        author: authorName,
+        createdAt: new Date().toISOString()
+      }, true);
+    }
+
+    setShowCreateModal(false);
+  };
+
+  // Quick export functionality
+  const handleExport = () => {
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      ['Client Name,Deal Name,Location,Deal Value,Expected Close Date,Sales Owner,Stage']
+        .concat(
+          filteredDeals.map(
+            d => `"${d.clientName}","${d.dealName}","${d.location}",${d.dealValue},"${d.expectedCloseDate}","${d.salesOwner}","${d.stage}"`
+          )
+        )
+        .join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `pipeline_deals_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Contacts Management Handlers
+  const handlePhoneChange = (e) => {
+    const digitsOnly = e.target.value.replace(/\D/g, '');
+    const maxDigits = selectedCountry?.maxDigits || 10;
+    setContactFormData(prev => ({
+      ...prev,
+      phone: digitsOnly.slice(0, maxDigits)
+    }));
+  };
+
+  const handleSelectCountry = (country) => {
+    setSelectedCountry(country);
+    setIsCountryCodeOpen(false);
+    setContactFormData(prev => ({
+      ...prev,
+      countryCode: country.code,
+      phone: prev.phone.slice(0, country.maxDigits)
+    }));
+  };
+
+  const handleLeadStageChangeOrAdd = (val) => {
+    const trimmed = (val || '').trim();
+    if (!trimmed) return;
+    setContactFormData(prev => ({ ...prev, leadStage: trimmed }));
+
+    // Instantly create the stage column in contactStages if not present
+    setContactStages(prev => {
+      const current = prev || [];
+      if (current.some(s => (s.name || s.id || '').toLowerCase() === trimmed.toLowerCase())) {
+        return current;
+      }
+      const badgeClasses = ['new', 'hot', 'cold', 'won', 'custom'];
+      const randomBadge = badgeClasses[current.length % badgeClasses.length];
+      const newStageObj = { id: trimmed, name: trimmed, badgeClass: randomBadge, isCustom: true };
+      const nextStages = [...current, newStageObj];
+      try {
+        localStorage.setItem('crm_contact_stages', JSON.stringify(nextStages));
+        let del = JSON.parse(localStorage.getItem('crm_deleted_stages') || '[]');
+        del = del.filter(d => d !== trimmed.toLowerCase());
+        localStorage.setItem('crm_deleted_stages', JSON.stringify(del));
+        api.post('/pipeline-configs/save', {
+          contactStages: nextStages,
+          deletedStages: del
+        }).catch(() => { });
+      } catch (e) { }
+      return nextStages;
+    });
+
+    setLeadStages(prev => Array.from(new Set([...(prev || []), trimmed])));
+  };
+
+  const handleOpenCreateContact = () => {
+    setEditingContact(null);
+    setSelectedCountry(COUNTRY_CODES[0]);
+    const defaultStage = effectiveContactStages.length > 0
+      ? (typeof effectiveContactStages[0] === 'string' ? effectiveContactStages[0] : (effectiveContactStages[0].name || effectiveContactStages[0].id))
+      : 'Lead';
+    setContactFormData({
+      firstName: '',
+      lastName: '',
+      email: '',
+      countryCode: '+1',
+      phone: '',
+      origin: 'Domestic',
+      contactSource: contactSources[0] || 'Website Form',
+      leadStage: defaultStage,
+      leadStatus: leadStatuses[0] || 'New',
+      owner: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Artiflow' : 'Artiflow',
+      addedBy: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Admin System' : 'Admin System',
+      company: ''
+    });
+    if (contactStages.length === 0 && defaultStage) {
+      handleLeadStageChangeOrAdd(defaultStage);
+    }
+    setShowCreateContactModal(true);
+  };
+
+  const handleOpenEditContact = (contact, e) => {
+    if (e) e.stopPropagation();
+    setEditingContact(contact);
+    const foundCountry = COUNTRY_CODES.find(c => c.code === contact.countryCode) || COUNTRY_CODES[0];
+    setSelectedCountry(foundCountry);
+    setContactFormData({
+      firstName: contact.firstName || '',
+      lastName: contact.lastName || '',
+      email: contact.email || '',
+      countryCode: contact.countryCode || '+1',
+      phone: contact.phone || '',
+      origin: contact.origin || 'Domestic',
+      contactSource: contact.contactSource || '',
+      leadStage: contact.leadStage || '',
+      leadStatus: contact.leadStatus || '',
+      owner: contact.owner || 'Artiflow',
+      company: contact.company || ''
+    });
+    setActiveContactMenuId(null);
+    setShowCreateContactModal(true);
+  };
+
+  const handleUpdateContactLeadStatus = async (contactId, newStatus, e) => {
+    if (e) e.stopPropagation();
+    setContacts(prev => prev.map(c => c._id === contactId ? { ...c, leadStatus: newStatus } : c));
+    setActiveContactStatusDropdownId(null);
+    setIsContactLeadStatusDropdownOpen(false);
+
+    try {
+      if (contactId && !contactId.toString().startsWith('contact-')) {
+        await api.put(`/pipeline-contacts/${contactId}`, { leadStatus: newStatus });
+      }
+    } catch (err) {
+      console.warn('Update contact leadStatus error:', err.message);
+    }
+  };
+
+  const handleDeleteContact = async (contactId, e) => {
+    if (e) e.stopPropagation();
+    if (!canDelete) {
+      alert('You do not have permission to delete contacts.');
+      return;
+    }
+    const contactToDelete = contacts.find(c => c._id === contactId);
+    if (window.confirm('Are you sure you want to delete this contact?')) {
+      let deletedContacts = [];
+      try {
+        deletedContacts = JSON.parse(localStorage.getItem('crm_deleted_contacts') || '[]');
+      } catch (err) { }
+      if (contactId) deletedContacts.push(contactId.toString());
+      if (contactToDelete && contactToDelete.email) deletedContacts.push(contactToDelete.email.toLowerCase());
+      if (contactToDelete && contactToDelete.firstName) deletedContacts.push(`${contactToDelete.firstName} ${contactToDelete.lastName || ''}`.trim().toLowerCase());
+      const uniqueDeletedContacts = Array.from(new Set(deletedContacts));
+      try {
+        localStorage.setItem('crm_deleted_contacts', JSON.stringify(uniqueDeletedContacts));
+      } catch (err) { }
+
+      try {
+        if (contactId && !contactId.toString().startsWith('contact-')) {
+          await api.delete(`/pipeline-contacts/${contactId}`);
+        }
+      } catch (err) {
+        console.warn('Delete contact API sync:', err.message);
+      }
+
+      setContacts(prev => prev.filter(c => c._id !== contactId));
+      if (contactToDelete) {
+        const targetEmail = (contactToDelete.email || '').toLowerCase();
+        const targetFullName = `${contactToDelete.firstName || ''} ${contactToDelete.lastName || ''}`.trim().toLowerCase();
+        setDeals(prev =>
+          prev.map(d =>
+            (d.associatedContact && (d.associatedContact.toLowerCase() === targetEmail || d.associatedContact.toLowerCase() === targetFullName))
+              ? { ...d, associatedContact: '' }
+              : d
+          )
+        );
+      }
+    }
+    setActiveContactMenuId(null);
+  };
+
+  const handleContactSubmit = async (e) => {
+    e.preventDefault();
+    if (!contactFormData.firstName.trim() || !contactFormData.lastName.trim()) {
+      alert('Please enter both First Name and Last Name');
+      return;
+    }
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const trimmedEmail = (contactFormData.email || '').trim().toLowerCase();
+    if (trimmedEmail && !emailRegex.test(trimmedEmail)) {
+      alert('Please enter a valid email address.');
+      return;
+    }
+
+    if (trimmedEmail) {
+      const isDuplicate = contacts.some(c =>
+        (c.email || '').trim().toLowerCase() === trimmedEmail &&
+        (!editingContact || (c._id && editingContact._id && c._id.toString() !== editingContact._id.toString()))
+      );
+      if (isDuplicate) {
+        alert(`A contact with the email "${contactFormData.email.trim()}" already exists. Duplicate email is not allowed.`);
+        return;
+      }
+    }
+
+    const requiredPhoneDigits = selectedCountry?.maxDigits || 10;
+    const cleanPhone = (contactFormData.phone || '').replace(/\D/g, '');
+    if (cleanPhone && cleanPhone.length !== requiredPhoneDigits) {
+      alert(`Please enter a valid ${requiredPhoneDigits}-digit phone number for ${selectedCountry?.country || 'the selected country'}.`);
+      return;
+    }
+
+    const trimmedStage = (contactFormData.leadStage || '').trim() || (effectiveContactStages[0]?.name || 'Lead');
+
+    // Auto-register any new custom dropdown items
+    if (!contactSources.includes(contactFormData.contactSource)) {
+      setContactSources(prev => [...prev, contactFormData.contactSource]);
+    }
+    if (!leadStages.includes(trimmedStage)) {
+      setLeadStages(prev => [...prev, trimmedStage]);
+    }
+    if (!leadStatuses.includes(contactFormData.leadStatus)) {
+      setLeadStatuses(prev => [...prev, contactFormData.leadStatus]);
+    }
+
+    // Ensure contactStages has this stage column and un-delete it if previously in deletedStages
+    if (!contactStages.some(s => (s.name || s.id || '').toLowerCase() === trimmedStage.toLowerCase())) {
+      const newStageObj = { id: trimmedStage, name: trimmedStage, badgeClass: 'new', isCustom: true };
+      const nextStages = [...contactStages, newStageObj];
+      setContactStages(nextStages);
+      try {
+        localStorage.setItem('crm_contact_stages', JSON.stringify(nextStages));
+        let del = JSON.parse(localStorage.getItem('crm_deleted_stages') || '[]');
+        del = del.filter(d => d !== trimmedStage.toLowerCase());
+        localStorage.setItem('crm_deleted_stages', JSON.stringify(del));
+        api.post('/pipeline-configs/save', {
+          contactStages: nextStages,
+          deletedStages: del
+        }).catch(() => { });
+      } catch (e) { }
+    }
+
+    // Un-delete this contact from crm_deleted_contacts if it was previously deleted
+    try {
+      let delContacts = JSON.parse(localStorage.getItem('crm_deleted_contacts') || '[]');
+      const cleanEmail = contactFormData.email.trim().toLowerCase();
+      const cleanFullName = `${contactFormData.firstName.trim()} ${contactFormData.lastName.trim()}`.toLowerCase();
+      delContacts = delContacts.filter(d =>
+        d &&
+        d.toLowerCase() !== cleanEmail &&
+        d.toLowerCase() !== cleanFullName &&
+        (editingContact ? d !== editingContact._id?.toString() : true)
+      );
+      localStorage.setItem('crm_deleted_contacts', JSON.stringify(delContacts));
+    } catch (e) { }
+
+    const payload = {
+      firstName: contactFormData.firstName.trim(),
+      lastName: contactFormData.lastName.trim(),
+      email: contactFormData.email.trim(),
+      countryCode: contactFormData.countryCode,
+      phone: contactFormData.phone,
+      origin: contactFormData.origin || 'Domestic',
+      contactSource: contactFormData.contactSource || 'Website Form',
+      leadStage: trimmedStage,
+      leadStatus: contactFormData.leadStatus || 'New',
+      owner: contactFormData.owner || '',
+      addedBy: contactFormData.addedBy || contactFormData.owner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Admin System'),
+      company: contactFormData.company.trim() || ''
+    };
+
+    let savedContact = null;
+    if (editingContact) {
+      try {
+        if (editingContact._id && !editingContact._id.toString().startsWith('contact-')) {
+          const res = await api.put(`/pipeline-contacts/${editingContact._id}`, payload);
+          if (res.data) {
+            savedContact = res.data;
+            setContacts(prev => prev.map(c => (c._id === editingContact._id ? res.data : c)));
+          }
+        }
+      } catch (err) {
+        console.warn('Update contact API error:', err.message);
+        const errMsg = err.response?.data?.message || 'Failed to update contact. Please check your inputs.';
+        alert(errMsg);
+        return;
+      }
+
+      if (!savedContact) {
+        savedContact = { ...editingContact, ...payload };
+        setContacts(prev =>
+          prev.map(c =>
+            c._id === editingContact._id ? { ...c, ...payload } : c
+          )
+        );
+      }
+    } else {
+      try {
+        const res = await api.post('/pipeline-contacts', payload);
+        if (res.data) {
+          savedContact = res.data;
+          setContacts(prev => [res.data, ...prev.filter(c => c._id !== res.data._id)]);
+        }
+      } catch (err) {
+        console.warn('Create contact API error:', err.message);
+        const errMsg = err.response?.data?.message || 'Failed to create contact. Please check your inputs.';
+        alert(errMsg);
+        return;
+      }
+    }
+
+    if (detailedDealId && savedContact) {
+      const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+      logActivity(detailedDealId, {
+        type: 'contact',
+        title: 'Associated Contact Added',
+        content: `Created and linked contact "${savedContact.firstName} ${savedContact.lastName}" (${savedContact.email}) to this deal.`,
+        author: authorName
+      });
+      setDeals(prev => prev.map(d => d._id === detailedDealId ? {
+        ...d,
+        associatedContact: savedContact.email,
+        email: savedContact.email || d.email,
+        phone: savedContact.phone ? `${savedContact.countryCode || '+1'} ${savedContact.phone}` : d.phone,
+        associatedCompany: (!d.associatedCompany || d.associatedCompany === 'Direct Client') && savedContact.company ? savedContact.company : d.associatedCompany
+      } : d));
+      try {
+        if (detailedDealId && !detailedDealId.toString().startsWith('deal-')) {
+          api.put(`/deals/${detailedDealId}`, {
+            associatedContact: savedContact.email,
+            email: savedContact.email,
+            phone: savedContact.phone ? `${savedContact.countryCode || '+1'} ${savedContact.phone}` : undefined
+          }).catch(() => { });
+        }
+      } catch (e) { }
+    }
+
+    if (showCreateModal && savedContact) {
+      setFormData(prev => ({
+        ...prev,
+        associatedContact: savedContact.email || prev.associatedContact,
+        email: savedContact.email || prev.email,
+        phone: savedContact.phone ? `${savedContact.countryCode || '+1'} ${savedContact.phone}` : prev.phone,
+        clientName: prev.clientName || `${savedContact.firstName} ${savedContact.lastName}`.trim(),
+        associatedCompany: (savedContact.company && savedContact.company !== 'Direct Client') ? savedContact.company : prev.associatedCompany
+      }));
+    }
+
+    setShowCreateContactModal(false);
+    setEditingContact(null);
+  };
+
+  const handleExportContacts = () => {
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      ['First Name,Last Name,Email,Phone,Company,Lead Stage,Lead Status,Contact Source,Type,Owner,Created Date']
+        .concat(
+          filteredContacts.map(
+            c => `"${c.firstName}","${c.lastName}","${c.email}","${c.countryCode} ${c.phone}","${c.company || ''}","${c.leadStage}","${c.leadStatus}","${c.contactSource}","${c.contactType}","${c.owner}","${c.createdDate || ''}"`
+          )
+        )
+        .join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `contacts_crm_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Drag and drop for contacts across stages
+  const handleContactDragStart = (e, contactId) => {
+    if (!canUpdate) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.setData('text/plain', contactId);
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedContactId(contactId);
+  };
+
+  const handleContactDragEnd = () => {
+    setDraggedContactId(null);
+    setDragOverContactColumnId(null);
+  };
+
+  const handleContactDragOver = (e, stageId) => {
+    if (!canUpdate) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverContactColumnId !== stageId) {
+      setDragOverContactColumnId(stageId);
+    }
+  };
+
+  const handleContactDragLeave = (e, stageId) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    if (dragOverContactColumnId === stageId) {
+      setDragOverContactColumnId(null);
+    }
+  };
+
+  const handleContactDrop = async (e, targetStageName) => {
+    e.preventDefault();
+    if (!canUpdate) return;
+    const contactId = e.dataTransfer.getData('text/plain') || draggedContactId;
+    if (contactId) {
+      try {
+        if (contactId && !contactId.toString().startsWith('contact-')) {
+          await api.put(`/pipeline-contacts/${contactId}`, { leadStage: targetStageName });
+        }
+      } catch (err) {
+        console.warn('Move contact stage API sync:', err.message);
+      }
+      setContacts(prev =>
+        prev.map(c => (c._id === contactId ? { ...c, leadStage: targetStageName } : c))
+      );
+    }
+    setDraggedContactId(null);
+    setDragOverContactColumnId(null);
+  };
+
+  const handleChangeDealStage = async (newStage) => {
+    if (!detailedDeal) return;
+    try {
+      if (detailedDeal._id && !detailedDeal._id.toString().startsWith('deal-')) {
+        await api.put(`/deals/${detailedDeal._id}`, { stage: newStage });
+      }
+    } catch (err) {
+      console.warn('Change deal stage API sync:', err.message);
+    }
+    setDeals(prev =>
+      prev.map(d => (d._id === detailedDeal._id ? { ...d, stage: newStage } : d))
+    );
+    const newAct = {
+      id: `act-${Date.now()}`,
+      type: 'activity',
+      author: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Admin' : 'Admin',
+      title: `Stage updated to ${newStage}`,
+      content: `Moved deal stage to ${newStage} in pipeline ${detailedDeal.pipeline}.`,
+      time: 'Just now',
+      date: formatDateDDMMYYYY(new Date())
+    };
+    setDealActivities(prev => ({
+      ...prev,
+      [detailedDeal._id]: [newAct, ...(prev[detailedDeal._id] || [])]
+    }));
+  };
+
+  // --------------------------------------------------------------------------
+  // Company Management Handlers
+  // --------------------------------------------------------------------------
+  const handleOpenCreateCompany = () => {
+    setEditingCompany(null);
+    setCompanyFormData({
+      name: '',
+      domain: '',
+      owner: [],
+      industry: 'Software & Tech',
+      country: 'United States',
+      state: '',
+      city: '',
+      postalCode: ''
+    });
+    setShowCreateCompanyModal(true);
+  };
+
+  const handleOpenEditCompany = (company, e) => {
+    if (e) e.stopPropagation();
+    setEditingCompany(company);
+    let initialOwner = [];
+    if (Array.isArray(company.owner)) {
+      initialOwner = company.owner.filter(Boolean);
+    } else if (typeof company.owner === 'string' && company.owner.trim()) {
+      initialOwner = company.owner.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    setCompanyFormData({
+      name: company.name || '',
+      domain: company.domain || '',
+      owner: initialOwner,
+      industry: company.industry || 'Software & Tech',
+      country: company.country || 'United States',
+      state: company.state || '',
+      city: company.city || '',
+      postalCode: company.postalCode || ''
+    });
+    setActiveCompanyMenuId(null);
+    setShowCreateCompanyModal(true);
+  };
+
+  const handleDeleteCompany = async (companyId, e) => {
+    if (e) e.stopPropagation();
+    if (!canDelete) {
+      alert('You do not have permission to delete companies.');
+      return;
+    }
+    if (window.confirm('Are you sure you want to delete this company?')) {
+      try {
+        if (companyId && !companyId.toString().startsWith('comp-')) {
+          await api.delete(`/pipeline-companies/${companyId}`);
+        }
+      } catch (err) {
+        console.warn('Delete company API sync:', err.message);
+      }
+      setCompanies(prev => prev.filter(c => c._id !== companyId));
+    }
+    setActiveCompanyMenuId(null);
+  };
+
+  const handleCompanySubmit = async (e) => {
+    e.preventDefault();
+    if (!companyFormData.name.trim()) {
+      alert('Please enter a company name');
+      return;
+    }
+
+    if (companyFormData.domain && companyFormData.domain.trim() && !isValidCompanyDomain(companyFormData.domain)) {
+      alert('Please enter a valid company domain.');
+      return;
+    }
+
+    // Auto-register any new custom dropdown items
+    if (!industryOptions.includes(companyFormData.industry)) {
+      setIndustryOptions(prev => [...prev, companyFormData.industry]);
+    }
+    if (!countryListOptions.includes(companyFormData.country)) {
+      setCountryListOptions(prev => [...prev, companyFormData.country]);
+    }
+
+    const ownerValue = Array.isArray(companyFormData.owner)
+      ? companyFormData.owner.filter(Boolean).join(', ')
+      : (companyFormData.owner || '');
+
+    const payload = {
+      name: companyFormData.name.trim(),
+      domain: companyFormData.domain.trim(),
+      owner: ownerValue || 'Artiflow',
+      industry: companyFormData.industry,
+      country: companyFormData.country,
+      state: companyFormData.state.trim(),
+      city: companyFormData.city.trim(),
+      postalCode: companyFormData.postalCode.trim()
+    };
+
+    let savedCompanyName = payload.name;
+    if (editingCompany) {
+      try {
+        if (editingCompany._id && !editingCompany._id.toString().startsWith('comp-')) {
+          const res = await api.put(`/pipeline-companies/${editingCompany._id}`, payload);
+          if (res.data) {
+            setCompanies(prev => prev.map(c => (c._id === editingCompany._id ? res.data : c)));
+            savedCompanyName = res.data.name || payload.name;
+          }
+        }
+      } catch (err) {
+        console.warn('Update company API error:', err.message);
+      }
+
+      if (!savedCompanyName) {
+        setCompanies(prev =>
+          prev.map(c =>
+            c._id === editingCompany._id ? { ...c, ...payload } : c
+          )
+        );
+      }
+    } else {
+      try {
+        const res = await api.post('/pipeline-companies', payload);
+        if (res.data) {
+          setCompanies(prev => [res.data, ...prev]);
+          savedCompanyName = res.data.name || payload.name;
+        }
+      } catch (err) {
+        console.warn('Create company API error:', err.message);
+      }
+
+      if (!savedCompanyName) {
+        const newCompany = {
+          _id: `comp-${Date.now()}`,
+          ...payload,
+          createdDate: formatDateDDMMYYYY(new Date())
+        };
+        setCompanies(prev => [newCompany, ...prev]);
+      }
+    }
+
+    // Automatically associate selected contact emails & their deals with this company
+    const selectedOwnerEmails = Array.isArray(companyFormData.owner)
+      ? companyFormData.owner.map(e => e.trim().toLowerCase()).filter(Boolean)
+      : (companyFormData.owner ? [companyFormData.owner.trim().toLowerCase()] : []);
+
+    if (selectedOwnerEmails.length > 0 && savedCompanyName) {
+      setContacts(prev => prev.map(c => {
+        const cEmail = (c.email || '').trim().toLowerCase();
+        if (selectedOwnerEmails.includes(cEmail)) {
+          return { ...c, company: savedCompanyName };
+        }
+        return c;
+      }));
+
+      // Async sync to backend for all matched contacts
+      contacts.forEach(async (c) => {
+        const cEmail = (c.email || '').trim().toLowerCase();
+        if (selectedOwnerEmails.includes(cEmail) && c._id && !c._id.toString().startsWith('cont-')) {
+          try {
+            await api.put(`/pipeline-contacts/${c._id}`, { ...c, company: savedCompanyName });
+          } catch (err) {
+            console.warn('Sync contact company association:', err.message);
+          }
+        }
+      });
+
+      // Update associated deals for these contacts
+      setDeals(prev => prev.map(d => {
+        const dEmail = (d.email || d.associatedContact || '').trim().toLowerCase();
+        const matchesContact = selectedOwnerEmails.includes(dEmail) || contacts.some(c => selectedOwnerEmails.includes((c.email || '').trim().toLowerCase()) && (c._id === d.associatedContactId || c._id === d.contactId));
+        if (matchesContact && (!d.associatedCompany || d.associatedCompany === 'Direct Client' || !d.company)) {
+          if (d._id && !d._id.toString().startsWith('deal-sample-') && !d._id.toString().startsWith('deal-')) {
+            api.put(`/deals/${d._id}`, { company: savedCompanyName, associatedCompany: savedCompanyName }).catch(() => { });
+          }
+          return { ...d, associatedCompany: savedCompanyName, company: savedCompanyName };
+        }
+        return d;
+      }));
+    }
+
+    if (showCreateContactModal) {
+      setContactFormData(prev => ({ ...prev, company: savedCompanyName }));
+    }
+    if (showCreateModal) {
+      setFormData(prev => ({ ...prev, associatedCompany: savedCompanyName }));
+    }
+    if (detailedDealId && savedCompanyName) {
+      const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+      logActivity(detailedDealId, {
+        type: 'company',
+        title: 'Company Registered & Linked',
+        content: `Company "${savedCompanyName}" registered and linked with deal.`,
+        author: authorName,
+        createdAt: new Date().toISOString()
+      }, false);
+      setDeals(prev => prev.map(d => d._id === detailedDealId ? {
+        ...d,
+        associatedCompany: savedCompanyName
+      } : d));
+      if (detailedDealId && !detailedDealId.toString().startsWith('deal-sample-') && !detailedDealId.toString().startsWith('deal-')) {
+        api.put(`/deals/${detailedDealId}`, { company: savedCompanyName, associatedCompany: savedCompanyName }).catch(() => { });
+      }
+    }
+    if (detailedContactId && savedCompanyName) {
+      const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+      logActivity(detailedContactId, {
+        type: 'company',
+        title: 'Company Registered & Linked',
+        content: `Company "${savedCompanyName}" registered and linked with contact.`,
+        author: authorName,
+        createdAt: new Date().toISOString()
+      }, true);
+      setContacts(prev => prev.map(c => c._id === detailedContactId ? { ...c, company: savedCompanyName } : c));
+      if (detailedContactId && !detailedContactId.toString().startsWith('contact-')) {
+        api.put(`/pipeline-contacts/${detailedContactId}`, { company: savedCompanyName }).catch(() => { });
+      }
+    }
+
+    setShowCreateCompanyModal(false);
+    setEditingCompany(null);
+  };
+
+  const handleExportCompanies = () => {
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      ['Company Name,Domain,Owner,Industry,Country,State,City,Postal Code,Created Date']
+        .concat(
+          filteredCompanies.map(
+            c => `"${c.name}","${c.domain || ''}","${c.owner || ''}","${c.industry || ''}","${c.country || ''}","${c.state || ''}","${c.city || ''}","${c.postalCode || ''}","${c.createdDate || ''}"`
+          )
+        )
+        .join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `crm_companies_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportTasks = () => {
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      ['Title,Description,Status,Priority,Type,Assignee,Due Date,Associated Deal,Associated Contact']
+        .concat(
+          filteredTasks.map(
+            t => `"${(t.title || '').replace(/"/g, '""')}","${(t.description || '').replace(/"/g, '""')}","${t.completed ? 'Completed' : t.status || 'Pending'}","${t.priority || 'Medium'}","${t.type || 'Follow-up'}","${(t.assignee || '').replace(/"/g, '""')}","${t.dueDate || ''}","${(t.associatedDealName || '').replace(/"/g, '""')}","${(t.associatedContactName || '').replace(/"/g, '""')}"`
+          )
+        )
+        .join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `crm_tasks_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (countryCodeRef.current && !countryCodeRef.current.contains(event.target)) {
+        setIsCountryCodeOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  if (!isLoading && !canRead) {
+    return (
+      <div className="pipeline-page-wrapper" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '80vh' }}>
+        <div style={{ maxWidth: '480px', width: '100%', background: '#fff', padding: '40px', borderRadius: '16px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', textAlign: 'center', border: '1px solid #fee2e2' }}>
+          <div style={{ width: '64px', height: '64px', background: '#fef2f2', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', color: '#dc2626' }}>
+            <AlertCircle size={32} />
+          </div>
+          <h2 style={{ fontSize: '20px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>Access Restricted</h2>
+          <p style={{ color: '#4b5563', fontSize: '14px', lineHeight: '1.6', marginBottom: '20px' }}>
+            Your role does not have permission to access the Pipeline & CRM module. Please contact your system administrator or Sales Head to request access.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pipeline-page-wrapper">
+      {/* ------------------------------------------------------------------
+          1. Left Navigation Tabs Sub-Sidebar (hidden when in deal or contact details view)
+          ------------------------------------------------------------------ */}
+      {!(activeTab === 'deals' && detailedDeal) && !(activeTab === 'contacts' && detailedContact) && (
+        <aside className={`pipeline-sub-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+          <div className="pipeline-sub-sidebar-header">
+            {!isSidebarCollapsed && <span className="pipeline-sub-sidebar-title">Menu</span>}
+            <button
+              type="button"
+              className="pipeline-sidebar-toggle-btn"
+              onClick={() => setIsSidebarCollapsed(prev => !prev)}
+              title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {isSidebarCollapsed ? <ChevronsRight size={15} /> : <ChevronsLeft size={15} />}
+            </button>
+          </div>
+
+          <ul className="pipeline-sub-sidebar-menu">
+            {SIDEBAR_TABS.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <li
+                  key={tab.id}
+                  className={`pipeline-sub-sidebar-item ${isActive ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    setDetailedDealId(null);
+                    setDetailedContactId(null);
+                  }}
+                  title={isSidebarCollapsed ? tab.label : ''}
+                >
+                  <div className="pipeline-sub-sidebar-item-left">
+                    <Icon size={16} className="pipeline-sub-sidebar-icon" />
+                    {!isSidebarCollapsed && <span>{tab.label}</span>}
+                  </div>
+                  {!isSidebarCollapsed && tab.id === 'deals' && (
+                    <span className="pipeline-sub-sidebar-count">{activeDealsCount}</span>
+                  )}
+                  {!isSidebarCollapsed && tab.id === 'contacts' && (
+                    <span className="pipeline-sub-sidebar-count">{activeContactsCount}</span>
+                  )}
+                  {!isSidebarCollapsed && tab.id === 'companies' && (
+                    <span className="pipeline-sub-sidebar-count">{activeCompaniesCount}</span>
+                  )}
+                  {!isSidebarCollapsed && tab.id === 'tasks' && (
+                    <span className="pipeline-sub-sidebar-count">{activeTasksCount}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </aside>
+      )}
+
+      {/* ------------------------------------------------------------------
+          2. Main Content Area
+          ------------------------------------------------------------------ */}
+      <main className="pipeline-main-content">
+        {/* DEALS TAB (Pipeline Management Board or 3-Section Deal Activity Detail View) */}
+        {activeTab === 'deals' && (
+          (detailedDealId && isLoading) ? (
+            renderDetailSkeleton()
+          ) : detailedDeal ? (
+            <div className="pipeline-detail-view-container">
+              {/* Top Header Bar */}
+              <div className="pipeline-detail-top-nav">
+                <div className="pipeline-detail-nav-left">
+                  <button
+                    type="button"
+                    className="pipeline-detail-back-btn"
+                    onClick={() => {
+                      setDetailedDealId(null);
+                      setDetailedContactId(null);
+                    }}
+                    title="Back to Pipeline Board"
+                  >
+                    <ChevronsLeft size={16} />
+                    <span>Back to Deals</span>
+                  </button>
+
+                  <div className="pipeline-detail-title-group">
+                    <div className="pipeline-card-avatar" style={{ width: '38px', height: '38px', fontSize: '15px' }}>
+                      {detailedDeal.clientName.charAt(0)}
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h2 className="pipeline-detail-deal-title">{detailedDeal.clientName}</h2>
+                        <span className={`pipeline-stage-badge ${detailedDeal.stage === 'New' ? 'new' : detailedDeal.stage === 'Hot' ? 'hot' : detailedDeal.stage === 'Won' ? 'won' : 'lost'}`}>
+                          {detailedDeal.stage}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '3px', flexWrap: 'wrap' }}>
+                        {dealDisplayLocation !== '-' && (
+                          <><MapPin size={11} /> {dealDisplayLocation} • </>
+                        )}
+                        {(() => {
+                          const dealCompany = getDealCompany(detailedDeal);
+                          return dealCompany ? <><Building2 size={11} /> {dealCompany} • </> : null;
+                        })()}
+                        {detailedDeal.pipeline} • {detailedDeal.dealType || 'New Business'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pipeline-detail-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <NotificationBell filterType="CRM" />
+                </div>
+              </div>
+
+              {/* 3-Section Split Body */}
+              <div className="pipeline-detail-split-body three-sections">
+                {/* 1. LEFT SECTION: Deal Details, Project Details & Payment Details */}
+                <div className="pipeline-detail-col-deal">
+                  <div className="pipeline-detail-card-panel">
+                    {/* Accordion 1: Deal Details */}
+                    <div className="pipeline-accordion-section">
+                      <div
+                        className="pipeline-accordion-header"
+                        onClick={() => setDealAccordionState(prev => ({ ...prev, deal: !prev.deal }))}
+                      >
+                        <div className="pipeline-accordion-title-wrap">
+                          <span className="pipeline-accordion-title-icon">
+                            <Tag size={12} strokeWidth={2.5} />
+                          </span>
+                          <span>Deal Details</span>
+                        </div>
+
+                        <div className="pipeline-accordion-actions" onClick={e => e.stopPropagation()}>
+                          <div style={{ position: 'relative' }}>
+                            <button
+                              type="button"
+                              className="pipeline-card-more-btn"
+                              style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: '#64748b', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsDealDetailsMenuOpen(prev => !prev);
+                              }}
+                              title="Deal Options"
+                            >
+                              <MoreHorizontal size={16} />
+                            </button>
+
+                            {isDealDetailsMenuOpen && (
+                              <div
+                                className="pipeline-card-dropdown-menu"
+                                style={{ top: 'calc(100% + 4px)', right: '0', minWidth: '150px', zIndex: 90 }}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  className="pipeline-card-menu-item"
+                                  onClick={() => {
+                                    setIsDealDetailsMenuOpen(false);
+                                    handleOpenEditDeal(detailedDeal);
+                                  }}
+                                >
+                                  <div className="pipeline-card-menu-item-left">
+                                    <Edit2 size={13} style={{ color: '#64748b' }} />
+                                    <span>Edit</span>
+                                  </div>
+                                </button>
+                                <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                <button
+                                  type="button"
+                                  className="pipeline-card-menu-item danger"
+                                  onClick={() => {
+                                    setIsDealDetailsMenuOpen(false);
+                                    handleDeleteDeal(detailedDeal._id);
+                                    setDetailedDealId(null);
+                                  }}
+                                >
+                                  <div className="pipeline-card-menu-item-left">
+                                    <Trash2 size={13} />
+                                    <span>Delete</span>
+                                  </div>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            className={`pipeline-accordion-toggle-btn ${dealAccordionState.deal ? 'open' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDealAccordionState(prev => ({ ...prev, deal: !prev.deal }));
+                            }}
+                            title={dealAccordionState.deal ? 'Collapse Section' : 'Expand Section'}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={`pipeline-accordion-body ${dealAccordionState.deal ? '' : 'collapsed'}`}>
+                        <div className="pipeline-detail-kv-grid">
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Deal Name</span>
+                            <span className="pipeline-detail-v-val">
+                              {(() => {
+                                const raw = detailedDeal.dealName || detailedDeal.clientName || '';
+                                const dt = (detailedDeal.dealType || 'New Business').trim();
+                                const regex = new RegExp(`\\s*-\\s*${dt}$`, 'i');
+                                if (regex.test(raw)) {
+                                  return raw.replace(regex, '').trim();
+                                }
+                                return raw.replace(/\s*-\s*New Business$/i, '').trim();
+                              })()}
+                            </span>
+                          </div>
+
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Company</span>
+                            <span className="pipeline-detail-v-val">
+                              {getDealCompany(detailedDeal) || '—'}
+                            </span>
+                          </div>
+
+                          {/* Interactive Stage (formerly Pipeline) Pill Badge with Dropdown */}
+                          <div className="pipeline-detail-kv-row" style={{ position: 'relative' }}>
+                            <span className="pipeline-detail-k-label">Stage</span>
+                            <div style={{ position: 'relative', display: 'inline-block' }}>
+                              <button
+                                type="button"
+                                className="pipeline-pill-badge-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsPipelineDropdownOpen(prev => !prev);
+                                }}
+                                title="Click to switch stage"
+                              >
+                                <span>{detailedDeal.pipeline || 'Sales Pipeline'}</span>
+                                <ChevronDown size={11} />
+                              </button>
+
+                              {isPipelineDropdownOpen && (
+                                <div
+                                  className="pipeline-card-dropdown-menu"
+                                  style={{ top: 'calc(100% + 4px)', right: 0, minWidth: '190px', zIndex: 120 }}
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  <div style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                    Select Stage
+                                  </div>
+                                  {pipelines.map(p => {
+                                    const isSelected = (detailedDeal.pipeline || 'Sales Pipeline') === p.name;
+                                    return (
+                                      <button
+                                        key={p.id}
+                                        type="button"
+                                        className={`pipeline-card-menu-item ${isSelected ? 'active' : ''}`}
+                                        onClick={async () => {
+                                          try {
+                                            if (detailedDeal._id && !detailedDeal._id.toString().startsWith('deal-sample-')) {
+                                              await api.put(`/deals/${detailedDeal._id}`, { pipeline: p.name });
+                                            }
+                                          } catch (err) {
+                                            console.warn('Update deal pipeline API error:', err.message);
+                                          }
+                                          setDeals(prev => prev.map(d => d._id === detailedDeal._id ? { ...d, pipeline: p.name } : d));
+                                          logActivity(detailedDeal._id, {
+                                            type: 'deal',
+                                            title: 'Pipeline Stage Updated',
+                                            content: `Pipeline changed to "${p.name}".`
+                                          });
+                                          setIsPipelineDropdownOpen(false);
+                                        }}
+                                      >
+                                        <div className="pipeline-card-menu-item-left">
+                                          <Tag size={13} style={{ color: isSelected ? '#0284c7' : '#64748b' }} />
+                                          <span style={{ fontWeight: isSelected ? 700 : 500 }}>{p.name}</span>
+                                        </div>
+                                        {isSelected && (
+                                          <CheckCircle size={13} style={{ color: '#0284c7', marginLeft: 'auto' }} />
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Interactive Status (formerly Stage) Pill Badge with Dropdown */}
+                          <div className="pipeline-detail-kv-row" style={{ position: 'relative' }}>
+                            <span className="pipeline-detail-k-label">Status</span>
+                            <div style={{ position: 'relative', display: 'inline-block' }}>
+                              <button
+                                type="button"
+                                className={`pipeline-stage-pill-badge-btn ${detailedDeal.stage === 'New' ? 'new' : detailedDeal.stage === 'Hot' ? 'hot' : detailedDeal.stage === 'Won' ? 'won' : detailedDeal.stage === 'Lost' ? 'lost' : 'custom'}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsStageDropdownOpen(prev => !prev);
+                                }}
+                                title="Click to change status"
+                              >
+                                <span>{detailedDeal.stage}</span>
+                                <ChevronDown size={11} />
+                              </button>
+
+                              {isStageDropdownOpen && (
+                                <div
+                                  className="pipeline-card-dropdown-menu"
+                                  style={{ top: 'calc(100% + 4px)', right: 0, minWidth: '170px', zIndex: 120 }}
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  <div style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                    Select Status
+                                  </div>
+                                  {stages.map(s => {
+                                    const isSelected = detailedDeal.stage === s.name;
+                                    return (
+                                      <button
+                                        key={s.id}
+                                        type="button"
+                                        className={`pipeline-card-menu-item ${isSelected ? 'active' : ''}`}
+                                        onClick={async () => {
+                                          try {
+                                            if (detailedDeal._id && !detailedDeal._id.toString().startsWith('deal-sample-')) {
+                                              await api.put(`/deals/${detailedDeal._id}`, { stage: s.name });
+                                            }
+                                          } catch (err) {
+                                            console.warn('Update deal stage API error:', err.message);
+                                          }
+                                          setDeals(prev => prev.map(d => d._id === detailedDeal._id ? { ...d, stage: s.name } : d));
+                                          logActivity(detailedDeal._id, {
+                                            type: 'deal',
+                                            title: 'Status Updated',
+                                            content: `Status updated to "${s.name}".`
+                                          });
+                                          setIsStageDropdownOpen(false);
+                                        }}
+                                      >
+                                        <div className="pipeline-card-menu-item-left">
+                                          <span className={`pipeline-stage-badge ${s.badgeClass || 'new'}`} style={{ fontSize: '10.5px', padding: '1px 6px' }}>
+                                            {s.name}
+                                          </span>
+                                        </div>
+                                        {isSelected && (
+                                          <CheckCircle size={13} style={{ color: '#0284c7', marginLeft: 'auto' }} />
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Deal Value</span>
+                            <span className="pipeline-detail-v-val" style={{ fontWeight: 700, color: '#0284c7' }}>
+                              {detailedDeal.currency || '$'} {Number(detailedDeal.dealValue).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Deal Type</span>
+                            <span className="pipeline-detail-v-val">{detailedDeal.dealType || 'New Business'}</span>
+                          </div>
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Expected Close Date</span>
+                            <span className="pipeline-detail-v-val">{formatDateDDMMYYYY(detailedDeal.expectedCloseDate)}</span>
+                          </div>
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Location / Territory</span>
+                            <span className="pipeline-detail-v-val">{dealDisplayLocation}</span>
+                          </div>
+
+                          {/* Interactive Dealer Name Pill Badge with Hover / Click Popover */}
+                          <div className="pipeline-detail-kv-row" style={{ position: 'relative' }}>
+                            <span className="pipeline-detail-k-label">Deal Owner</span>
+                            <div style={{ position: 'relative', display: 'inline-block' }}>
+                              <button
+                                type="button"
+                                className={`pipeline-owner-pill-badge-btn ${isDealerDropdownOpen ? 'active' : ''}`}
+                                onMouseEnter={(e) => {
+                                  if (isDealerDropdownOpen) return;
+                                  if (dealerPopoverTimeoutRef.current) clearTimeout(dealerPopoverTimeoutRef.current);
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setDealerPopoverCoords({
+                                    top: Math.max(12, rect.top - 12),
+                                    left: rect.right + 12
+                                  });
+                                  setIsDealerPopoverOpen(true);
+                                }}
+                                onMouseLeave={() => {
+                                  dealerPopoverTimeoutRef.current = setTimeout(() => {
+                                    setIsDealerPopoverOpen(false);
+                                  }, 180);
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (dealerPopoverTimeoutRef.current) clearTimeout(dealerPopoverTimeoutRef.current);
+                                  setIsDealerPopoverOpen(false);
+                                  setIsDealerDropdownOpen(prev => !prev);
+                                  setDealerSearchQuery('');
+                                }}
+                              >
+                                <div className="pipeline-owner-pill-avatar">
+                                  {(detailedDeal.salesOwner || 'Akhil Verma').charAt(0)}
+                                </div>
+                                <span>{detailedDeal.salesOwner || 'Akhil Verma'}</span>
+                                <ChevronDown size={10} style={{ opacity: 0.6, transform: isDealerDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                              </button>
+
+                              {isDealerPopoverOpen && (() => {
+                                const ownerEmp = matchedOwnerEmployee;
+                                const ownerFullName = detailedDeal.salesOwner || (ownerEmp ? `${ownerEmp.firstName || ''} ${ownerEmp.lastName || ''}`.trim() : '') || 'Deal Specialist';
+                                const ownerDesignation = ownerEmp?.designation || (typeof ownerEmp?.role === 'string' ? ownerEmp?.role : ownerEmp?.role?.name) || 'Senior Deal Specialist';
+                                const isOwnerActive = ownerEmp ? (ownerEmp.isActive !== false && ownerEmp.status !== 'Inactive') : true;
+                                const ownerEmail = ownerEmp?.officialEmail || ownerEmp?.email || (detailedDeal.salesOwner ? `${detailedDeal.salesOwner.toLowerCase().replace(/\s+/g, '.')}@bhoomi.com` : '—');
+                                const ownerPhone = ownerEmp?.phone || ownerEmp?.mobile || ownerEmp?.phoneNumber || ownerEmp?.alternatePhone || '—';
+                                const ownerDepartment = ownerEmp?.department || ownerEmp?.dept || 'Sales & Operations';
+                                const rawAssignedDate = detailedDeal.assignedDate || detailedDeal.createdAt || detailedDeal.createdDate || detailedDeal.date;
+                                const ownerAssignedDate = formatISTDateTime(rawAssignedDate || new Date());
+
+                                return (
+                                  <div
+                                    className="pipeline-dealer-hover-popover outside-popover"
+                                    style={{
+                                      position: 'fixed',
+                                      top: `${dealerPopoverCoords.top}px`,
+                                      left: `${dealerPopoverCoords.left}px`,
+                                      zIndex: 99999
+                                    }}
+                                    onMouseEnter={() => {
+                                      if (dealerPopoverTimeoutRef.current) clearTimeout(dealerPopoverTimeoutRef.current);
+                                      setIsDealerPopoverOpen(true);
+                                    }}
+                                    onMouseLeave={() => {
+                                      dealerPopoverTimeoutRef.current = setTimeout(() => {
+                                        setIsDealerPopoverOpen(false);
+                                      }, 180);
+                                    }}
+                                    onClick={e => e.stopPropagation()}
+                                  >
+                                    <div className="pipeline-dealer-popover-header">
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                                        <div className="pipeline-detail-clean-svg-icon contact" style={{ width: '32px', height: '32px', minWidth: '32px' }}>
+                                          <User size={16} strokeWidth={2} />
+                                        </div>
+                                        <div style={{ overflow: 'hidden', minWidth: 0 }}>
+                                          <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                            {ownerFullName}
+                                          </h4>
+                                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                            {ownerDesignation}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <span
+                                        className={`pipeline-stage-badge ${isOwnerActive ? 'won' : 'lost'}`}
+                                        style={{
+                                          marginLeft: 'auto',
+                                          fontSize: '10px',
+                                          padding: '2px 8px',
+                                          lineHeight: '14px',
+                                          height: '18px',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          borderRadius: '10px',
+                                          fontWeight: 600,
+                                          flexShrink: 0
+                                        }}
+                                      >
+                                        {isOwnerActive ? 'Active' : 'Inactive'}
+                                      </span>
+                                    </div>
+
+                                    <div className="pipeline-dealer-popover-body">
+                                      <div className="pipeline-dealer-popover-row">
+                                        <div
+                                          className="pipeline-dealer-popover-icon-box"
+                                          data-tooltip="Email"
+                                          title="Email"
+                                        >
+                                          <Mail size={13} style={{ color: '#0284c7', flexShrink: 0 }} />
+                                        </div>
+                                        {ownerEmail && ownerEmail !== '—' && ownerEmail !== '-' ? (
+                                          <a
+                                            href={`mailto:${ownerEmail}`}
+                                            style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#0284c7' }}
+                                            title={ownerEmail}
+                                          >
+                                            {ownerEmail}
+                                          </a>
+                                        ) : (
+                                          <span style={{ color: '#64748b' }}>—</span>
+                                        )}
+                                      </div>
+
+                                      <div className="pipeline-dealer-popover-row">
+                                        <div
+                                          className="pipeline-dealer-popover-icon-box"
+                                          data-tooltip="Phone"
+                                          title="Phone"
+                                        >
+                                          <Phone size={13} style={{ color: '#16a34a', flexShrink: 0 }} />
+                                        </div>
+                                        {ownerPhone && ownerPhone !== '—' && ownerPhone !== '-' ? (
+                                          <a
+                                            href={`tel:${ownerPhone.replace(/\s+/g, '')}`}
+                                            style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#16a34a' }}
+                                            title={ownerPhone}
+                                          >
+                                            {ownerPhone}
+                                          </a>
+                                        ) : (
+                                          <span style={{ color: '#64748b' }}>—</span>
+                                        )}
+                                      </div>
+
+                                      <div className="pipeline-dealer-popover-row">
+                                        <div
+                                          className="pipeline-dealer-popover-icon-box"
+                                          data-tooltip="Department"
+                                          title="Department"
+                                        >
+                                          <Briefcase size={13} style={{ color: '#6366f1', flexShrink: 0 }} />
+                                        </div>
+                                        <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#334155' }}>
+                                          {ownerDepartment}
+                                        </span>
+                                      </div>
+
+                                      <div className="pipeline-dealer-popover-row">
+                                        <div
+                                          className="pipeline-dealer-popover-icon-box"
+                                          data-tooltip="Assigned On"
+                                          title="Assigned On"
+                                        >
+                                          <Calendar size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                                        </div>
+                                        <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#334155' }}>
+                                          {ownerAssignedDate}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
+                              {isDealerDropdownOpen && (
+                                <div
+                                  className="pipeline-card-dropdown-menu"
+                                  style={{
+                                    top: 'calc(100% + 4px)',
+                                    right: 0,
+                                    minWidth: '200px',
+                                    maxWidth: '225px',
+                                    zIndex: 120
+                                  }}
+                                  onClick={e => e.stopPropagation()}
+                                  onWheel={e => e.stopPropagation()}
+                                >
+                                  <div style={{ padding: '6px 12px 6px 12px', fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                    Select Deal Owner
+                                  </div>
+
+                                  {availableAssignEmployees.length > 5 && (
+                                    <div style={{ padding: '0 8px 6px 8px' }} onClick={e => e.stopPropagation()}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px 8px' }}>
+                                        <Search size={12} style={{ color: '#94a3b8', flexShrink: 0 }} />
+                                        <input
+                                          type="text"
+                                          placeholder="Search employee..."
+                                          value={dealerSearchQuery}
+                                          onChange={e => setDealerSearchQuery(e.target.value)}
+                                          autoFocus
+                                          style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '11.5px', width: '100%', color: '#1e293b' }}
+                                        />
+                                        {dealerSearchQuery && (
+                                          <button
+                                            type="button"
+                                            onClick={() => setDealerSearchQuery('')}
+                                            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, display: 'flex', color: '#94a3b8' }}
+                                          >
+                                            <X size={11} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div style={{ maxHeight: '210px', overflowY: 'auto' }} onWheel={e => e.stopPropagation()}>
+                                    {availableAssignEmployees.length === 0 ? (
+                                      <div style={{ padding: '12px 10px', textAlign: 'center', fontSize: '12px', color: '#94a3b8' }}>
+                                        No matching employees
+                                      </div>
+                                    ) : (
+                                      availableAssignEmployees.map(emp => {
+                                        const empFullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || 'Employee';
+                                        const isSelected = (detailedDeal.salesOwner || '').toLowerCase() === empFullName.toLowerCase() ||
+                                          (detailedDeal.assignedTo && typeof detailedDeal.assignedTo === 'object' && detailedDeal.assignedTo._id && detailedDeal.assignedTo._id.toString() === emp._id?.toString()) ||
+                                          (detailedDeal.assignedTo && detailedDeal.assignedTo.toString() === emp._id?.toString());
+
+                                        return (
+                                          <button
+                                            key={emp._id || empFullName}
+                                            type="button"
+                                            className={`pipeline-card-menu-item ${isSelected ? 'active' : ''}`}
+                                            onClick={async () => {
+                                              try {
+                                                if (detailedDeal._id && !detailedDeal._id.toString().startsWith('deal-sample-') && !detailedDeal._id.toString().startsWith('deal-')) {
+                                                  await api.put(`/deals/${detailedDeal._id}`, {
+                                                    salesOwner: empFullName,
+                                                    assignedTo: emp._id || null
+                                                  });
+                                                }
+                                              } catch (err) {
+                                                console.warn('Assign deal owner API error:', err.message);
+                                              }
+
+                                              // Update deals state
+                                              setDeals(prev => prev.map(d => {
+                                                if (d._id === detailedDeal._id) {
+                                                  return {
+                                                    ...d,
+                                                    salesOwner: empFullName,
+                                                    assignedTo: emp
+                                                  };
+                                                }
+                                                return d;
+                                              }));
+
+                                              const actorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || user?.email || 'Admin System';
+                                              const prevOwner = (detailedDeal.salesOwner || '').trim();
+                                              const activityContent = prevOwner && prevOwner.toLowerCase() !== empFullName.toLowerCase()
+                                                ? `${actorName} changed deal owner from ${prevOwner} to ${empFullName}.`
+                                                : `${actorName} assigned the deal to ${empFullName}.`;
+
+                                              logActivity(detailedDeal._id, {
+                                                type: 'deal',
+                                                title: 'Deal Owner Assigned',
+                                                content: activityContent,
+                                                author: actorName
+                                              });
+
+                                              setIsDealerDropdownOpen(false);
+                                              setDealerSearchQuery('');
+                                            }}
+                                          >
+                                            <div className="pipeline-card-menu-item-left">
+                                              <div
+                                                style={{
+                                                  width: '20px',
+                                                  height: '20px',
+                                                  fontSize: '10px',
+                                                  fontWeight: 700,
+                                                  background: isSelected ? '#0284c7' : '#e2e8f0',
+                                                  color: isSelected ? '#ffffff' : '#475569',
+                                                  borderRadius: '50%',
+                                                  display: 'inline-flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                  flexShrink: 0
+                                                }}
+                                              >
+                                                {empFullName.charAt(0).toUpperCase()}
+                                              </div>
+                                              <span style={{ fontWeight: isSelected ? 700 : 500, fontSize: '12.5px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: '140px' }}>
+                                                {empFullName}
+                                              </span>
+                                            </div>
+                                            {isSelected && (
+                                              <CheckCircle size={13} style={{ color: '#0284c7', marginLeft: 'auto', flexShrink: 0 }} />
+                                            )}
+                                          </button>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="pipeline-detail-kv-row" style={{ position: 'relative' }}>
+                            <span className="pipeline-detail-k-label">Added By</span>
+                            <div style={{ position: 'relative', display: 'inline-block' }}>
+                              {(() => {
+                                const addedByName = detailedDeal.addedBy || (detailedDeal.createdBy?.firstName ? `${detailedDeal.createdBy.firstName} ${detailedDeal.createdBy.lastName || ''}`.trim() : '') || detailedDeal.salesOwner || 'Admin System';
+                                const emp = getAddedByEmployee(addedByName);
+                                const empFullName = (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || addedByName;
+                                const empDesignation = emp?.designation || (typeof emp?.role === 'string' ? emp?.role : emp?.role?.name) || (addedByName === 'Admin System' ? 'System Administrator' : 'Deal Specialist');
+                                const isEmpActive = emp ? (emp.isActive !== false && emp.status !== 'Inactive') : true;
+                                const empEmail = emp?.officialEmail || emp?.email || (addedByName === 'Admin System' ? 'admin@bhoomi.com' : `${addedByName.toLowerCase().replace(/\s+/g, '.')}@bhoomi.com`);
+                                const empPhone = emp?.phone || emp?.mobile || emp?.phoneNumber || emp?.alternatePhone || (addedByName === 'Admin System' ? '+91 98765 43210' : '—');
+                                const empDepartment = emp?.department || emp?.dept || (addedByName === 'Admin System' ? 'Administration & Operations' : 'Sales & Operations');
+                                const empAddedDate = formatISTDateTime(detailedDeal.createdAt || detailedDeal.createdDate || detailedDeal.date || new Date());
+
+                                return (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="pipeline-owner-pill-badge-btn"
+                                      onMouseEnter={(e) => {
+                                        if (dealAddedByPopoverTimeoutRef.current) clearTimeout(dealAddedByPopoverTimeoutRef.current);
+                                        const rect = e.currentTarget.getBoundingClientRect();
+                                        setDealAddedByPopoverCoords({
+                                          top: Math.max(12, rect.top - 12),
+                                          left: rect.right + 12
+                                        });
+                                        setIsDealAddedByPopoverOpen(true);
+                                      }}
+                                      onMouseLeave={() => {
+                                        dealAddedByPopoverTimeoutRef.current = setTimeout(() => {
+                                          setIsDealAddedByPopoverOpen(false);
+                                        }, 180);
+                                      }}
+                                    >
+                                      <div className="pipeline-owner-pill-avatar">
+                                        {empFullName.charAt(0).toUpperCase()}
+                                      </div>
+                                      <span>{empFullName}</span>
+                                    </button>
+
+                                    {isDealAddedByPopoverOpen && (
+                                      <div
+                                        className="pipeline-dealer-hover-popover outside-popover"
+                                        style={{
+                                          position: 'fixed',
+                                          top: `${dealAddedByPopoverCoords.top}px`,
+                                          left: `${dealAddedByPopoverCoords.left}px`,
+                                          zIndex: 99999
+                                        }}
+                                        onMouseEnter={() => {
+                                          if (dealAddedByPopoverTimeoutRef.current) clearTimeout(dealAddedByPopoverTimeoutRef.current);
+                                          setIsDealAddedByPopoverOpen(true);
+                                        }}
+                                        onMouseLeave={() => {
+                                          dealAddedByPopoverTimeoutRef.current = setTimeout(() => {
+                                            setIsDealAddedByPopoverOpen(false);
+                                          }, 180);
+                                        }}
+                                        onClick={e => e.stopPropagation()}
+                                      >
+                                        <div className="pipeline-dealer-popover-header">
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                                            <div className="pipeline-detail-clean-svg-icon contact" style={{ width: '32px', height: '32px', minWidth: '32px' }}>
+                                              <User size={16} strokeWidth={2} />
+                                            </div>
+                                            <div style={{ overflow: 'hidden', minWidth: 0 }}>
+                                              <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                                {empFullName}
+                                              </h4>
+                                              <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                                {empDesignation}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <span
+                                            className={`pipeline-stage-badge ${isEmpActive ? 'won' : 'lost'}`}
+                                            style={{
+                                              marginLeft: 'auto',
+                                              fontSize: '10px',
+                                              padding: '2px 8px',
+                                              lineHeight: '14px',
+                                              height: '18px',
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              borderRadius: '10px',
+                                              fontWeight: 600,
+                                              flexShrink: 0
+                                            }}
+                                          >
+                                            {isEmpActive ? 'Active' : 'Inactive'}
+                                          </span>
+                                        </div>
+
+                                        <div className="pipeline-dealer-popover-body">
+                                          <div className="pipeline-dealer-popover-row">
+                                            <div
+                                              className="pipeline-dealer-popover-icon-box"
+                                              data-tooltip="Email"
+                                              title="Email"
+                                            >
+                                              <Mail size={13} style={{ color: '#0284c7', flexShrink: 0 }} />
+                                            </div>
+                                            {empEmail && empEmail !== '—' && empEmail !== '-' ? (
+                                              <a
+                                                href={`mailto:${empEmail}`}
+                                                style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#0284c7' }}
+                                                title={empEmail}
+                                              >
+                                                {empEmail}
+                                              </a>
+                                            ) : (
+                                              <span style={{ color: '#64748b' }}>—</span>
+                                            )}
+                                          </div>
+
+                                          <div className="pipeline-dealer-popover-row">
+                                            <div
+                                              className="pipeline-dealer-popover-icon-box"
+                                              data-tooltip="Phone"
+                                              title="Phone"
+                                            >
+                                              <Phone size={13} style={{ color: '#16a34a', flexShrink: 0 }} />
+                                            </div>
+                                            {empPhone && empPhone !== '—' && empPhone !== '-' ? (
+                                              <a
+                                                href={`tel:${empPhone.replace(/\s+/g, '')}`}
+                                                style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#16a34a' }}
+                                                title={empPhone}
+                                              >
+                                                {empPhone}
+                                              </a>
+                                            ) : (
+                                              <span style={{ color: '#64748b' }}>—</span>
+                                            )}
+                                          </div>
+
+                                          <div className="pipeline-dealer-popover-row">
+                                            <div
+                                              className="pipeline-dealer-popover-icon-box"
+                                              data-tooltip="Department"
+                                              title="Department"
+                                            >
+                                              <Briefcase size={13} style={{ color: '#6366f1', flexShrink: 0 }} />
+                                            </div>
+                                            <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#334155' }}>
+                                              {empDepartment}
+                                            </span>
+                                          </div>
+
+                                          <div className="pipeline-dealer-popover-row">
+                                            <div
+                                              className="pipeline-dealer-popover-icon-box"
+                                              data-tooltip="Added On"
+                                              title="Added On"
+                                            >
+                                              <Calendar size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                                            </div>
+                                            <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#334155' }}>
+                                              {empAddedDate}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          </div>
+
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Created On</span>
+                            <span className="pipeline-detail-v-val">
+                              {formatISTDateTime(detailedDeal.createdAt || detailedDeal.createdDate || detailedDeal.date)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Accordion 2: Project Details */}
+                    <div className="pipeline-accordion-section">
+                      <div
+                        className="pipeline-accordion-header"
+                        onClick={() => setDealAccordionState(prev => ({ ...prev, project: !prev.project }))}
+                      >
+                        <div className="pipeline-accordion-title-wrap">
+                          <span className="pipeline-accordion-title-icon" style={{ background: '#f5f3ff', color: '#7c3aed' }}>
+                            <Briefcase size={12} strokeWidth={2.5} />
+                          </span>
+                          <span>Project Details</span>
+                        </div>
+
+                        <div className="pipeline-accordion-actions">
+                          <button
+                            type="button"
+                            className={`pipeline-accordion-toggle-btn ${dealAccordionState.project ? 'open' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDealAccordionState(prev => ({ ...prev, project: !prev.project }));
+                            }}
+                            title={dealAccordionState.project ? 'Collapse Section' : 'Expand Section'}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={`pipeline-accordion-body ${dealAccordionState.project ? '' : 'collapsed'}`}>
+                        {detailedDeal.projectId || detailedDeal.projectName ? (
+                          <div className="pipeline-detail-kv-grid">
+                            {detailedDeal.projectId && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Project ID</span>
+                                <span className="pipeline-detail-v-val" style={{ color: '#0284c7', fontFamily: 'monospace', fontWeight: 700 }}>
+                                  {detailedDeal.projectId}
+                                </span>
+                              </div>
+                            )}
+                            <div className="pipeline-detail-kv-row">
+                              <span className="pipeline-detail-k-label">Project Name</span>
+                              <span className="pipeline-detail-v-val font-semibold">{detailedDeal.projectName}</span>
+                            </div>
+                            {detailedDeal.projectType && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Project Type</span>
+                                <span className="pipeline-detail-v-val">{detailedDeal.projectType}</span>
+                              </div>
+                            )}
+                            {detailedDeal.projectCost && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Project Cost</span>
+                                <span className="pipeline-detail-v-val" style={{ fontWeight: 700, color: '#0284c7' }}>
+                                  {detailedDeal.projectCost}
+                                </span>
+                              </div>
+                            )}
+                            {detailedDeal.projectTimeline && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Timeline</span>
+                                <span className="pipeline-detail-v-val">{detailedDeal.projectTimeline}</span>
+                              </div>
+                            )}
+                            {detailedDeal.projectStatus && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Status</span>
+                                <span className="pipeline-detail-v-val">{detailedDeal.projectStatus}</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8' }}>
+                            <Briefcase size={28} style={{ margin: '0 auto 8px', opacity: 0.45 }} />
+                            <p style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#64748b' }}>No Associated Project</p>
+                            <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#94a3b8' }}>There is no active project linked to this deal yet.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Accordion 3: Payment Details */}
+                    <div className="pipeline-accordion-section">
+                      <div
+                        className="pipeline-accordion-header"
+                        onClick={() => setDealAccordionState(prev => ({ ...prev, payment: !prev.payment }))}
+                      >
+                        <div className="pipeline-accordion-title-wrap">
+                          <span className="pipeline-accordion-title-icon" style={{ background: '#ecfdf5', color: '#16a34a' }}>
+                            <CreditCard size={12} strokeWidth={2.5} />
+                          </span>
+                          <span>Payment Details</span>
+                        </div>
+
+                        <div className="pipeline-accordion-actions">
+                          <button
+                            type="button"
+                            className={`pipeline-accordion-toggle-btn ${dealAccordionState.payment ? 'open' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDealAccordionState(prev => ({ ...prev, payment: !prev.payment }));
+                            }}
+                            title={dealAccordionState.payment ? 'Collapse Section' : 'Expand Section'}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={`pipeline-accordion-body ${dealAccordionState.payment ? '' : 'collapsed'}`}>
+                        {(() => {
+                          const dealRecords = getDealPaymentRecords(detailedDeal);
+                          const hasRecords = dealRecords.length > 0;
+                          const dealVal = parsePaymentAmount(detailedDeal.dealValue);
+                          const paidVal = dealRecords
+                            .filter(r => (r.paymentStatus || '').toLowerCase() === 'paid')
+                            .reduce((sum, r) => sum + parsePaymentAmount(r.paidAmount), 0);
+                          const pendingRecordsAmount = dealRecords
+                            .filter(r => (r.paymentStatus || '').toLowerCase() !== 'paid')
+                            .reduce((sum, r) => sum + parsePaymentAmount(r.paidAmount), 0);
+
+                          const totalVal = dealVal > 0 ? dealVal : (paidVal + pendingRecordsAmount);
+                          const pendingVal = dealVal > 0 ? Math.max(0, dealVal - paidVal) : pendingRecordsAmount;
+                          const paidPct = totalVal > 0 ? Math.min(100, Math.round((paidVal / totalVal) * 100)) : 0;
+                          const currency = detailedDeal.currency || '₹';
+
+                          if (!hasRecords && totalVal === 0) {
+                            return (
+                              <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8' }}>
+                                <CreditCard size={28} style={{ margin: '0 auto 8px', opacity: 0.45 }} />
+                                <p style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#64748b' }}>No Payment Records</p>
+                                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#94a3b8' }}>No payment records found for this deal.</p>
+                                <button
+                                  type="button"
+                                  className="pipeline-milestone-pill-badge-btn"
+                                  style={{ margin: '12px auto 0', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setMilestoneModalDealId(detailedDeal._id);
+                                    setShowMilestoneModal(true);
+                                    setShowAddPaymentForm(true);
+                                  }}
+                                >
+                                  <Plus size={12} />
+                                  <span>Add Payment</span>
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="pipeline-detail-kv-grid">
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Total Amount</span>
+                                <span className="pipeline-detail-v-val" style={{ fontWeight: 700, color: '#0284c7' }}>
+                                  {currency} {totalVal.toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Paid Amount</span>
+                                <span className="pipeline-detail-v-val" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontWeight: 700, color: '#16a34a' }}>
+                                    {currency} {paidVal.toLocaleString()}
+                                  </span>
+                                  {totalVal > 0 && (
+                                    <span className="pipeline-stage-badge won" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                                      {paidPct}% Paid
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Pending Amount</span>
+                                <span className="pipeline-detail-v-val" style={{ fontWeight: 700, color: '#ea580c' }}>
+                                  {currency} {pendingVal.toLocaleString()}
+                                </span>
+                              </div>
+
+                              <div className="pipeline-detail-kv-row" style={{ position: 'relative' }}>
+                                <span className="pipeline-detail-k-label">Payment Terms</span>
+                                <div style={{ position: 'relative', display: 'inline-block' }}>
+                                  <button
+                                    type="button"
+                                    className="pipeline-milestone-pill-badge-btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setMilestoneModalDealId(detailedDeal._id);
+                                      setShowMilestoneModal(true);
+                                      setShowAddPaymentForm(false);
+                                    }}
+                                    title="Click to view full Payment Records"
+                                  >
+                                    <span>Milestone ({dealRecords.length})</span>
+                                    <ChevronRight size={11} />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. MIDDLE SECTION: Activities, Notes, Emails, Messages & Calls */}
+                <div className="pipeline-detail-col-activities">
+                  <div className="pipeline-detail-actions-card">
+                    {/* Activity Tabs */}
+                    <div className="pipeline-activity-tabs-bar">
+                      <div className="pipeline-activity-tab-btns">
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'all' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('all')}
+                        >
+                          <span>All Activities</span>
+                          <span className="pipeline-act-tab-badge">{currentDealActivities.length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'notes' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('notes')}
+                        >
+                          <FileText size={14} />
+                          <span>Notes</span>
+                          <span className="pipeline-act-tab-badge">{currentDealActivities.filter(a => a.type === 'note').length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'emails' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('emails')}
+                        >
+                          <Mail size={14} />
+                          <span>Emails</span>
+                          <span className="pipeline-act-tab-badge">{currentDealActivities.filter(a => a.type === 'email').length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'messages' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('messages')}
+                        >
+                          <MessageSquare size={14} />
+                          <span>Messages</span>
+                          <span className="pipeline-act-tab-badge">{currentDealActivities.filter(a => a.type === 'message').length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'tasks' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('tasks')}
+                        >
+                          <CheckSquare size={14} />
+                          <span>Tasks</span>
+                          <span className="pipeline-act-tab-badge">{dealSpecificTasks.length}</span>
+                        </button>
+                      </div>
+
+                      {/* Contextual Action Button on Right Side */}
+                      <div className="pipeline-activity-quick-actions">
+                        {detailActiveTab === 'notes' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            onClick={() => {
+                              setNewActivityType('note');
+                              setIsComposingActivity(true);
+                            }}
+                          >
+                            <Plus size={13} />
+                            <span>Add Note</span>
+                          </button>
+                        )}
+                        {detailActiveTab === 'emails' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            disabled
+                            style={{ opacity: 0.55, cursor: 'not-allowed' }}
+                            title="Feature not implemented yet"
+                          >
+                            <Plus size={13} />
+                            <span>Log Email</span>
+                          </button>
+                        )}
+                        {detailActiveTab === 'messages' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            disabled
+                            style={{ opacity: 0.55, cursor: 'not-allowed' }}
+                            title="Feature not implemented yet"
+                          >
+                            <Plus size={13} />
+                            <span>Log Message</span>
+                          </button>
+                        )}
+                        {detailActiveTab === 'tasks' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            onClick={() => {
+                              handleOpenCreateTask(detailedDeal._id, '');
+                            }}
+                          >
+                            <Plus size={13} />
+                            <span>Add Task</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Inline Activity Composer */}
+                    {isComposingActivity && (
+                      (detailActiveTab === 'notes' && newActivityType === 'note') ||
+                      (detailActiveTab === 'emails' && newActivityType === 'email') ||
+                      (detailActiveTab === 'messages' && newActivityType === 'message')
+                    ) && (
+                        <form onSubmit={handleAddActivity} className="pipeline-activity-composer">
+                          <div className="pipeline-activity-composer-header">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              {newActivityType === 'note' && (
+                                <>
+                                  <FileText size={16} style={{ color: '#0284c7' }} />
+                                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '13.5px' }}>Add Internal Note</span>
+                                </>
+                              )}
+                              {newActivityType === 'email' && (
+                                <>
+                                  <Mail size={16} style={{ color: '#0284c7' }} />
+                                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '13.5px' }}>Log Email</span>
+                                </>
+                              )}
+                              {newActivityType === 'message' && (
+                                <>
+                                  <MessageSquare size={16} style={{ color: '#0284c7' }} />
+                                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '13.5px' }}>Log Message</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {newActivityType === 'email' && (
+                            <input
+                              type="text"
+                              className="pipeline-form-input"
+                              style={{ padding: '8px 12px', fontSize: '13px' }}
+                              placeholder="Subject line (e.g. Contract review follow-up)"
+                              value={newActivitySubject}
+                              onChange={e => setNewActivitySubject(e.target.value)}
+                            />
+                          )}
+
+                          <textarea
+                            className="pipeline-activity-composer-textarea"
+                            placeholder={
+                              newActivityType === 'note'
+                                ? 'Write your note here...'
+                                : newActivityType === 'email'
+                                  ? 'Email summary or message body...'
+                                  : 'Chat notes or SMS conversation details...'
+                            }
+                            value={newActivityContent}
+                            onChange={e => setNewActivityContent(e.target.value)}
+                            autoFocus
+                            required
+                          />
+
+                          <div className="pipeline-activity-composer-footer">
+                            <button
+                              type="button"
+                              className="pipeline-btn-cancel"
+                              style={{ padding: '6px 14px', fontSize: '12.5px' }}
+                              onClick={() => {
+                                setIsComposingActivity(false);
+                                setNewActivityContent('');
+                                setNewActivitySubject('');
+                              }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              className="pipeline-btn-save"
+                              style={{ padding: '6px 18px', fontSize: '12.5px' }}
+                            >
+                              {newActivityType === 'note' ? 'Save Note' : newActivityType === 'email' ? 'Log Email' : 'Log Message'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
+                    {/* Dedicated Tasks View or Activity Timeline Feed */}
+                    {detailActiveTab === 'tasks' ? (
+                      <div className="pipeline-inline-tasks-panel">
+
+                        {dealSpecificTasks.length === 0 ? (
+                          <div className="pipeline-empty-state-mini" style={{ padding: '36px 20px', textAlign: 'center' }}>
+                            <CheckSquare size={32} style={{ color: '#94a3b8', marginBottom: '8px', opacity: 0.6 }} />
+                            <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No tasks created yet.</p>
+                          </div>
+                        ) : (
+                          <div className="pipeline-inline-tasks-list">
+                            {dealSpecificTasks.map(task => (
+                              <div key={task._id} className={`pipeline-inline-task-item ${task.completed ? 'completed' : ''}`}>
+                                <label className="pipeline-task-checkbox-wrap" onClick={e => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!task.completed}
+                                    onChange={(e) => handleToggleTaskComplete(task._id, e)}
+                                  />
+                                  <span className="pipeline-task-checkmark"></span>
+                                </label>
+                                <div className="pipeline-inline-task-main">
+                                  <div className="pipeline-inline-task-title-row">
+                                    <span className={`pipeline-inline-task-title ${task.completed ? 'done' : ''}`}>
+                                      {task.title}
+                                    </span>
+                                    <span className={`pipeline-task-priority-pill ${(task.priority || 'medium').toLowerCase()}`}>
+                                      {task.priority || 'Medium'}
+                                    </span>
+                                  </div>
+                                  {task.description && (
+                                    <p className="pipeline-inline-task-desc">{task.description}</p>
+                                  )}
+                                  <div className="pipeline-inline-task-meta-row">
+                                    <span className="pipeline-inline-task-meta-item">
+                                      <Clock size={12} />
+                                      <span>Due: {task.dueDate ? formatDateDDMMYYYY(task.dueDate) : 'No due date'}</span>
+                                    </span>
+                                    <span className="pipeline-inline-task-meta-item">
+                                      <User size={12} />
+                                      <span>{task.assignee || 'Artiflow'}</span>
+                                    </span>
+                                    <span className="pipeline-inline-task-type-badge">
+                                      {task.type || 'Follow-up'}
+                                    </span>
+                                    <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
+                                      <button
+                                        type="button"
+                                        className="pipeline-mini-icon-btn"
+                                        title="Edit Task"
+                                        onClick={(e) => handleOpenEditTask(task, e)}
+                                      >
+                                        <Edit2 size={12} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="pipeline-mini-icon-btn danger"
+                                        title="Delete Task"
+                                        onClick={(e) => handleDeleteTask(task._id, e)}
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Activity Timeline Feed */
+                      <div className="pipeline-activity-timeline-feed" style={{ marginTop: (isComposingActivity && ((detailActiveTab === 'notes' && newActivityType === 'note') || (detailActiveTab === 'emails' && newActivityType === 'email') || (detailActiveTab === 'messages' && newActivityType === 'message'))) ? '16px' : '0' }}>
+                        {detailActiveTab === 'emails' ? (
+                          <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
+                            <Mail size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                            <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
+                            <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Email integration and logging will be available soon.</p>
+                          </div>
+                        ) : detailActiveTab === 'messages' ? (
+                          <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
+                            <MessageSquare size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                            <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
+                            <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Message and SMS logging will be available soon.</p>
+                          </div>
+                        ) : currentDealActivities.filter(act => {
+                          if (detailActiveTab === 'all') return true;
+                          if (detailActiveTab === 'notes') return act.type === 'note';
+                          return true;
+                        }).length > 0 ? (
+                          currentDealActivities.filter(act => {
+                            if (detailActiveTab === 'all') return true;
+                            if (detailActiveTab === 'notes') return act.type === 'note';
+                            return true;
+                          }).map(act => (
+                            <div key={act.id} className="pipeline-timeline-item-card">
+                              <div className={`pipeline-timeline-icon-wrap ${act.type || 'activity'}`}>
+                                {act.type === 'note' && <FileText size={18} />}
+                                {act.type === 'email' && <Mail size={18} />}
+                                {act.type === 'message' && <MessageSquare size={18} />}
+                                {act.type === 'task' && <CheckSquare size={18} />}
+                                {act.type === 'deal' && <Briefcase size={18} />}
+                                {act.type === 'contact' && <User size={18} />}
+                                {act.type === 'company' && <Building2 size={18} />}
+                                {act.type === 'payment' && <CreditCard size={18} />}
+                                {(act.type === 'activity' || !['note', 'email', 'message', 'task', 'deal', 'contact', 'company', 'payment'].includes(act.type)) && <Tag size={18} />}
+                              </div>
+
+                              <div className="pipeline-timeline-content">
+                                <div className="pipeline-timeline-header-row">
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span className="pipeline-timeline-author-title">{act.author}</span>
+                                    <span style={{ fontSize: '12px', color: '#64748b' }}>• {act.title}</span>
+                                  </div>
+                                  <span className="pipeline-timeline-time-badge">{formatActivityTimestamp(act)}</span>
+                                </div>
+
+                                <p className="pipeline-timeline-body-text">{act.content}</p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div style={{ textAlign: 'center', padding: '36px 20px', color: '#94a3b8' }}>
+                            {detailActiveTab === 'notes' ? (
+                              <>
+                                <FileText size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                                <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No notes created yet.</p>
+                              </>
+                            ) : (
+                              <>
+                                <FileText size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                                <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No activities recorded yet.</p>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. RIGHT SECTION: Associated Contact and Company Details */}
+                <div className="pipeline-detail-col-assoc">
+                  <div className="pipeline-detail-card-panel">
+                    {/* Section 1: Complete Associated Contact Details */}
+                    <div className="pipeline-detail-panel-section">
+                      <div className="pipeline-detail-section-heading">
+                        <span>Associated Contact Details</span>
+                        <button
+                          type="button"
+                          className="pipeline-detail-add-badge-btn"
+                          onClick={() => {
+                            setContactFormData({
+                              firstName: '',
+                              lastName: '',
+                              email: '',
+                              countryCode: '+1',
+                              phone: '',
+                              contactSource: 'Direct Reference',
+                              leadStage: 'Lead',
+                              leadStatus: 'New',
+                              owner: detailedDeal.salesOwner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Tejaswi Yadav') || 'Tejaswi Yadav',
+                              company: detailedDeal.associatedCompany || ''
+                            });
+                            setShowCreateContactModal(true);
+                          }}
+                          title="Add / Link Contact"
+                        >
+                          Add+
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div className="pipeline-detail-clean-svg-icon contact">
+                          <User size={19} strokeWidth={2} />
+                        </div>
+                        <div style={{ overflow: 'hidden' }}>
+                          <h4
+                            style={{
+                              margin: 0,
+                              fontSize: '13.5px',
+                              fontWeight: 700,
+                              color: matchedContactForDeal ? '#0284c7' : '#0f172a',
+                              whiteSpace: 'nowrap',
+                              textOverflow: 'ellipsis',
+                              overflow: 'hidden',
+                              cursor: matchedContactForDeal ? 'pointer' : 'default',
+                              textDecoration: 'none'
+                            }}
+                            onMouseEnter={(e) => {
+                              if (matchedContactForDeal) e.currentTarget.style.textDecoration = 'underline';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.textDecoration = 'none';
+                            }}
+                            onClick={() => {
+                              if (matchedContactForDeal) {
+                                setDetailedDealId(null);
+                                setActiveTab('contacts');
+                                setDetailedContactId(matchedContactForDeal._id);
+                              }
+                            }}
+                            title={matchedContactForDeal ? "Click to view Contact Profile" : ""}
+                          >
+                            {matchedContactForDeal ? `${matchedContactForDeal.firstName} ${matchedContactForDeal.lastName}`.trim() : (detailedDeal.associatedContact || detailedDeal.clientName)}
+                          </h4>
+                          <a
+                            href={`mailto:${matchedContactForDeal?.email || detailedDeal.associatedContact || detailedDeal.email || 'contact@example.com'}`}
+                            style={{ fontSize: '12px', color: '#0284c7', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}
+                            onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
+                            onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
+                          >
+                            <Mail size={11} /> {matchedContactForDeal?.email || detailedDeal.associatedContact || detailedDeal.email || 'contact@example.com'}
+                          </a>
+                        </div>
+                      </div>
+
+                      <div className="pipeline-detail-kv-grid" style={{ marginTop: '4px' }}>
+                        <div className="pipeline-detail-kv-row">
+                          <span className="pipeline-detail-k-label">Phone</span>
+                          <span className="pipeline-detail-v-val">
+                            <a
+                              href={`tel:${(matchedContactForDeal?.countryCode || '') + (matchedContactForDeal?.phone || '')}`}
+                              style={{ color: '#0f172a', textDecoration: 'none' }}
+                            >
+                              {(matchedContactForDeal?.countryCode || '+91') + ' ' + (matchedContactForDeal?.phone || detailedDeal.phone || '98765 43210')}
+                            </a>
+                          </span>
+                        </div>
+                        <div className="pipeline-detail-kv-row">
+                          <span className="pipeline-detail-k-label">Lead Stage</span>
+                          <span className="pipeline-detail-v-val">
+                            <span
+                              className={`pipeline-stage-badge ${(() => {
+                                const st = (matchedContactForDeal?.leadStage || 'Lead').toLowerCase();
+                                if (st.includes('won') || st.includes('qualified')) return 'won';
+                                if (st.includes('lost') || st.includes('junk')) return 'lost';
+                                if (st.includes('hot') || st.includes('proposal')) return 'hot';
+                                return 'new';
+                              })()}`}
+                              style={{ padding: '2px 8px', fontSize: '11px' }}
+                            >
+                              {matchedContactForDeal?.leadStage || 'Lead'}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="pipeline-detail-kv-row">
+                          <span className="pipeline-detail-k-label">Lead Status</span>
+                          <span className="pipeline-detail-v-val">
+                            <span
+                              className={`pipeline-stage-badge ${(() => {
+                                const st = (matchedContactForDeal?.leadStatus || 'New').toLowerCase();
+                                if (st === 'won' || st === 'qualified' || st === 'active' || st === 'open') return 'won';
+                                if (st === 'lost' || st === 'unqualified' || st === 'spam') return 'lost';
+                                if (st === 'hot' || st === 'in progress' || st === 'contacted') return 'hot';
+                                return 'new';
+                              })()}`}
+                              style={{ padding: '2px 8px', fontSize: '11px' }}
+                            >
+                              {matchedContactForDeal?.leadStatus || 'New'}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="pipeline-detail-kv-row">
+                          <span className="pipeline-detail-k-label">Contact Source</span>
+                          <span className="pipeline-detail-v-val">{matchedContactForDeal?.contactSource || 'Direct Traffic'}</span>
+                        </div>
+                        <div className="pipeline-detail-kv-row">
+                          <span className="pipeline-detail-k-label">Added By</span>
+                          <span className="pipeline-detail-v-val">{matchedContactForDeal?.addedBy || matchedContactForDeal?.owner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Admin System') || 'Admin System'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section 2: Complete Associated Company Details */}
+                    <div className="pipeline-detail-panel-section">
+                      <div className="pipeline-detail-section-heading">
+                        <span>Associated Company Details</span>
+                        <button
+                          type="button"
+                          className="pipeline-detail-add-badge-btn"
+                          onClick={() => {
+                            setCompanyFormData({
+                              name: (detailedDeal.associatedCompany && detailedDeal.associatedCompany !== 'Direct Client') ? detailedDeal.associatedCompany : ((matchedContactForDeal?.company && matchedContactForDeal.company !== 'Direct Client') ? matchedContactForDeal.company : ''),
+                              domain: '',
+                              owner: [],
+                              industry: '',
+                              country: 'United States',
+                              state: '',
+                              city: (detailedDeal.location && detailedDeal.location !== 'Pembroke Pines' && detailedDeal.location !== 'Pune, India') ? detailedDeal.location : '',
+                              postalCode: ''
+                            });
+                            setShowCreateCompanyModal(true);
+                          }}
+                          title="Add / Link Company"
+                        >
+                          Add+
+                        </button>
+                      </div>
+
+                      {(() => {
+                        const compFromContact = (matchedContactForDeal?.company && matchedContactForDeal.company !== 'Direct Client') ? matchedContactForDeal.company.trim() : '';
+                        const compFromDeal = (detailedDeal.associatedCompany && detailedDeal.associatedCompany !== 'Direct Client') ? detailedDeal.associatedCompany.trim() : (detailedDeal.company && detailedDeal.company !== 'Direct Client' ? detailedDeal.company.trim() : '');
+                        const effectiveCompany = compFromDeal || compFromContact;
+                        const hasAssociatedCompany = Boolean(matchedCompanyForDeal || effectiveCompany);
+
+                        if (!hasAssociatedCompany) {
+                          return (
+                            <div className="pipeline-detail-empty-subcard" style={{ padding: '14px 12px', textAlign: 'center', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1', marginTop: '6px' }}>
+                              <Building2 size={20} style={{ color: '#94a3b8', marginBottom: '4px' }} />
+                              <p style={{ margin: 0, fontSize: '12.5px', fontWeight: 600, color: '#64748b' }}>
+                                No company details
+                              </p>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div className="pipeline-detail-clean-svg-icon company">
+                                <Building2 size={19} strokeWidth={2} />
+                              </div>
+                              <div style={{ overflow: 'hidden' }}>
+                                <h4
+                                  style={{
+                                    margin: 0,
+                                    fontSize: '13.5px',
+                                    fontWeight: 700,
+                                    color: '#575757f0',
+                                    whiteSpace: 'nowrap',
+                                    textOverflow: 'ellipsis',
+                                    overflow: 'hidden',
+                                    cursor: (hasAssociatedCompany && matchedCompanyForDeal) ? 'pointer' : 'default'
+                                  }}
+                                  onClick={() => {
+                                    if (hasAssociatedCompany && matchedCompanyForDeal) {
+                                      setViewingCompany(matchedCompanyForDeal);
+                                    }
+                                  }}
+                                  title={(hasAssociatedCompany && matchedCompanyForDeal) ? "Click to view Company Profile" : ""}
+                                >
+                                  {matchedCompanyForDeal?.name || effectiveCompany}
+                                </h4>
+                                {matchedCompanyForDeal?.domain && (
+                                  <a
+                                    href={`https://${matchedCompanyForDeal.domain.replace(/^https?:\/\//, '')}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{ fontSize: '12px', color: '#0284c7', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}
+                                  >
+                                    <Globe size={11} /> {matchedCompanyForDeal.domain} <ExternalLink size={10} />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="pipeline-detail-kv-grid" style={{ marginTop: '4px' }}>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Industry Type</span>
+                                <span className="pipeline-detail-v-val">{matchedCompanyForDeal?.industry || '-'}</span>
+                              </div>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Company Owner</span>
+                                <span className="pipeline-detail-v-val">
+                                  <CompanyOwnerDisplay owner={matchedCompanyForDeal?.owner} fallback={detailedDeal.salesOwner} />
+                                </span>
+                              </div>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Country</span>
+                                <span className="pipeline-detail-v-val">{matchedCompanyForDeal?.country || '-'}</span>
+                              </div>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">State / Region</span>
+                                <span className="pipeline-detail-v-val">{matchedCompanyForDeal?.state || '-'}</span>
+                              </div>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">City</span>
+                                <span className="pipeline-detail-v-val">{matchedCompanyForDeal?.city || (detailedDeal.location && detailedDeal.location !== 'Pembroke Pines' && detailedDeal.location !== 'Pune, India' ? detailedDeal.location : '-') || '-'}</span>
+                              </div>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Postal Code</span>
+                                <span className="pipeline-detail-v-val">{matchedCompanyForDeal?.postalCode || '-'}</span>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Top Header */}
+              <div className="pipeline-top-header">
+                <h1 className="pipeline-deals-count-title">
+                  Deals Management
+                </h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {/* View Switcher */}
+                  <div className="pipeline-view-switcher">
+                    <button
+                      className={`pipeline-view-btn ${viewMode === 'list' ? 'active' : ''}`}
+                      onClick={() => setViewMode('list')}
+                      title="List Table View"
+                    >
+                      <List size={16} />
+                    </button>
+                    <button
+                      className={`pipeline-view-btn ${viewMode === 'kanban' ? 'active' : ''}`}
+                      onClick={() => setViewMode('kanban')}
+                      title="Kanban Board View"
+                    >
+                      <Kanban size={16} />
+                    </button>
+                  </div>
+
+                  {/* Export */}
+                  <button className="pipeline-btn-export" onClick={handleExport} title="Export CSV">
+                    <Download size={14} />
+                    <span>Export</span>
+                  </button>
+
+                  <NotificationBell filterType="CRM" />
+                </div>
+              </div>
+
+              {/* Action Toolbar */}
+              <div className="pipeline-toolbar-row">
+                <div className="pipeline-toolbar-left">
+                  {/* Search Box */}
+                  <div className="pipeline-contacts-search-box">
+                    <Search size={14} className="pipeline-search-icon" />
+                    <input
+                      type="text"
+                      placeholder="Search deals..."
+                      value={dealSearchQuery}
+                      onChange={e => setDealSearchQuery(e.target.value)}
+                      className="pipeline-contacts-search-input"
+                    />
+                    {dealSearchQuery && (
+                      <button
+                        type="button"
+                        className="pipeline-search-clear-btn"
+                        onClick={() => setDealSearchQuery('')}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Sort By Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${sortBy !== 'newest' ? 'filter-active' : ''} ${isSortDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsOwnerDropdownOpen(false);
+                        setIsDealStatusDropdownOpen(false);
+                        setIsDealOriginDropdownOpen(false);
+                        setIsDateDropdownOpen(false);
+                        setIsSortDropdownOpen(prev => !prev);
+                      }}
+                      title="Sort deals"
+                    >
+                      <ArrowUpDown size={14} />
+                      <span>{sortBy !== 'newest' ? `Sort: ${sortLabel}` : 'Sort by'}</span>
+                      <ChevronDown size={13} style={{ color: sortBy !== 'newest' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isSortDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Sort deals by</div>
+                        <div className="pipeline-filter-items-scroll">
+                          {[
+                            { id: 'newest', label: 'Newest first' },
+                            { id: 'oldest', label: 'Oldest first' },
+                            { id: 'value_high', label: 'Deal Value: High to Low' },
+                            { id: 'value_low', label: 'Deal Value: Low to High' },
+                            { id: 'name_asc', label: 'Deal Name (A - Z)' },
+                            { id: 'name_desc', label: 'Deal Name (Z - A)' },
+                            { id: 'date_asc', label: 'Expected Close Date (Earliest)' },
+                            { id: 'date_desc', label: 'Expected Close Date (Latest)' }
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              className={`pipeline-filter-item-btn ${sortBy === opt.id ? 'selected' : ''}`}
+                              onClick={() => {
+                                setSortBy(opt.id);
+                                setIsSortDropdownOpen(false);
+                              }}
+                            >
+                              <span>{opt.label}</span>
+                              {sortBy === opt.id && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* All Deal Owners Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${ownerFilter !== 'all' ? 'filter-active' : ''} ${isOwnerDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsSortDropdownOpen(false);
+                        setIsDealStatusDropdownOpen(false);
+                        setIsDealOriginDropdownOpen(false);
+                        setIsDateDropdownOpen(false);
+                        setIsOwnerDropdownOpen(prev => !prev);
+                      }}
+                      title="Filter by deal owners"
+                    >
+                      <User size={14} />
+                      <span>{ownerFilter === 'all' ? 'All deal owners' : ownerFilter}</span>
+                      <ChevronDown size={13} style={{ color: ownerFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isOwnerDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" style={{ minWidth: '240px' }} onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Filter by Deal Owner</div>
+                        {allDealOwners.length > 5 && (
+                          <div className="pipeline-filter-search-wrap">
+                            <input
+                              type="text"
+                              className="pipeline-filter-search-input"
+                              placeholder="Search deal owner..."
+                              value={ownerSearchQuery}
+                              onChange={e => setOwnerSearchQuery(e.target.value)}
+                              autoFocus
+                            />
+                          </div>
+                        )}
+                        <div className="pipeline-filter-items-scroll">
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${ownerFilter === 'all' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setOwnerFilter('all');
+                              setIsOwnerDropdownOpen(false);
+                              setOwnerSearchQuery('');
+                            }}
+                          >
+                            <User size={14} style={{ color: '#64748b' }} />
+                            <span>All deal owners</span>
+                            <span className="pipeline-filter-item-badge">{deals.filter(d => isItemOwnedByUser(d, 'deal')).length}</span>
+                            {ownerFilter === 'all' && <Check size={14} style={{ color: '#0284c7' }} />}
+                          </button>
+
+                          {allDealOwners
+                            .filter(ownerName => !ownerSearchQuery.trim() || ownerName.toLowerCase().includes(ownerSearchQuery.trim().toLowerCase()))
+                            .map(ownerName => {
+                              const count = dealOwnerCounts[ownerName] || dealOwnerCounts[ownerName.toLowerCase()] || 0;
+                              return (
+                                <button
+                                  key={ownerName}
+                                  type="button"
+                                  className={`pipeline-filter-item-btn ${ownerFilter.toLowerCase() === ownerName.toLowerCase() ? 'selected' : ''}`}
+                                  onClick={() => {
+                                    setOwnerFilter(ownerName);
+                                    setIsOwnerDropdownOpen(false);
+                                    setOwnerSearchQuery('');
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: 18,
+                                      height: 18,
+                                      borderRadius: '50%',
+                                      background: '#e0f2fe',
+                                      color: '#0284c7',
+                                      fontSize: '10px',
+                                      fontWeight: 700,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center'
+                                    }}
+                                  >
+                                    {ownerName.charAt(0).toUpperCase()}
+                                  </div>
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ownerName}</span>
+                                  <span className="pipeline-filter-item-badge">{count}</span>
+                                  {ownerFilter.toLowerCase() === ownerName.toLowerCase() && (
+                                    <Check size={14} style={{ color: '#0284c7' }} />
+                                  )}
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Filter by Status Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${dealStatusFilter !== 'all' ? 'filter-active' : ''} ${isDealStatusDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsSortDropdownOpen(false);
+                        setIsOwnerDropdownOpen(false);
+                        setIsDealOriginDropdownOpen(false);
+                        setIsDateDropdownOpen(false);
+                        setIsDealStatusDropdownOpen(prev => !prev);
+                      }}
+                      title="Filter deals by status / stage"
+                    >
+                      <Tag size={14} />
+                      <span>{dealStatusFilter === 'all' ? 'All statuses' : dealStatusFilter}</span>
+                      <ChevronDown size={13} style={{ color: dealStatusFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isDealStatusDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" style={{ minWidth: '210px' }} onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Filter by Status / Stage</div>
+                        <div className="pipeline-filter-items-scroll">
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${dealStatusFilter === 'all' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setDealStatusFilter('all');
+                              setIsDealStatusDropdownOpen(false);
+                            }}
+                          >
+                            <span>All statuses</span>
+                            {dealStatusFilter === 'all' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                          {allDealStatuses.map(status => (
+                            <button
+                              key={status}
+                              type="button"
+                              className={`pipeline-filter-item-btn ${dealStatusFilter.toLowerCase() === status.toLowerCase() ? 'selected' : ''}`}
+                              onClick={() => {
+                                setDealStatusFilter(status);
+                                setIsDealStatusDropdownOpen(false);
+                              }}
+                            >
+                              <span>{status}</span>
+                              {dealStatusFilter.toLowerCase() === status.toLowerCase() && (
+                                <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Filter by Origin Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${dealOriginFilter !== 'all' ? 'filter-active' : ''} ${isDealOriginDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsSortDropdownOpen(false);
+                        setIsOwnerDropdownOpen(false);
+                        setIsDealStatusDropdownOpen(false);
+                        setIsDateDropdownOpen(false);
+                        setIsDealOriginDropdownOpen(prev => !prev);
+                      }}
+                      title="Filter deals by origin"
+                    >
+                      <Globe size={14} />
+                      <span>{dealOriginFilter === 'all' ? 'All origins' : dealOriginFilter}</span>
+                      <ChevronDown size={13} style={{ color: dealOriginFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isDealOriginDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" style={{ minWidth: '200px' }} onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Filter by Origin</div>
+                        <div className="pipeline-filter-items-scroll">
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${dealOriginFilter === 'all' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setDealOriginFilter('all');
+                              setIsDealOriginDropdownOpen(false);
+                            }}
+                          >
+                            <span>All origins</span>
+                            <span className="pipeline-filter-item-badge">{dealOriginCounts.all}</span>
+                            {dealOriginFilter === 'all' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${dealOriginFilter === 'Domestic' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setDealOriginFilter('Domestic');
+                              setIsDealOriginDropdownOpen(false);
+                            }}
+                          >
+                            <span>Domestic</span>
+                            <span className="pipeline-filter-item-badge">{dealOriginCounts.domestic}</span>
+                            {dealOriginFilter === 'Domestic' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${dealOriginFilter === 'International' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setDealOriginFilter('International');
+                              setIsDealOriginDropdownOpen(false);
+                            }}
+                          >
+                            <span>International</span>
+                            <span className="pipeline-filter-item-badge">{dealOriginCounts.international}</span>
+                            {dealOriginFilter === 'International' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Date Filter Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${dateFilter !== 'all' ? 'filter-active' : ''} ${isDateDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsSortDropdownOpen(false);
+                        setIsOwnerDropdownOpen(false);
+                        setIsDealStatusDropdownOpen(false);
+                        setIsDealOriginDropdownOpen(false);
+                        setIsDateDropdownOpen(prev => !prev);
+                      }}
+                      title="Filter deals by date"
+                    >
+                      <Calendar size={14} />
+                      <span>{dateFilterLabel}</span>
+                      <ChevronDown size={13} style={{ color: dateFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isDateDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" style={{ minWidth: '230px' }} onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Filter by Close Date</div>
+                        <div className="pipeline-filter-items-scroll">
+                          {[
+                            { id: 'all', label: 'All Dates (All Time)' },
+                            { id: 'today', label: 'Today' },
+                            { id: 'this_week', label: 'This Week' },
+                            { id: 'this_month', label: 'This Month' },
+                            { id: 'next_30_days', label: 'Next 30 Days' },
+                            { id: 'this_quarter', label: 'This Quarter' },
+                            { id: 'this_year', label: 'This Year' },
+                            { id: 'custom', label: 'Custom Date Range...' }
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              className={`pipeline-filter-item-btn ${dateFilter === opt.id ? 'selected' : ''}`}
+                              onClick={() => {
+                                setDateFilter(opt.id);
+                                if (opt.id !== 'custom') {
+                                  setIsDateDropdownOpen(false);
+                                }
+                              }}
+                            >
+                              <span>{opt.label}</span>
+                              {dateFilter === opt.id && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                            </button>
+                          ))}
+                        </div>
+
+                        {dateFilter === 'custom' && (
+                          <div className="pipeline-filter-date-custom-panel">
+                            <div className="pipeline-filter-date-input-group">
+                              <label className="pipeline-filter-date-label">From Date</label>
+                              <input
+                                type="date"
+                                className="pipeline-filter-date-input"
+                                value={customDateStart}
+                                onChange={e => setCustomDateStart(e.target.value)}
+                              />
+                            </div>
+                            <div className="pipeline-filter-date-input-group">
+                              <label className="pipeline-filter-date-label">To Date</label>
+                              <input
+                                type="date"
+                                className="pipeline-filter-date-input"
+                                value={customDateEnd}
+                                onChange={e => setCustomDateEnd(e.target.value)}
+                              />
+                            </div>
+                            <div className="pipeline-filter-date-actions">
+                              <button
+                                type="button"
+                                className="pipeline-filter-date-btn-cancel"
+                                onClick={() => {
+                                  setCustomDateStart('');
+                                  setCustomDateEnd('');
+                                  setDateFilter('all');
+                                  setIsDateDropdownOpen(false);
+                                }}
+                              >
+                                Clear
+                              </button>
+                              <button
+                                type="button"
+                                className="pipeline-filter-date-btn-apply"
+                                onClick={() => setIsDateDropdownOpen(false)}
+                              >
+                                Apply
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Reset / Clear All Filters */}
+                  {isAnyDealFilterActive && (
+                    <button
+                      type="button"
+                      className="pipeline-filter-clear-all-btn"
+                      onClick={handleResetDealFilters}
+                      title="Clear all filters"
+                    >
+                      <X size={13} />
+                      <span>Reset Filters</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="pipeline-toolbar-right">
+                  {/* Create Deals Primary Button */}
+                  {canCreate && (
+                    <button
+                      className="pipeline-btn-create-deal"
+                      onClick={() => handleOpenAddDeal('Initial')}
+                      title="Create new deal"
+                    >
+                      <Plus size={15} />
+                      <span>Create deals</span>
+                      <ChevronDown size={13} />
+                    </button>
+                  )}
+
+                  {/* More Options */}
+                  {canCreate && (
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        type="button"
+                        className={`pipeline-btn-more ${isDealsToolbarMenuOpen ? 'active' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsDealsToolbarMenuOpen(prev => !prev);
+                        }}
+                        title="More Options"
+                      >
+                        <MoreHorizontal size={16} />
+                      </button>
+                      {isDealsToolbarMenuOpen && (
+                        <div
+                          className="pipeline-card-dropdown-menu"
+                          style={{ top: 'calc(100% + 6px)', right: 0, minWidth: '160px', zIndex: 100 }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="pipeline-card-menu-item"
+                            onClick={() => {
+                              setIsDealsToolbarMenuOpen(false);
+                              setShowAddStageModal(true);
+                            }}
+                          >
+                            <div className="pipeline-card-menu-item-left">
+                              <Plus size={14} style={{ color: '#0284c7' }} />
+                              <span>Add Stage</span>
+                            </div>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ----------------------------------------------------------------
+              3. Kanban Columns Board or List View
+              ---------------------------------------------------------------- */}
+              {isLoading ? (
+                viewMode === 'kanban' ? renderKanbanSkeleton(pipelines.length || 4, false) : renderTableSkeleton(7)
+              ) : viewMode === 'kanban' ? (
+                pipelines.length === 0 ? (
+                  <div className="pipeline-empty-state-card" style={{ maxWidth: '480px', margin: '40px auto' }}>
+                    <div className="pipeline-empty-icon-wrap" style={{ background: '#f0f9ff', color: '#0284c7' }}>
+                      <Briefcase size={32} />
+                    </div>
+                    <h3 className="pipeline-empty-state-title">No Deal Stages</h3>
+                    <p className="pipeline-empty-state-desc">
+                      No deal stages are currently configured. Click below to add a custom stage column.
+                    </p>
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '12px' }}>
+                      <button
+                        type="button"
+                        className="pipeline-empty-state-action-btn"
+                        onClick={() => setShowAddStageModal(true)}
+                      >
+                        <Plus size={14} />
+                        <span>Add Stage</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="pipeline-kanban-board">
+                    {pipelines.map((pipeline, pIndex) => {
+                      const activePipelineNames = new Set(pipelines.map(p => (p.name || p.id || '').toLowerCase()));
+                      const pipelineDeals = filteredDeals.filter(d => {
+                        const dp = (d.pipeline || '').trim().toLowerCase();
+                        const ds = (d.stage || '').trim().toLowerCase();
+                        const pName = (pipeline.name || '').trim().toLowerCase();
+                        const pId = (pipeline.id || '').trim().toLowerCase();
+                        if (dp === pName || dp === pId || ds === pName || ds === pId) return true;
+                        if ((!dp || (!activePipelineNames.has(dp) && !activePipelineNames.has(ds))) && pIndex === 0) {
+                          return true;
+                        }
+                        return false;
+                      });
+                      const count = pipelineDeals.length;
+                      const totalStageAmountINR = pipelineDeals.reduce((sum, d) => sum + getDealValueInINR(d), 0);
+
+                      return (
+                        <div
+                          key={pipeline.id}
+                          className={`pipeline-column ${dragOverColumnId === pipeline.id ? 'drag-over' : ''}`}
+                          onDragOver={e => handleDragOver(e, pipeline.id)}
+                          onDragLeave={e => handleDragLeave(e, pipeline.id)}
+                          onDrop={e => handleDrop(e, pipeline.name)}
+                        >
+                          {/* Column Header */}
+                          <div className="pipeline-column-header">
+                            {editingPipelineId === pipeline.id ? (
+                              <div className="pipeline-inline-edit-wrap">
+                                <input
+                                  type="text"
+                                  className="pipeline-inline-edit-input"
+                                  value={editingPipelineName}
+                                  autoFocus
+                                  onChange={e => setEditingPipelineName(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') handleSaveEditPipeline(pipeline.id);
+                                    if (e.key === 'Escape') setEditingPipelineId(null);
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className="pipeline-inline-save-btn"
+                                  onClick={() => handleSaveEditPipeline(pipeline.id)}
+                                  title="Save stage name"
+                                >
+                                  <CheckCircle size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="pipeline-inline-cancel-btn"
+                                  onClick={() => setEditingPipelineId(null)}
+                                  title="Cancel"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="pipeline-stage-info">
+                                  <h3 className="pipeline-stage-name" title={pipeline.name}>
+                                    {pipeline.name}
+                                  </h3>
+                                  <span className={`pipeline-stage-badge ${pipeline.badgeClass || 'new'}`}>
+                                    {count}
+                                  </span>
+                                </div>
+
+                                <div className="pipeline-col-header-actions" style={{ position: 'relative' }}>
+                                  <button
+                                    type="button"
+                                    className="pipeline-col-action-btn more"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveColMenuId(activeColMenuId === pipeline.id ? null : pipeline.id);
+                                    }}
+                                    title="Stage options"
+                                  >
+                                    <MoreHorizontal size={14} />
+                                  </button>
+
+                                  {activeColMenuId === pipeline.id && (
+                                    <div
+                                      className="pipeline-card-dropdown-menu"
+                                      style={{ top: 'calc(100% + 4px)', right: 0, minWidth: '160px', zIndex: 90 }}
+                                      onClick={e => e.stopPropagation()}
+                                    >
+                                      {canCreate && (
+                                        <button
+                                          type="button"
+                                          className="pipeline-card-menu-item"
+                                          onClick={() => {
+                                            setActiveColMenuId(null);
+                                            handleOpenAddDeal(pipeline.name);
+                                          }}
+                                        >
+                                          <div className="pipeline-card-menu-item-left">
+                                            <Plus size={13} style={{ color: '#0284c7' }} />
+                                            <span>Add Deal</span>
+                                          </div>
+                                        </button>
+                                      )}
+                                      {canUpdate && (
+                                        <button
+                                          type="button"
+                                          className="pipeline-card-menu-item"
+                                          onClick={(e) => handleStartEditPipeline(pipeline, e)}
+                                        >
+                                          <div className="pipeline-card-menu-item-left">
+                                            <Edit2 size={13} style={{ color: '#64748b' }} />
+                                            <span>Edit Stage</span>
+                                          </div>
+                                        </button>
+                                      )}
+                                      {canDelete && (
+                                        <>
+                                          <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-menu-item danger"
+                                            onClick={(e) => handleDeletePipeline(pipeline.id, e)}
+                                          >
+                                            <div className="pipeline-card-menu-item-left">
+                                              <Trash2 size={13} />
+                                              <span>Delete Stage</span>
+                                            </div>
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Deal Cards Scroll Container */}
+                          <div
+                            className="pipeline-cards-list"
+                            onDragOver={e => handleDragOver(e, pipeline.id)}
+                            onDrop={e => handleDrop(e, pipeline.name)}
+                          >
+                            {pipelineDeals.map(deal => (
+                              <div
+                                key={deal._id}
+                                className={`pipeline-card ${activeMenuId === deal._id ? 'menu-active' : ''} ${hoveredActivityDealId === deal._id ? 'activity-hovered' : ''} ${draggedDealId === deal._id ? 'dragging' : ''}`}
+                                draggable={canUpdate}
+                                onDragStart={e => handleDragStart(e, deal._id)}
+                                onDragEnd={handleDragEnd}
+                              >
+                                {/* Card Top: Avatar, Name, Location, 3-dots */}
+                                <div className="pipeline-card-top">
+                                  <div className="pipeline-card-person" style={{ cursor: 'pointer', alignItems: 'flex-start', minWidth: 0, overflow: 'hidden', flex: 1 }} onClick={() => setDetailedDealId(deal._id)}>
+                                    {deal.avatar ? (
+                                      <img
+                                        src={deal.avatar}
+                                        alt={deal.clientName}
+                                        className="pipeline-card-avatar"
+                                        onError={e => {
+                                          e.target.style.display = 'none';
+                                        }}
+                                      />
+                                    ) : (
+                                      <div className="pipeline-card-avatar">
+                                        {deal.clientName.charAt(0)}
+                                      </div>
+                                    )}
+                                    <div className="pipeline-card-name-wrap" style={{ minWidth: 0, overflow: 'hidden', flex: 1 }}>
+                                      <h4 className="pipeline-card-client-name" style={{ margin: 0 }}>
+                                        <button
+                                          type="button"
+                                          className="pipeline-card-client-name-link"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setDetailedDealId(deal._id);
+                                          }}
+                                          title="View activity and deal details"
+                                        >
+                                          {deal.clientName}
+                                        </button>
+                                      </h4>
+
+                                      {/* Origin + Status badge directly below deal name */}
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
+                                        {(() => {
+                                          const origin = getDealContactOrigin(deal);
+                                          return (
+                                            <>
+                                              {origin && (
+                                                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '3.5px' }}>
+                                                  <Globe size={11} style={{ color: origin === 'International' ? '#ea580c' : '#0284c7', flexShrink: 0 }} />
+                                                  <span>{origin}</span>
+                                                </span>
+                                              )}
+                                              <span
+                                                className={`pipeline-stage-badge ${(() => {
+                                                  const st = (deal.stage || deal.status || 'New').toLowerCase();
+                                                  if (st === 'won' || st === 'closed won' || st === 'active' || st === 'open') return 'won';
+                                                  if (st === 'lost' || st === 'closed lost' || st === 'unqualified' || st === 'spam') return 'lost';
+                                                  if (st === 'hot' || st === 'negotiation' || st === 'in progress' || st === 'contacted' || st === 'proposal sent') return 'hot';
+                                                  return 'new';
+                                                })()}`}
+                                                style={{ fontSize: '8px', padding: '0.8px 5px', borderRadius: '999px', fontWeight: 600, letterSpacing: '0.2px', lineHeight: '1.1' }}
+                                              >
+                                                {deal.stage || deal.status || 'New'}
+                                              </span>
+                                            </>
+                                          );
+                                        })()}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Options Button & Context Menu */}
+                                  <div style={{ position: 'relative' }}>
+                                    <button
+                                      className="pipeline-card-more-btn"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        if (activeMenuId === deal._id) {
+                                          setActiveMenuId(null);
+                                          setMoveSubmenuDealId(null);
+                                        } else {
+                                          setActiveMenuId(deal._id);
+                                          setMoveSubmenuDealId(null);
+                                        }
+                                      }}
+                                      title="Deal options"
+                                    >
+                                      <MoreHorizontal size={16} />
+                                    </button>
+
+                                    {/* Main 3-dots Actions Menu Card */}
+                                    {activeMenuId === deal._id && moveSubmenuDealId !== deal._id && (
+                                      <div
+                                        className="pipeline-card-dropdown-menu"
+                                        onClick={e => e.stopPropagation()}
+                                      >
+                                        {canUpdate && (
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-menu-item"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setMoveSubmenuDealId(deal._id);
+                                            }}
+                                          >
+                                            <div className="pipeline-card-menu-item-left">
+                                              <ArrowRightLeft size={14} style={{ color: '#0284c7' }} />
+                                              <span>Move</span>
+                                            </div>
+                                            <ChevronRight size={13} style={{ color: '#94a3b8' }} />
+                                          </button>
+                                        )}
+
+                                        <button
+                                          type="button"
+                                          className="pipeline-card-menu-item"
+                                          onClick={(e) => handleOpenViewDeal(deal, e)}
+                                        >
+                                          <div className="pipeline-card-menu-item-left">
+                                            <Eye size={14} style={{ color: '#64748b' }} />
+                                            <span>View Deal</span>
+                                          </div>
+                                        </button>
+
+                                        {canUpdate && (
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-menu-item"
+                                            onClick={(e) => handleOpenEditDeal(deal, e)}
+                                          >
+                                            <div className="pipeline-card-menu-item-left">
+                                              <Edit2 size={14} style={{ color: '#64748b' }} />
+                                              <span>Edit Deal</span>
+                                            </div>
+                                          </button>
+                                        )}
+
+                                        {canDelete && (
+                                          <>
+                                            <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                            <button
+                                              type="button"
+                                              className="pipeline-card-menu-item danger"
+                                              onClick={e => handleDeleteDeal(deal._id, e)}
+                                            >
+                                              <div className="pipeline-card-menu-item-left">
+                                                <Trash2 size={14} />
+                                                <span>Delete Deal</span>
+                                              </div>
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Nested Move Stage Submenu */}
+                                    {activeMenuId === deal._id && moveSubmenuDealId === deal._id && (
+                                      <div
+                                        className="pipeline-card-dropdown-menu submenu"
+                                        onClick={e => e.stopPropagation()}
+                                      >
+                                        <div className="pipeline-submenu-header">
+                                          <button
+                                            type="button"
+                                            className="pipeline-submenu-back"
+                                            onClick={() => setMoveSubmenuDealId(null)}
+                                          >
+                                            <ChevronsLeft size={12} />
+                                            <span>Back</span>
+                                          </button>
+                                          <span className="pipeline-submenu-title">Move Pipeline</span>
+                                        </div>
+
+                                        {pipelines.map(p => (
+                                          <button
+                                            key={p.id}
+                                            type="button"
+                                            className="pipeline-card-menu-item"
+                                            onClick={e => handleMovePipeline(deal._id, p.name, e)}
+                                          >
+                                            <span className={`pipeline-menu-indicator ${p.badgeClass || 'new'}`} />
+                                            <span>{p.name}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Card Body Fields */}
+                                <div className="pipeline-card-body">
+                                  <div className="pipeline-card-field">
+                                    <span className="pipeline-card-label">Deal value</span>
+                                    <span className="pipeline-card-val-strong" style={{ color: '#0284c7' }}>
+                                      {deal.currency || '$'}{Number(deal.dealValue).toLocaleString()}
+                                    </span>
+                                  </div>
+
+                                  <div className="pipeline-card-field">
+                                    <span className="pipeline-card-label">Expected close date</span>
+                                    <span className="pipeline-card-val">
+                                      {formatDateDDMMYYYY(deal.expectedCloseDate)}
+                                    </span>
+                                  </div>
+
+                                  <div className="pipeline-card-field">
+                                    <span className="pipeline-card-label">Deal Owner</span>
+                                    <span className="pipeline-card-val">{deal.salesOwner}</span>
+                                  </div>
+
+                                  {(deal.associatedContact || deal.email) && (
+                                    <div className="pipeline-card-field">
+                                      <span className="pipeline-card-label">Contact</span>
+                                      <span
+                                        className="pipeline-card-val"
+                                        style={{
+                                          color: '#0284c7',
+                                          fontWeight: 600,
+                                          cursor: 'pointer',
+                                          textDecoration: 'none',
+                                          display: 'inline-block'
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                                        onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const targetEmail = (deal.associatedContact || deal.email || '').trim().toLowerCase();
+                                          const targetName = (deal.clientName || '').trim().toLowerCase();
+                                          const matched = contacts.find(c => {
+                                            if (deal.contactId && c._id === deal.contactId) return true;
+                                            const ce = (c.email || '').trim().toLowerCase();
+                                            const cn = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+                                            return (ce && ce === targetEmail) || (cn && (cn === targetEmail || cn === targetName));
+                                          });
+                                          if (matched) {
+                                            setActiveTab('contacts');
+                                            setDetailedContactId(matched._id);
+                                          } else {
+                                            setActiveTab('contacts');
+                                            setDetailedContactId(null);
+                                          }
+                                        }}
+                                        title="Click to view contact details"
+                                      >
+                                        {deal.associatedContact || deal.email}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Card Bottom Actions */}
+                                <div className="pipeline-card-actions">
+                                  <div className="pipeline-card-actions-left">
+                                    <button
+                                      type="button"
+                                      className="pipeline-card-action-circle"
+                                      title="Milestones & Payment Records"
+                                      onClick={() => {
+                                        setMilestoneModalDealId(deal._id);
+                                        setShowMilestoneModal(true);
+                                      }}
+                                    >
+                                      <CreditCard size={12} />
+                                    </button>
+                                    <a
+                                      href={`mailto:${deal.email || 'client@example.com'}`}
+                                      className="pipeline-card-action-circle"
+                                      title="Send Mail"
+                                    >
+                                      <Mail size={12} />
+                                    </a>
+                                    <button
+                                      type="button"
+                                      className="pipeline-card-action-circle"
+                                      title="Send Message"
+                                      onClick={() => alert(`Message ${deal.clientName}`)}
+                                    >
+                                      <MessageSquare size={12} />
+                                    </button>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    className={`pipeline-card-view-activity-pill ${hoveredActivityDealId === deal._id ? 'active' : ''}`}
+                                    onMouseEnter={(e) => handleActivityMouseEnter(deal._id, 'deal', e)}
+                                    onMouseLeave={handleActivityMouseLeave}
+                                    onClick={() => {
+                                      setHoveredActivityDealId(null);
+                                      setHoveredActivityContactId(null);
+                                      setDetailedDealId(deal._id);
+                                    }}
+                                    title="View full activity timeline and deal details"
+                                  >
+                                    <span>View activity</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Column Footer with Approx. Amount in INR converted via Frankfurter v2 */}
+                          <div
+                            className="pipeline-column-footer"
+                            title="These rates might be fluctuating as per the live rates"
+                          >
+                            <span className="pipeline-stage-footer-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <span>Approximate Value</span>
+                              <Info size={11} style={{ color: '#94a3b8' }} />
+                            </span>
+                            <span
+                              className="pipeline-stage-footer-amount"
+                              title="These rates might be fluctuating as per the live rates"
+                            >
+                              ₹{totalStageAmountINR.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              ) : (
+                /* Table List View */
+                filteredDeals.length === 0 ? (
+                  <div className="pipeline-empty-state-card" style={{ maxWidth: '480px', margin: '40px auto' }}>
+                    <div className="pipeline-empty-icon-wrap" style={{ background: '#f0f9ff', color: '#0284c7' }}>
+                      <Briefcase size={32} />
+                    </div>
+                    <h3 className="pipeline-empty-state-title">No Deals Found</h3>
+                    <p className="pipeline-empty-state-desc">
+                      No deals match your current filter criteria. Click below to create a new deal.
+                    </p>
+                    <button
+                      type="button"
+                      className="pipeline-empty-state-action-btn"
+                      onClick={() => handleOpenAddDeal()}
+                    >
+                      <Plus size={14} />
+                      <span>Add Deal</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="pipeline-table-view">
+                    <div className="pipeline-table-card">
+                      <table className="pipeline-table">
+                        <thead>
+                          <tr>
+                            <th>Client / Contact</th>
+                            <th>Deal Name</th>
+                            <th>Location</th>
+                            <th>Value</th>
+                            <th>Expected Close</th>
+                            <th>Owner</th>
+                            <th>Stage</th>
+                            <th>Status</th>
+                            <th style={{ textAlign: 'right' }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredDeals.map(deal => (
+                            <tr key={deal._id}>
+                              <td>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <div className="pipeline-card-avatar" style={{ width: '28px', height: '28px' }}>
+                                    {deal.clientName.charAt(0)}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="pipeline-card-client-name-link"
+                                    onClick={() => setDetailedDealId(deal._id)}
+                                    title="View deal activity and details"
+                                  >
+                                    {deal.clientName}
+                                  </button>
+                                </div>
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="pipeline-card-client-name-link"
+                                  onClick={() => setDetailedDealId(deal._id)}
+                                  title="View deal activity and details"
+                                >
+                                  {deal.dealName || deal.clientName}
+                                </button>
+                              </td>
+                              <td>{deal.location}</td>
+                              <td style={{ fontWeight: 700, color: '#0284c7' }}>{deal.currency || '$'} {Number(deal.dealValue).toLocaleString()}</td>
+                              <td>{formatDateDDMMYYYY(deal.expectedCloseDate)}</td>
+                              <td>{deal.salesOwner}</td>
+                              <td>
+                                <span className="pipeline-stage-badge" style={{ fontSize: '11px', background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' }}>
+                                  {deal.pipeline || 'Sales Pipeline'}
+                                </span>
+                              </td>
+                              <td>
+                                <span
+                                  className={`pipeline-stage-badge ${deal.stage === 'New'
+                                    ? 'new'
+                                    : deal.stage === 'Negotiation'
+                                      ? 'negotiation'
+                                      : deal.stage === 'Won'
+                                        ? 'won'
+                                        : 'lost'
+                                    }`}
+                                >
+                                  {deal.stage}
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
+                                  <button
+                                    style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer' }}
+                                    onClick={() => {
+                                      const nextStage = deal.stage === 'New' ? 'Negotiation' : deal.stage === 'Negotiation' ? 'Won' : 'New';
+                                      handleMoveStage(deal._id, nextStage);
+                                    }}
+                                  >
+                                    Advance
+                                  </button>
+                                  <button
+                                    style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #fee2e2', background: '#fef2f2', color: '#ef4444', cursor: 'pointer' }}
+                                    onClick={e => handleDeleteDeal(deal._id, e)}
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              )}
+            </>
+          )
+        )}
+
+        {/* CONTACTS TAB VIEW (Full Interactive Contacts Management & 3-Section Detail View) */}
+        {activeTab === 'contacts' && (
+          (detailedContactId && isLoading) ? (
+            renderDetailSkeleton()
+          ) : detailedContact ? (
+            <div className="pipeline-detail-view-container">
+              {/* Top Header Bar */}
+              <div className="pipeline-detail-top-nav">
+                <div className="pipeline-detail-nav-left">
+                  <button
+                    type="button"
+                    className="pipeline-detail-back-btn"
+                    onClick={() => {
+                      setDetailedContactId(null);
+                      setDetailedDealId(null);
+                    }}
+                    title="Back to Contacts Board"
+                  >
+                    <ChevronsLeft size={16} />
+                    <span>Back to Contacts</span>
+                  </button>
+
+                  <div className="pipeline-detail-title-group">
+                    <div className="pipeline-card-avatar" style={{ width: '38px', height: '38px', fontSize: '15px' }}>
+                      {detailedContact.firstName ? detailedContact.firstName.charAt(0).toUpperCase() : 'C'}
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h2 className="pipeline-detail-deal-title">{`${detailedContact.firstName || ''} ${detailedContact.lastName || ''}`.trim() || 'Unnamed Contact'}</h2>
+                        {/* Lead Stage Badge (Refined, smaller, professional) */}
+                        {(() => {
+                          const stageName = detailedContact.leadStage || 'Lead';
+                          const stLower = stageName.toLowerCase();
+                          let stageBg = '#f5f3ff';
+                          let stageColor = '#6d28d9';
+                          let stageBorder = '#ddd6fe';
+                          if (stLower.includes('hot')) {
+                            stageBg = '#fff7ed'; stageColor = '#c2410c'; stageBorder = '#fed7aa';
+                          } else if (stLower.includes('won') || stLower.includes('customer')) {
+                            stageBg = '#ecfdf5'; stageColor = '#047857'; stageBorder = '#a7f3d0';
+                          } else if (stLower.includes('prop') || stLower.includes('qual')) {
+                            stageBg = '#eff6ff'; stageColor = '#1d4ed8'; stageBorder = '#bfdbfe';
+                          } else if (stLower.includes('cold') || stLower.includes('lost')) {
+                            stageBg = '#f8fafc'; stageColor = '#475569'; stageBorder = '#cbd5e1';
+                          }
+                          return (
+                            <span
+                              style={{
+                                fontSize: '10.5px',
+                                padding: '1.5px 8px',
+                                background: stageBg,
+                                color: stageColor,
+                                border: `1px solid ${stageBorder}`,
+                                borderRadius: '999px',
+                                fontWeight: 600,
+                                letterSpacing: '0.2px',
+                                lineHeight: '1.2',
+                                display: 'inline-flex',
+                                alignItems: 'center'
+                              }}
+                            >
+                              {stageName}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <span style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
+                        {detailedContact.location && <><MapPin size={11} /> {detailedContact.location} • </>}
+                        {(detailedContact.company && detailedContact.company !== 'Direct Client') ? (
+                          <>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600, color: '#334155' }}>
+                              <Building2 size={12} style={{ color: '#0284c7', flexShrink: 0 }} />
+                              {detailedContact.company}
+                            </span>
+                            <span style={{ color: '#94a3b8' }}>•</span>
+                          </>
+                        ) : null}
+                        {/* Lead Status Badge */}
+                        {(() => {
+                          const st = (detailedContact.leadStatus || 'New').trim();
+                          const stLower = st.toLowerCase();
+                          let badgeBg = '#e0f2fe';
+                          let badgeColor = '#0369a1';
+                          let badgeBorder = '#bae6fd';
+                          let dotColor = '#0284c7';
+
+                          if (stLower === 'won' || stLower === 'qualified' || stLower === 'active' || stLower === 'open') {
+                            badgeBg = '#dcfce7'; badgeColor = '#15803d'; badgeBorder = '#86efac'; dotColor = '#16a34a';
+                          } else if (stLower === 'lost' || stLower === 'unqualified' || stLower === 'spam') {
+                            badgeBg = '#ffe4e6'; badgeColor = '#be123c'; badgeBorder = '#fecdd3'; dotColor = '#e11d48';
+                          } else if (stLower === 'hot' || stLower === 'in progress' || stLower === 'contacted') {
+                            badgeBg = '#fef3c7'; badgeColor = '#b45309'; badgeBorder = '#fde68a'; dotColor = '#d97706';
+                          }
+
+                          return (
+                            <span
+                              style={{
+                                fontSize: '9px',
+                                padding: '1px 6.5px',
+                                background: badgeBg,
+                                color: badgeColor,
+                                border: `1px solid ${badgeBorder}`,
+                                borderRadius: '999px',
+                                fontWeight: 600,
+                                letterSpacing: '0.25px',
+                                lineHeight: '1.2',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3.5px'
+                              }}
+                            >
+                              <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: dotColor, display: 'inline-block', flexShrink: 0 }} />
+                              {st}
+                            </span>
+                          );
+                        })()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pipeline-detail-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <NotificationBell filterType="CRM" />
+                </div>
+              </div>
+
+              {/* 3-Section Split Body */}
+              <div className="pipeline-detail-split-body three-sections">
+                {/* 1. LEFT SECTION: Contact Details, Project Details & Payment Details */}
+                <div className="pipeline-detail-col-deal">
+                  <div className="pipeline-detail-card-panel">
+                    {/* Accordion 1: Contact Details */}
+                    <div className="pipeline-accordion-section">
+                      <div
+                        className="pipeline-accordion-header"
+                        onClick={() => setContactAccordionState(prev => ({ ...prev, contact: !prev.contact }))}
+                      >
+                        <div className="pipeline-accordion-title-wrap">
+                          <span className="pipeline-accordion-title-icon">
+                            <User size={12} strokeWidth={2.5} />
+                          </span>
+                          <span>Contact Details</span>
+                        </div>
+
+                        <div className="pipeline-accordion-actions" onClick={e => e.stopPropagation()}>
+                          <div style={{ position: 'relative' }}>
+                            <button
+                              type="button"
+                              className="pipeline-card-more-btn"
+                              style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: '#64748b', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsContactDetailsMenuOpen(prev => !prev);
+                              }}
+                              title="Contact Options"
+                            >
+                              <MoreHorizontal size={16} />
+                            </button>
+
+                            {isContactDetailsMenuOpen && (
+                              <div
+                                className="pipeline-card-dropdown-menu"
+                                style={{ top: 'calc(100% + 4px)', right: '0', minWidth: '150px', zIndex: 90 }}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  className="pipeline-card-menu-item"
+                                  onClick={() => {
+                                    setIsContactDetailsMenuOpen(false);
+                                    handleOpenEditContact(detailedContact);
+                                  }}
+                                >
+                                  <div className="pipeline-card-menu-item-left">
+                                    <Edit2 size={13} style={{ color: '#64748b' }} />
+                                    <span>Edit</span>
+                                  </div>
+                                </button>
+                                <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                <button
+                                  type="button"
+                                  className="pipeline-card-menu-item danger"
+                                  onClick={(e) => {
+                                    setIsContactDetailsMenuOpen(false);
+                                    handleDeleteContact(detailedContact._id, e);
+                                    setDetailedContactId(null);
+                                  }}
+                                >
+                                  <div className="pipeline-card-menu-item-left">
+                                    <Trash2 size={13} />
+                                    <span>Delete</span>
+                                  </div>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            className={`pipeline-accordion-toggle-btn ${contactAccordionState.contact ? 'open' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setContactAccordionState(prev => ({ ...prev, contact: !prev.contact }));
+                            }}
+                            title={contactAccordionState.contact ? 'Collapse Section' : 'Expand Section'}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={`pipeline-accordion-body ${contactAccordionState.contact ? '' : 'collapsed'}`}>
+                        <div className="pipeline-detail-kv-grid">
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">First Name</span>
+                            <span className="pipeline-detail-v-val">{detailedContact.firstName || '—'}</span>
+                          </div>
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Last Name</span>
+                            <span className="pipeline-detail-v-val">{detailedContact.lastName || '—'}</span>
+                          </div>
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Email</span>
+                            <span className="pipeline-detail-v-val">
+                              <a href={`mailto:${detailedContact.email}`} style={{ color: '#0284c7', textDecoration: 'none' }}>
+                                {detailedContact.email || '—'}
+                              </a>
+                            </span>
+                          </div>
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Phone</span>
+                            <span className="pipeline-detail-v-val">
+                              <a href={`tel:${(detailedContact.countryCode || '') + (detailedContact.phone || '')}`} style={{ color: '#0f172a', textDecoration: 'none' }}>
+                                {detailedContact.phone ? formatPhoneNumber(detailedContact.phone, detailedContact.countryCode) : '—'}
+                              </a>
+                            </span>
+                          </div>
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Company</span>
+                            <span className="pipeline-detail-v-val">
+                              {(detailedContact.company && detailedContact.company !== 'Direct Client') ? detailedContact.company : '—'}
+                            </span>
+                          </div>
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Origin</span>
+                            <span className="pipeline-detail-v-val">
+                              <span className={`pipeline-stage-badge ${detailedContact.origin === 'International' ? 'hot' : 'new'}`} style={{ padding: '2px 8px', fontSize: '11px' }}>
+                                {detailedContact.origin || 'Domestic'}
+                              </span>
+                            </span>
+                          </div>
+
+                          {/* Interactive Lead Stage Pill Badge with Dropdown */}
+                          <div className="pipeline-detail-kv-row" style={{ position: 'relative' }}>
+                            <span className="pipeline-detail-k-label">Lead Stage</span>
+                            <div style={{ position: 'relative', display: 'inline-block' }}>
+                              <button
+                                type="button"
+                                className="pipeline-pill-badge-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsContactLeadStageDropdownOpen(prev => !prev);
+                                }}
+                                title="Click to change lead stage"
+                              >
+                                <span>{detailedContact.leadStage || 'Lead Pipeline'}</span>
+                                <ChevronDown size={11} />
+                              </button>
+
+                              {isContactLeadStageDropdownOpen && (
+                                <div
+                                  className="pipeline-card-dropdown-menu"
+                                  style={{ top: 'calc(100% + 4px)', right: 0, minWidth: '180px', zIndex: 120 }}
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  <div style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                    Select Lead Stage
+                                  </div>
+                                  {effectiveContactStages.map(s => {
+                                    const isSelected = (detailedContact.leadStage || 'Lead').toLowerCase() === s.name.toLowerCase();
+                                    return (
+                                      <button
+                                        key={s.id}
+                                        type="button"
+                                        className={`pipeline-card-menu-item ${isSelected ? 'active' : ''}`}
+                                        onClick={() => {
+                                          setContacts(prev => prev.map(c => c._id === detailedContact._id ? { ...c, leadStage: s.name } : c));
+                                          setIsContactLeadStageDropdownOpen(false);
+                                        }}
+                                      >
+                                        <span style={{ fontWeight: isSelected ? 700 : 500 }}>{s.name}</span>
+                                        {isSelected && (
+                                          <CheckCircle size={13} style={{ color: '#0284c7', marginLeft: 'auto' }} />
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Interactive Lead Status Pill Badge with Dropdown */}
+                          <div className="pipeline-detail-kv-row" style={{ position: 'relative' }}>
+                            <span className="pipeline-detail-k-label">Lead Status</span>
+                            <div style={{ position: 'relative', display: 'inline-block' }}>
+                              <button
+                                type="button"
+                                className={`pipeline-stage-pill-badge-btn ${(detailedContact.leadStatus || 'New').toLowerCase() === 'open' || (detailedContact.leadStatus || 'New').toLowerCase() === 'won' ? 'won' : (detailedContact.leadStatus || 'New').toLowerCase() === 'hot' || (detailedContact.leadStatus || 'New').toLowerCase() === 'in progress' ? 'hot' : (detailedContact.leadStatus || 'New').toLowerCase() === 'unqualified' || (detailedContact.leadStatus || 'New').toLowerCase() === 'lost' ? 'lost' : 'new'}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsContactLeadStatusDropdownOpen(prev => !prev);
+                                }}
+                                title="Click to change lead status"
+                              >
+                                <span>{detailedContact.leadStatus || 'New'}</span>
+                                <ChevronDown size={11} />
+                              </button>
+
+                              {isContactLeadStatusDropdownOpen && (
+                                <div
+                                  className="pipeline-card-dropdown-menu"
+                                  style={{ top: 'calc(100% + 4px)', right: 0, minWidth: '170px', zIndex: 120 }}
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  <div style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                    Select Lead Status
+                                  </div>
+                                  {['New', 'Open', 'In Progress', 'Contacted', 'Qualified', 'Unqualified'].map(st => {
+                                    const isSelected = (detailedContact.leadStatus || 'New').toLowerCase() === st.toLowerCase();
+                                    return (
+                                      <button
+                                        key={st}
+                                        type="button"
+                                        className={`pipeline-card-menu-item ${isSelected ? 'active' : ''}`}
+                                        onClick={() => {
+                                          setContacts(prev => prev.map(c => c._id === detailedContact._id ? { ...c, leadStatus: st } : c));
+                                          setIsContactLeadStatusDropdownOpen(false);
+                                        }}
+                                      >
+                                        <span style={{ fontWeight: isSelected ? 700 : 500 }}>{st}</span>
+                                        {isSelected && (
+                                          <CheckCircle size={13} style={{ color: '#0284c7', marginLeft: 'auto' }} />
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Contact Source</span>
+                            <span className="pipeline-detail-v-val">{detailedContact.contactSource || 'Direct Search'}</span>
+                          </div>
+
+                          <div className="pipeline-detail-kv-row" style={{ position: 'relative' }}>
+                            <span className="pipeline-detail-k-label">Added By</span>
+                            <div style={{ position: 'relative', display: 'inline-block' }}>
+                              {(() => {
+                                const addedByName = detailedContact.addedBy || detailedContact.owner || 'Admin System';
+                                const emp = getAddedByEmployee(addedByName);
+                                const empFullName = (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || addedByName;
+                                const empDesignation = emp?.designation || (typeof emp?.role === 'string' ? emp?.role : emp?.role?.name) || (addedByName === 'Admin System' ? 'System Administrator' : 'Operations Specialist');
+                                const isEmpActive = emp ? (emp.isActive !== false && emp.status !== 'Inactive') : true;
+                                const empEmail = emp?.officialEmail || emp?.email || (addedByName === 'Admin System' ? 'admin@bhoomi.com' : `${addedByName.toLowerCase().replace(/\s+/g, '.')}@bhoomi.com`);
+                                const empPhone = emp?.phone || emp?.mobile || emp?.phoneNumber || emp?.alternatePhone || (addedByName === 'Admin System' ? '+91 98765 43210' : '—');
+                                const empDepartment = emp?.department || emp?.dept || (addedByName === 'Admin System' ? 'Administration & Operations' : 'Sales & Support');
+                                const empAddedDate = formatISTDateTime(detailedContact.createdAt || detailedContact.createdDate || detailedContact.date || new Date());
+
+                                return (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="pipeline-owner-pill-badge-btn"
+                                      onMouseEnter={(e) => {
+                                        if (contactAddedByPopoverTimeoutRef.current) clearTimeout(contactAddedByPopoverTimeoutRef.current);
+                                        const rect = e.currentTarget.getBoundingClientRect();
+                                        setContactAddedByPopoverCoords({
+                                          top: Math.max(12, rect.top - 12),
+                                          left: rect.right + 12
+                                        });
+                                        setIsContactAddedByPopoverOpen(true);
+                                      }}
+                                      onMouseLeave={() => {
+                                        contactAddedByPopoverTimeoutRef.current = setTimeout(() => {
+                                          setIsContactAddedByPopoverOpen(false);
+                                        }, 180);
+                                      }}
+                                    >
+                                      <div className="pipeline-owner-pill-avatar">
+                                        {empFullName.charAt(0).toUpperCase()}
+                                      </div>
+                                      <span>{empFullName}</span>
+                                    </button>
+
+                                    {isContactAddedByPopoverOpen && (
+                                      <div
+                                        className="pipeline-dealer-hover-popover outside-popover"
+                                        style={{
+                                          position: 'fixed',
+                                          top: `${contactAddedByPopoverCoords.top}px`,
+                                          left: `${contactAddedByPopoverCoords.left}px`,
+                                          zIndex: 99999
+                                        }}
+                                        onMouseEnter={() => {
+                                          if (contactAddedByPopoverTimeoutRef.current) clearTimeout(contactAddedByPopoverTimeoutRef.current);
+                                          setIsContactAddedByPopoverOpen(true);
+                                        }}
+                                        onMouseLeave={() => {
+                                          contactAddedByPopoverTimeoutRef.current = setTimeout(() => {
+                                            setIsContactAddedByPopoverOpen(false);
+                                          }, 180);
+                                        }}
+                                        onClick={e => e.stopPropagation()}
+                                      >
+                                        <div className="pipeline-dealer-popover-header">
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                                            <div className="pipeline-detail-clean-svg-icon contact" style={{ width: '32px', height: '32px', minWidth: '32px' }}>
+                                              <User size={16} strokeWidth={2} />
+                                            </div>
+                                            <div style={{ overflow: 'hidden', minWidth: 0 }}>
+                                              <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                                {empFullName}
+                                              </h4>
+                                              <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                                {empDesignation}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <span
+                                            className={`pipeline-stage-badge ${isEmpActive ? 'won' : 'lost'}`}
+                                            style={{
+                                              marginLeft: 'auto',
+                                              fontSize: '10px',
+                                              padding: '2px 8px',
+                                              lineHeight: '14px',
+                                              height: '18px',
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              borderRadius: '10px',
+                                              fontWeight: 600,
+                                              flexShrink: 0
+                                            }}
+                                          >
+                                            {isEmpActive ? 'Active' : 'Inactive'}
+                                          </span>
+                                        </div>
+
+                                        <div className="pipeline-dealer-popover-body">
+                                          <div className="pipeline-dealer-popover-row">
+                                            <div
+                                              className="pipeline-dealer-popover-icon-box"
+                                              data-tooltip="Email"
+                                              title="Email"
+                                            >
+                                              <Mail size={13} style={{ color: '#0284c7', flexShrink: 0 }} />
+                                            </div>
+                                            {empEmail && empEmail !== '—' && empEmail !== '-' ? (
+                                              <a
+                                                href={`mailto:${empEmail}`}
+                                                style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#0284c7' }}
+                                                title={empEmail}
+                                              >
+                                                {empEmail}
+                                              </a>
+                                            ) : (
+                                              <span style={{ color: '#64748b' }}>—</span>
+                                            )}
+                                          </div>
+
+                                          <div className="pipeline-dealer-popover-row">
+                                            <div
+                                              className="pipeline-dealer-popover-icon-box"
+                                              data-tooltip="Phone"
+                                              title="Phone"
+                                            >
+                                              <Phone size={13} style={{ color: '#16a34a', flexShrink: 0 }} />
+                                            </div>
+                                            {empPhone && empPhone !== '—' && empPhone !== '-' ? (
+                                              <a
+                                                href={`tel:${empPhone.replace(/\s+/g, '')}`}
+                                                style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#16a34a' }}
+                                                title={empPhone}
+                                              >
+                                                {empPhone}
+                                              </a>
+                                            ) : (
+                                              <span style={{ color: '#64748b' }}>—</span>
+                                            )}
+                                          </div>
+
+                                          <div className="pipeline-dealer-popover-row">
+                                            <div
+                                              className="pipeline-dealer-popover-icon-box"
+                                              data-tooltip="Department"
+                                              title="Department"
+                                            >
+                                              <Briefcase size={13} style={{ color: '#6366f1', flexShrink: 0 }} />
+                                            </div>
+                                            <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#334155' }}>
+                                              {empDepartment}
+                                            </span>
+                                          </div>
+
+                                          <div className="pipeline-dealer-popover-row">
+                                            <div
+                                              className="pipeline-dealer-popover-icon-box"
+                                              data-tooltip="Added On"
+                                              title="Added On"
+                                            >
+                                              <Calendar size={13} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                                            </div>
+                                            <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', color: '#334155' }}>
+                                              {empAddedDate}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          </div>
+
+                          <div className="pipeline-detail-kv-row">
+                            <span className="pipeline-detail-k-label">Created On</span>
+                            <span className="pipeline-detail-v-val">
+                              {formatISTDateTime(detailedContact.createdAt || detailedContact.createdDate || detailedContact.date)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Accordion 2: Project Details */}
+                    <div className="pipeline-accordion-section">
+                      <div
+                        className="pipeline-accordion-header"
+                        onClick={() => setContactAccordionState(prev => ({ ...prev, project: !prev.project }))}
+                      >
+                        <div className="pipeline-accordion-title-wrap">
+                          <span className="pipeline-accordion-title-icon" style={{ background: '#f5f3ff', color: '#7c3aed' }}>
+                            <Briefcase size={12} strokeWidth={2.5} />
+                          </span>
+                          <span>Project Details</span>
+                        </div>
+
+                        <div className="pipeline-accordion-actions">
+                          <button
+                            type="button"
+                            className={`pipeline-accordion-toggle-btn ${contactAccordionState.project ? 'open' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setContactAccordionState(prev => ({ ...prev, project: !prev.project }))
+                            }}
+                            title={contactAccordionState.project ? 'Collapse Section' : 'Expand Section'}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={`pipeline-accordion-body ${contactAccordionState.project ? '' : 'collapsed'}`}>
+                        {detailedContact.projectId || detailedContact.projectName ? (
+                          <div className="pipeline-detail-kv-grid">
+                            {detailedContact.projectId && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Project ID</span>
+                                <span className="pipeline-detail-v-val" style={{ color: '#0284c7', fontFamily: 'monospace', fontWeight: 700 }}>
+                                  {detailedContact.projectId}
+                                </span>
+                              </div>
+                            )}
+                            <div className="pipeline-detail-kv-row">
+                              <span className="pipeline-detail-k-label">Project Name</span>
+                              <span className="pipeline-detail-v-val font-semibold">{detailedContact.projectName}</span>
+                            </div>
+                            {detailedContact.projectType && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Project Type</span>
+                                <span className="pipeline-detail-v-val">{detailedContact.projectType}</span>
+                              </div>
+                            )}
+                            {detailedContact.projectCost && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Project Cost</span>
+                                <span className="pipeline-detail-v-val" style={{ fontWeight: 700, color: '#0284c7' }}>
+                                  {detailedContact.projectCost}
+                                </span>
+                              </div>
+                            )}
+                            {detailedContact.projectTimeline && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Timeline</span>
+                                <span className="pipeline-detail-v-val">{detailedContact.projectTimeline}</span>
+                              </div>
+                            )}
+                            {detailedContact.projectStatus && (
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Status</span>
+                                <span className="pipeline-detail-v-val">{detailedContact.projectStatus}</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8' }}>
+                            <Briefcase size={28} style={{ margin: '0 auto 8px', opacity: 0.45 }} />
+                            <p style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#64748b' }}>No Associated Project</p>
+                            <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#94a3b8' }}>There is no active project linked to this contact yet.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Accordion 3: Payment Details */}
+                    <div className="pipeline-accordion-section">
+                      <div
+                        className="pipeline-accordion-header"
+                        onClick={() => setContactAccordionState(prev => ({ ...prev, payment: !prev.payment }))}
+                      >
+                        <div className="pipeline-accordion-title-wrap">
+                          <span className="pipeline-accordion-title-icon" style={{ background: '#ecfdf5', color: '#16a34a' }}>
+                            <CreditCard size={12} strokeWidth={2.5} />
+                          </span>
+                          <span>Payment Details</span>
+                        </div>
+
+                        <div className="pipeline-accordion-actions">
+                          <button
+                            type="button"
+                            className={`pipeline-accordion-toggle-btn ${contactAccordionState.payment ? 'open' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setContactAccordionState(prev => ({ ...prev, payment: !prev.payment }));
+                            }}
+                            title={contactAccordionState.payment ? 'Collapse Section' : 'Expand Section'}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={`pipeline-accordion-body ${contactAccordionState.payment ? '' : 'collapsed'}`}>
+                        {(() => {
+                          const matchedDeal = deals.find(d =>
+                            d.contactId === detailedContact._id ||
+                            (d.clientName && detailedContact.firstName && (
+                              d.clientName.toLowerCase().includes(detailedContact.firstName.toLowerCase()) ||
+                              detailedContact.firstName.toLowerCase().includes(d.clientName.toLowerCase())
+                            )) ||
+                            (d.clientName && detailedContact.company && d.clientName.toLowerCase().includes(detailedContact.company.toLowerCase()))
+                          );
+                          const contactDealKey = matchedDeal ? matchedDeal._id : `contact_${detailedContact._id}`;
+                          const dealRecords = getContactPaymentRecords(detailedContact);
+                          const hasRecords = dealRecords.length > 0;
+                          const dealVal = matchedDeal ? parsePaymentAmount(matchedDeal.dealValue) : 0;
+                          const paidVal = dealRecords
+                            .filter(r => (r.paymentStatus || '').toLowerCase() === 'paid')
+                            .reduce((sum, r) => sum + parsePaymentAmount(r.paidAmount), 0);
+                          const pendingRecordsAmount = dealRecords
+                            .filter(r => (r.paymentStatus || '').toLowerCase() !== 'paid')
+                            .reduce((sum, r) => sum + parsePaymentAmount(r.paidAmount), 0);
+
+                          const totalVal = dealVal > 0 ? dealVal : (paidVal + pendingRecordsAmount);
+                          const pendingVal = dealVal > 0 ? Math.max(0, dealVal - paidVal) : pendingRecordsAmount;
+                          const paidPct = totalVal > 0 ? Math.min(100, Math.round((paidVal / totalVal) * 100)) : 0;
+                          const currency = matchedDeal?.currency || detailedContact.currency || '₹';
+
+                          if (!hasRecords && totalVal === 0) {
+                            return (
+                              <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8' }}>
+                                <CreditCard size={28} style={{ margin: '0 auto 8px', opacity: 0.45 }} />
+                                <p style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#64748b' }}>No Payment Records</p>
+                                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#94a3b8' }}>No payment records found for this contact.</p>
+                                <button
+                                  type="button"
+                                  className="pipeline-milestone-pill-badge-btn"
+                                  style={{ margin: '12px auto 0', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setMilestoneModalDealId(contactDealKey);
+                                    setShowMilestoneModal(true);
+                                    setShowAddPaymentForm(true);
+                                  }}
+                                >
+                                  <Plus size={12} />
+                                  <span>Add Payment</span>
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="pipeline-detail-kv-grid">
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Total Amount</span>
+                                <span className="pipeline-detail-v-val" style={{ fontWeight: 700, color: '#0284c7' }}>
+                                  {currency} {totalVal.toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Paid Amount</span>
+                                <span className="pipeline-detail-v-val" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontWeight: 700, color: '#16a34a' }}>
+                                    {currency} {paidVal.toLocaleString()}
+                                  </span>
+                                  {totalVal > 0 && (
+                                    <span className="pipeline-stage-badge won" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                                      {paidPct}% Paid
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="pipeline-detail-kv-row">
+                                <span className="pipeline-detail-k-label">Pending Amount</span>
+                                <span className="pipeline-detail-v-val" style={{ fontWeight: 700, color: '#ea580c' }}>
+                                  {currency} {pendingVal.toLocaleString()}
+                                </span>
+                              </div>
+
+                              <div className="pipeline-detail-kv-row" style={{ position: 'relative' }}>
+                                <span className="pipeline-detail-k-label">Payment Terms</span>
+                                <div style={{ position: 'relative', display: 'inline-block' }}>
+                                  <button
+                                    type="button"
+                                    className="pipeline-milestone-pill-badge-btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setMilestoneModalDealId(contactDealKey);
+                                      setShowMilestoneModal(true);
+                                      setShowAddPaymentForm(false);
+                                    }}
+                                    title="Click to view full Payment Records"
+                                  >
+                                    <span>Milestone ({dealRecords.length})</span>
+                                    <ChevronRight size={11} />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. MIDDLE SECTION: Activities, Notes, Emails, Messages & Calls */}
+                <div className="pipeline-detail-col-activities">
+                  <div className="pipeline-detail-actions-card">
+                    {/* Activity Tabs */}
+                    <div className="pipeline-activity-tabs-bar">
+                      <div className="pipeline-activity-tab-btns">
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'all' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('all')}
+                        >
+                          <span>All Activities</span>
+                          <span className="pipeline-act-tab-badge">{currentContactActivities.length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'notes' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('notes')}
+                        >
+                          <FileText size={14} />
+                          <span>Notes</span>
+                          <span className="pipeline-act-tab-badge">{currentContactActivities.filter(a => a.type === 'note').length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'emails' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('emails')}
+                        >
+                          <Mail size={14} />
+                          <span>Emails</span>
+                          <span className="pipeline-act-tab-badge">{currentContactActivities.filter(a => a.type === 'email').length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'messages' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('messages')}
+                        >
+                          <MessageSquare size={14} />
+                          <span>Messages</span>
+                          <span className="pipeline-act-tab-badge">{currentContactActivities.filter(a => a.type === 'message').length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'tasks' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('tasks')}
+                        >
+                          <CheckSquare size={14} />
+                          <span>Tasks</span>
+                          <span className="pipeline-act-tab-badge">{contactSpecificTasks.length}</span>
+                        </button>
+                      </div>
+
+                      {/* Contextual Action Button on Right Side */}
+                      <div className="pipeline-activity-quick-actions">
+                        {detailActiveTab === 'notes' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            onClick={() => {
+                              setNewActivityType('note');
+                              setIsComposingActivity(true);
+                            }}
+                          >
+                            <Plus size={13} />
+                            <span>Add Note</span>
+                          </button>
+                        )}
+                        {detailActiveTab === 'emails' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            disabled
+                            style={{ opacity: 0.55, cursor: 'not-allowed' }}
+                            title="Feature not implemented yet"
+                          >
+                            <Plus size={13} />
+                            <span>Log Email</span>
+                          </button>
+                        )}
+                        {detailActiveTab === 'messages' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            disabled
+                            style={{ opacity: 0.55, cursor: 'not-allowed' }}
+                            title="Feature not implemented yet"
+                          >
+                            <Plus size={13} />
+                            <span>Log Message</span>
+                          </button>
+                        )}
+                        {detailActiveTab === 'tasks' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            onClick={() => {
+                              handleOpenCreateTask('', detailedContact._id);
+                            }}
+                          >
+                            <Plus size={13} />
+                            <span>Add Task</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Inline Activity Composer */}
+                    {isComposingActivity && (
+                      (detailActiveTab === 'notes' && newActivityType === 'note') ||
+                      (detailActiveTab === 'emails' && newActivityType === 'email') ||
+                      (detailActiveTab === 'messages' && newActivityType === 'message')
+                    ) && (
+                        <form onSubmit={handleAddActivity} className="pipeline-activity-composer">
+                          <div className="pipeline-activity-composer-header">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              {newActivityType === 'note' && (
+                                <>
+                                  <FileText size={16} style={{ color: '#0284c7' }} />
+                                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '13.5px' }}>Add Internal Note</span>
+                                </>
+                              )}
+                              {newActivityType === 'email' && (
+                                <>
+                                  <Mail size={16} style={{ color: '#0284c7' }} />
+                                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '13.5px' }}>Log Email</span>
+                                </>
+                              )}
+                              {newActivityType === 'message' && (
+                                <>
+                                  <MessageSquare size={16} style={{ color: '#0284c7' }} />
+                                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '13.5px' }}>Log Message</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {newActivityType === 'email' && (
+                            <input
+                              type="text"
+                              className="pipeline-form-input"
+                              style={{ padding: '8px 12px', fontSize: '13px' }}
+                              placeholder="Subject line (e.g. Contract review follow-up)"
+                              value={newActivitySubject}
+                              onChange={e => setNewActivitySubject(e.target.value)}
+                            />
+                          )}
+
+                          <textarea
+                            className="pipeline-activity-composer-textarea"
+                            placeholder={
+                              newActivityType === 'note'
+                                ? 'Write your note here...'
+                                : newActivityType === 'email'
+                                  ? 'Email summary or message body...'
+                                  : 'Chat notes or SMS conversation details...'
+                            }
+                            value={newActivityContent}
+                            onChange={e => setNewActivityContent(e.target.value)}
+                            autoFocus
+                            required
+                          />
+
+                          <div className="pipeline-activity-composer-footer">
+                            <button
+                              type="button"
+                              className="pipeline-btn-cancel"
+                              style={{ padding: '6px 14px', fontSize: '12.5px' }}
+                              onClick={() => {
+                                setIsComposingActivity(false);
+                                setNewActivityContent('');
+                                setNewActivitySubject('');
+                              }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              className="pipeline-btn-save"
+                              style={{ padding: '6px 18px', fontSize: '12.5px' }}
+                            >
+                              {newActivityType === 'note' ? 'Save Note' : newActivityType === 'email' ? 'Log Email' : 'Log Message'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
+                    {/* Dedicated Tasks View or Activity Timeline Feed */}
+                    {detailActiveTab === 'tasks' ? (
+                      <div className="pipeline-inline-tasks-panel" style={{ marginTop: isComposingActivity ? '16px' : '0' }}>
+
+                        {contactSpecificTasks.length === 0 ? (
+                          <div className="pipeline-empty-state-mini" style={{ padding: '36px 20px', textAlign: 'center' }}>
+                            <CheckSquare size={32} style={{ color: '#94a3b8', marginBottom: '8px', opacity: 0.6 }} />
+                            <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No tasks created yet.</p>
+                          </div>
+                        ) : (
+                          <div className="pipeline-inline-tasks-list">
+                            {contactSpecificTasks.map(task => (
+                              <div key={task._id} className={`pipeline-inline-task-item ${task.completed ? 'completed' : ''}`}>
+                                <label className="pipeline-task-checkbox-wrap" onClick={e => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!task.completed}
+                                    onChange={(e) => handleToggleTaskComplete(task._id, e)}
+                                  />
+                                  <span className="pipeline-task-checkmark"></span>
+                                </label>
+                                <div className="pipeline-inline-task-main">
+                                  <div className="pipeline-inline-task-title-row">
+                                    <span className={`pipeline-inline-task-title ${task.completed ? 'done' : ''}`}>
+                                      {task.title}
+                                    </span>
+                                    <span className={`pipeline-task-priority-pill ${(task.priority || 'medium').toLowerCase()}`}>
+                                      {task.priority || 'Medium'}
+                                    </span>
+                                  </div>
+                                  {task.description && (
+                                    <p className="pipeline-inline-task-desc">{task.description}</p>
+                                  )}
+                                  <div className="pipeline-inline-task-meta-row">
+                                    <span className="pipeline-inline-task-meta-item">
+                                      <Clock size={12} />
+                                      <span>Due: {task.dueDate ? formatDateDDMMYYYY(task.dueDate) : 'No due date'}</span>
+                                    </span>
+                                    <span className="pipeline-inline-task-meta-item">
+                                      <User size={12} />
+                                      <span>{task.assignee || 'Artiflow'}</span>
+                                    </span>
+                                    <span className="pipeline-inline-task-type-badge">
+                                      {task.type || 'Follow-up'}
+                                    </span>
+                                    <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
+                                      <button
+                                        type="button"
+                                        className="pipeline-mini-icon-btn"
+                                        title="Edit Task"
+                                        onClick={(e) => handleOpenEditTask(task, e)}
+                                      >
+                                        <Edit2 size={12} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="pipeline-mini-icon-btn danger"
+                                        title="Delete Task"
+                                        onClick={(e) => handleDeleteTask(task._id, e)}
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Timeline Stream */
+                      <div className="pipeline-activity-timeline-feed" style={{ marginTop: (isComposingActivity && ((detailActiveTab === 'notes' && newActivityType === 'note') || (detailActiveTab === 'emails' && newActivityType === 'email') || (detailActiveTab === 'messages' && newActivityType === 'message'))) ? '16px' : '0' }}>
+                        {detailActiveTab === 'emails' ? (
+                          <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
+                            <Mail size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                            <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
+                            <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Email integration and logging will be available soon.</p>
+                          </div>
+                        ) : detailActiveTab === 'messages' ? (
+                          <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
+                            <MessageSquare size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                            <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
+                            <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Message and SMS logging will be available soon.</p>
+                          </div>
+                        ) : currentContactActivities.filter(act => {
+                          if (detailActiveTab === 'all') return true;
+                          if (detailActiveTab === 'notes') return act.type === 'note';
+                          return true;
+                        }).length > 0 ? (
+                          currentContactActivities.filter(act => {
+                            if (detailActiveTab === 'all') return true;
+                            if (detailActiveTab === 'notes') return act.type === 'note';
+                            return true;
+                          }).map(act => (
+                            <div key={act.id} className="pipeline-timeline-item-card">
+                              <div className={`pipeline-timeline-icon-wrap ${act.type || 'activity'}`}>
+                                {act.type === 'note' && <FileText size={18} />}
+                                {act.type === 'email' && <Mail size={18} />}
+                                {act.type === 'message' && <MessageSquare size={18} />}
+                                {act.type === 'task' && <CheckSquare size={18} />}
+                                {act.type === 'deal' && <Briefcase size={18} />}
+                                {act.type === 'contact' && <User size={18} />}
+                                {act.type === 'company' && <Building2 size={18} />}
+                                {act.type === 'payment' && <CreditCard size={18} />}
+                                {(act.type === 'activity' || !['note', 'email', 'message', 'task', 'deal', 'contact', 'company', 'payment'].includes(act.type)) && <Tag size={18} />}
+                              </div>
+
+                              <div className="pipeline-timeline-content">
+                                <div className="pipeline-timeline-header-row">
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span className="pipeline-timeline-author-title">{act.author}</span>
+                                    <span style={{ fontSize: '12px', color: '#64748b' }}>• {act.title}</span>
+                                  </div>
+                                  <span className="pipeline-timeline-time-badge">{formatActivityTimestamp(act)}</span>
+                                </div>
+
+                                <p className="pipeline-timeline-body-text">{act.content}</p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div style={{ textAlign: 'center', padding: '36px 20px', color: '#94a3b8' }}>
+                            {detailActiveTab === 'notes' ? (
+                              <>
+                                <FileText size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                                <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No notes created yet.</p>
+                              </>
+                            ) : (
+                              <>
+                                <FileText size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                                <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No activities recorded yet.</p>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. RIGHT SECTION: Associated Deal Details & Associated Company Details */}
+                <div className="pipeline-detail-col-assoc">
+                  <div className="pipeline-detail-card-panel">
+                    {/* Section 1: Associated Deal Details */}
+                    <div className="pipeline-detail-panel-section">
+                      <div
+                        className="pipeline-detail-section-heading"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => setContactAccordionState(prev => ({ ...prev, deals: prev.deals === false ? true : false }))}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>Associated Deal Details</span>
+                          {matchedDealsForContact.length > 0 && (
+                            <span className="pipeline-act-tab-badge" style={{ background: '#e0f2fe', color: '#0284c7', fontSize: '11px', fontWeight: 700, padding: '1px 7px', borderRadius: '10px' }}>
+                              {matchedDealsForContact.length}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="pipeline-detail-add-badge-btn"
+                            onClick={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                clientName: `${detailedContact.firstName || ''} ${detailedContact.lastName || ''}`.trim(),
+                                associatedContact: detailedContact.email || '',
+                                email: detailedContact.email || '',
+                                phone: detailedContact.phone ? `${detailedContact.countryCode || '+1'} ${detailedContact.phone}` : '',
+                                associatedCompany: (detailedContact.company && detailedContact.company !== 'Direct Client') ? detailedContact.company : '',
+                                salesOwner: detailedContact.owner || 'Artiflow',
+                                stage: 'New'
+                              }));
+                              setModalStage('New');
+                              setEditingDeal(null);
+                              setShowCreateModal(true);
+                            }}
+                            title="Add / Link Deal"
+                          >
+                            Add+
+                          </button>
+                          <button
+                            type="button"
+                            className={`pipeline-accordion-toggle-btn ${contactAccordionState.deals !== false ? 'open' : ''}`}
+                            onClick={() => setContactAccordionState(prev => ({ ...prev, deals: prev.deals === false ? true : false }))}
+                            title={contactAccordionState.deals !== false ? 'Collapse Section' : 'Expand Section'}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {contactAccordionState.deals !== false && (
+                        matchedDealsForContact.length > 0 ? (
+                          <div
+                            className="pipeline-assoc-scroll-container"
+                            style={{
+                              maxHeight: matchedDealsForContact.length > 1 ? '290px' : 'none',
+                              overflowY: matchedDealsForContact.length > 1 ? 'auto' : 'visible',
+                              paddingRight: matchedDealsForContact.length > 1 ? '6px' : '0'
+                            }}
+                          >
+                            {matchedDealsForContact.map((deal, idx) => {
+                              const isDealCollapsed = !!collapsedDeals[deal._id];
+                              const rawStage = (deal.stage || 'New').trim();
+                              const sLower = rawStage.toLowerCase();
+                              let stageTheme = 'new';
+                              if (sLower.includes('won')) stageTheme = 'won';
+                              else if (sLower.includes('lost') || sLower.includes('cancel')) stageTheme = 'lost';
+                              else if (sLower.includes('hot') || sLower.includes('qual') || sLower.includes('prop')) stageTheme = 'hot';
+                              else if (sLower.includes('neg') || sLower.includes('rev')) stageTheme = 'negotiation';
+                              else if (sLower.includes('cold') || sLower.includes('hold')) stageTheme = 'cold';
+
+                              return (
+                                <div
+                                  key={deal._id || idx}
+                                  style={{
+                                    marginTop: idx > 0 ? '16px' : '0',
+                                    paddingTop: idx > 0 ? '16px' : '0',
+                                    borderTop: idx > 0 ? '1px solid #f1f5f9' : 'none'
+                                  }}
+                                >
+                                  <div
+                                    style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+                                    onClick={() => setCollapsedDeals(prev => ({ ...prev, [deal._id]: !prev[deal._id] }))}
+                                  >
+                                    <div className="pipeline-detail-clean-svg-icon contact">
+                                      <Briefcase size={19} strokeWidth={2} />
+                                    </div>
+                                    <div style={{ overflow: 'hidden', flex: 1 }}>
+                                      <h4
+                                        className="pipeline-card-client-name"
+                                        style={{ margin: 0, fontSize: '13.5px', fontWeight: 700, color: '#0284c7', cursor: 'pointer', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDetailedContactId(null);
+                                          setActiveTab('deals');
+                                          setDetailedDealId(deal._id);
+                                        }}
+                                        title="Click to view Deal Details"
+                                      >
+                                        {(() => {
+                                          const raw = deal.dealName || deal.clientName || '';
+                                          const dt = (deal.dealType || 'New Business').trim();
+                                          const escapedDt = dt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                          const regex = new RegExp(`\\s*[-–—]\\s*(?:${escapedDt}|New Business)$`, 'i');
+                                          return raw.replace(regex, '').trim();
+                                        })()}
+                                      </h4>
+                                      <span style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                        {deal.pipeline || 'Sales Pipeline'} • {deal.dealType || 'New Business'}
+                                        {isDealCollapsed && (
+                                          <strong style={{ color: '#0284c7', marginLeft: '4px' }}>
+                                            • {deal.currency || '$'}{Number(deal.dealValue || 0).toLocaleString()}
+                                          </strong>
+                                        )}
+                                      </span>
+                                    </div>
+
+                                    {/* Arrow button to open/close this deal's details */}
+                                    <button
+                                      type="button"
+                                      className={`pipeline-accordion-toggle-btn ${!isDealCollapsed ? 'open' : ''}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setCollapsedDeals(prev => ({ ...prev, [deal._id]: !prev[deal._id] }));
+                                      }}
+                                      title={isDealCollapsed ? 'Open Details' : 'Close Details'}
+                                      style={{ marginLeft: 'auto', flexShrink: 0 }}
+                                    >
+                                      <ChevronDown size={14} />
+                                    </button>
+                                  </div>
+
+                                  {!isDealCollapsed && (
+                                    <div className="pipeline-detail-kv-grid" style={{ marginTop: '8px' }}>
+                                      <div className="pipeline-detail-kv-row">
+                                        <span className="pipeline-detail-k-label">Deal Value</span>
+                                        <span className="pipeline-detail-v-val" style={{ fontWeight: 700, color: '#0284c7' }}>
+                                          {deal.currency || '$'} {Number(deal.dealValue || 0).toLocaleString()}
+                                        </span>
+                                      </div>
+                                      <div className="pipeline-detail-kv-row">
+                                        <span className="pipeline-detail-k-label">Stage</span>
+                                        <span className="pipeline-detail-v-val">
+                                          <span
+                                            className={`pipeline-stage-badge ${stageTheme}`}
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '5px',
+                                              padding: '3px 10px',
+                                              fontSize: '11px',
+                                              fontWeight: 700,
+                                              borderRadius: '999px',
+                                              lineHeight: '1.2'
+                                            }}
+                                          >
+                                            <span
+                                              style={{
+                                                width: '6px',
+                                                height: '6px',
+                                                borderRadius: '50%',
+                                                backgroundColor: 'currentColor',
+                                                display: 'inline-block',
+                                                flexShrink: 0
+                                              }}
+                                            />
+                                            {rawStage}
+                                          </span>
+                                        </span>
+                                      </div>
+                                      <div className="pipeline-detail-kv-row">
+                                        <span className="pipeline-detail-k-label">Expected Close</span>
+                                        <span className="pipeline-detail-v-val">{formatDateDDMMYYYY(deal.expectedCloseDate)}</span>
+                                      </div>
+                                      <div className="pipeline-detail-kv-row">
+                                        <span className="pipeline-detail-k-label">Deal Owner</span>
+                                        <span className="pipeline-detail-v-val">{deal.salesOwner || 'Artiflow'}</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div style={{ textAlign: 'center', padding: '16px 12px', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                            <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>No deal associated with this contact yet.</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  clientName: `${detailedContact.firstName || ''} ${detailedContact.lastName || ''}`.trim(),
+                                  associatedContact: detailedContact.email || '',
+                                  email: detailedContact.email || '',
+                                  phone: detailedContact.phone ? `${detailedContact.countryCode || '+1'} ${detailedContact.phone}` : '',
+                                  associatedCompany: (detailedContact.company && detailedContact.company !== 'Direct Client') ? detailedContact.company : '',
+                                  salesOwner: detailedContact.owner || 'Artiflow',
+                                  stage: 'New'
+                                }));
+                                setModalStage('New');
+                                setEditingDeal(null);
+                                setShowCreateModal(true);
+                              }}
+                              style={{
+                                marginTop: '8px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '11.5px',
+                                fontWeight: 600,
+                                color: '#0284c7',
+                                background: '#fff',
+                                border: '1px solid #bae6fd',
+                                borderRadius: '6px',
+                                padding: '3px 10px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <Plus size={12} />
+                              <span>Create Associated Deal</span>
+                            </button>
+                          </div>
+                        )
+                      )}
+                    </div>
+
+                    {/* Section 2: Associated Company Details */}
+                    <div className="pipeline-detail-panel-section">
+                      <div
+                        className="pipeline-detail-section-heading"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => setContactAccordionState(prev => ({ ...prev, company: prev.company === false ? true : false }))}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>Associated Company Details</span>
+                          {matchedCompaniesForContact.length > 0 && (
+                            <span className="pipeline-act-tab-badge" style={{ background: '#e0f2fe', color: '#0284c7', fontSize: '11px', fontWeight: 700, padding: '1px 7px', borderRadius: '10px' }}>
+                              {matchedCompaniesForContact.length}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="pipeline-detail-add-badge-btn"
+                            onClick={() => {
+                              setCompanyFormData({
+                                name: (detailedContact.company && detailedContact.company !== 'Direct Client') ? detailedContact.company : '',
+                                domain: '',
+                                owner: [],
+                                industry: '',
+                                country: 'United States',
+                                state: '',
+                                city: detailedContact.location || '',
+                                postalCode: ''
+                              });
+                              setShowCreateCompanyModal(true);
+                            }}
+                            title="Add / Link Company"
+                          >
+                            Add+
+                          </button>
+                          <button
+                            type="button"
+                            className={`pipeline-accordion-toggle-btn ${contactAccordionState.company !== false ? 'open' : ''}`}
+                            onClick={() => setContactAccordionState(prev => ({ ...prev, company: prev.company === false ? true : false }))}
+                            title={contactAccordionState.company !== false ? 'Collapse Section' : 'Expand Section'}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {contactAccordionState.company !== false && (
+                        matchedCompaniesForContact.length === 0 ? (
+                          <div className="pipeline-detail-empty-subcard">
+                            <p style={{ margin: 0, fontSize: '11.5px', color: '#94a3b8' }}>
+                              No company associated with this contact yet.
+                            </p>
+                          </div>
+                        ) : (
+                          <div
+                            className="pipeline-assoc-scroll-container"
+                            style={{
+                              maxHeight: matchedCompaniesForContact.length > 1 ? '290px' : 'none',
+                              overflowY: matchedCompaniesForContact.length > 1 ? 'auto' : 'visible',
+                              paddingRight: matchedCompaniesForContact.length > 1 ? '6px' : '0'
+                            }}
+                          >
+                            {matchedCompaniesForContact.map((company, idx) => {
+                              const isCompCollapsed = !!collapsedCompanies[company._id];
+                              return (
+                                <div
+                                  key={company._id || idx}
+                                  style={{
+                                    marginTop: idx > 0 ? '16px' : '0',
+                                    paddingTop: idx > 0 ? '16px' : '0',
+                                    borderTop: idx > 0 ? '1px solid #f1f5f9' : 'none'
+                                  }}
+                                >
+                                  <div
+                                    style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+                                    onClick={() => setCollapsedCompanies(prev => ({ ...prev, [company._id]: !prev[company._id] }))}
+                                  >
+                                    <div className="pipeline-detail-clean-svg-icon company">
+                                      <Building2 size={19} strokeWidth={2} />
+                                    </div>
+                                    <div style={{ overflow: 'hidden', flex: 1 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <h4
+                                          style={{
+                                            margin: 0,
+                                            fontSize: '13.5px',
+                                            fontWeight: 700,
+                                            color: '#0f172a',
+                                            whiteSpace: 'nowrap',
+                                            textOverflow: 'ellipsis',
+                                            overflow: 'hidden',
+                                            cursor: 'pointer'
+                                          }}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setViewingCompany(company);
+                                          }}
+                                          title="Click to view Company Details"
+                                        >
+                                          {company.name}
+                                        </h4>
+                                        {company.sourceLabel && matchedCompaniesForContact.length > 1 && (
+                                          <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 6px', borderRadius: '4px', whiteSpace: 'nowrap', fontWeight: 600 }}>
+                                            {company.sourceLabel}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {company.domain ? (
+                                        <a
+                                          href={`https://${company.domain.replace(/^https?:\/\//, '')}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          style={{ fontSize: '12px', color: '#0284c7', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}
+                                          onClick={e => e.stopPropagation()}
+                                        >
+                                          <Globe size={11} /> {company.domain} <ExternalLink size={10} />
+                                        </a>
+                                      ) : (
+                                        <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>
+                                          Client organization
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Arrow button to open/close this company's details */}
+                                    <button
+                                      type="button"
+                                      className={`pipeline-accordion-toggle-btn ${!isCompCollapsed ? 'open' : ''}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setCollapsedCompanies(prev => ({ ...prev, [company._id]: !prev[company._id] }));
+                                      }}
+                                      title={isCompCollapsed ? 'Open Details' : 'Close Details'}
+                                      style={{ marginLeft: 'auto', flexShrink: 0 }}
+                                    >
+                                      <ChevronDown size={14} />
+                                    </button>
+                                  </div>
+
+                                  {!isCompCollapsed && (
+                                    <div className="pipeline-detail-kv-grid" style={{ marginTop: '6px' }}>
+                                      <div className="pipeline-detail-kv-row">
+                                        <span className="pipeline-detail-k-label">Industry Type</span>
+                                        <span className="pipeline-detail-v-val">{company.industry || '—'}</span>
+                                      </div>
+                                      <div className="pipeline-detail-kv-row">
+                                        <span className="pipeline-detail-k-label">Company Owner</span>
+                                        <span className="pipeline-detail-v-val">
+                                          <CompanyOwnerDisplay owner={company.owner} fallback={detailedContact.owner} />
+                                        </span>
+                                      </div>
+                                      <div className="pipeline-detail-kv-row">
+                                        <span className="pipeline-detail-k-label">Country</span>
+                                        <span className="pipeline-detail-v-val">{company.country || '—'}</span>
+                                      </div>
+                                      <div className="pipeline-detail-kv-row">
+                                        <span className="pipeline-detail-k-label">State / Region</span>
+                                        <span className="pipeline-detail-v-val">{company.state || '—'}</span>
+                                      </div>
+                                      <div className="pipeline-detail-kv-row">
+                                        <span className="pipeline-detail-k-label">City</span>
+                                        <span className="pipeline-detail-v-val">{company.city || detailedContact.location || '—'}</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="pipeline-tab-page-view">
+              {/* Top Header */}
+              <div className="pipeline-top-header">
+                <h1 className="pipeline-deals-count-title">Contacts</h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {/* View Switcher: Table List or Kanban Board */}
+                  <div className="pipeline-view-switcher">
+                    <button
+                      type="button"
+                      className={`pipeline-view-btn ${contactViewMode === 'list' ? 'active' : ''}`}
+                      onClick={() => setContactViewMode('list')}
+                      title="List Table View"
+                    >
+                      <List size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`pipeline-view-btn ${contactViewMode === 'kanban' ? 'active' : ''}`}
+                      onClick={() => setContactViewMode('kanban')}
+                      title="Kanban Board View"
+                    >
+                      <Kanban size={16} />
+                    </button>
+                  </div>
+
+                  {/* Export */}
+                  <button
+                    type="button"
+                    className="pipeline-btn-export"
+                    onClick={handleExportContacts}
+                    title="Export contacts to CSV"
+                  >
+                    <Download size={14} />
+                    <span>Export</span>
+                  </button>
+
+                  <NotificationBell filterType="CRM" />
+                </div>
+              </div>
+
+              {/* Action Toolbar */}
+              <div className="pipeline-toolbar-row">
+                <div className="pipeline-toolbar-left">
+                  {/* Search Box */}
+                  <div className="pipeline-contacts-search-box">
+                    <Search size={14} className="pipeline-search-icon" />
+                    <input
+                      type="text"
+                      placeholder="Search contacts..."
+                      value={contactSearchQuery}
+                      onChange={e => setContactSearchQuery(e.target.value)}
+                      className="pipeline-contacts-search-input"
+                    />
+                    {contactSearchQuery && (
+                      <button
+                        type="button"
+                        className="pipeline-search-clear-btn"
+                        onClick={() => setContactSearchQuery('')}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Sort by Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${contactSortBy !== 'newest' ? 'filter-active' : ''} ${isContactSortDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsContactOwnerDropdownOpen(false);
+                        setIsContactStatusDropdownOpen(false);
+                        setIsContactOriginDropdownOpen(false);
+                        setIsContactDateDropdownOpen(false);
+                        setIsContactSortDropdownOpen(prev => !prev);
+                      }}
+                      title="Sort Contacts"
+                    >
+                      <ArrowUpDown size={14} />
+                      <span>{contactSortBy !== 'newest' ? `Sort: ${contactSortLabel}` : 'Sort by'}</span>
+                      <ChevronDown size={13} style={{ color: contactSortBy !== 'newest' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isContactSortDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Sort contacts by</div>
+                        <div className="pipeline-filter-items-scroll">
+                          {[
+                            { id: 'newest', label: 'Newest first' },
+                            { id: 'oldest', label: 'Oldest first' },
+                            { id: 'name_asc', label: 'Contact Name (A - Z)' },
+                            { id: 'name_desc', label: 'Contact Name (Z - A)' },
+                            { id: 'company', label: 'Company Name (A - Z)' },
+                            { id: 'stage', label: 'Lead Stage' },
+                            { id: 'status', label: 'Lead Status' }
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              className={`pipeline-filter-item-btn ${contactSortBy === opt.id ? 'selected' : ''}`}
+                              onClick={() => {
+                                setContactSortBy(opt.id);
+                                setIsContactSortDropdownOpen(false);
+                              }}
+                            >
+                              <span>{opt.label}</span>
+                              {contactSortBy === opt.id && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* All Contact Owners Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${contactOwnerFilter !== 'all' ? 'filter-active' : ''} ${isContactOwnerDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsContactSortDropdownOpen(false);
+                        setIsContactStatusDropdownOpen(false);
+                        setIsContactOriginDropdownOpen(false);
+                        setIsContactDateDropdownOpen(false);
+                        setIsContactOwnerDropdownOpen(prev => !prev);
+                      }}
+                      title="Filter by contact owners"
+                    >
+                      <User size={14} />
+                      <span>{contactOwnerFilter === 'all' ? 'All contact owners' : contactOwnerFilter}</span>
+                      <ChevronDown size={13} style={{ color: contactOwnerFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isContactOwnerDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" style={{ minWidth: '240px' }} onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Filter by Contact Owner</div>
+                        {allContactOwners.length > 5 && (
+                          <div className="pipeline-filter-search-wrap">
+                            <input
+                              type="text"
+                              className="pipeline-filter-search-input"
+                              placeholder="Search contact owner..."
+                              value={contactOwnerSearchQuery}
+                              onChange={e => setContactOwnerSearchQuery(e.target.value)}
+                              autoFocus
+                            />
+                          </div>
+                        )}
+                        <div className="pipeline-filter-items-scroll">
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${contactOwnerFilter === 'all' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setContactOwnerFilter('all');
+                              setIsContactOwnerDropdownOpen(false);
+                              setContactOwnerSearchQuery('');
+                            }}
+                          >
+                            <User size={14} style={{ color: '#64748b' }} />
+                            <span>All contact owners</span>
+                            <span className="pipeline-filter-item-badge">{contacts.filter(c => isItemOwnedByUser(c, 'contact')).length}</span>
+                            {contactOwnerFilter === 'all' && <Check size={14} style={{ color: '#0284c7' }} />}
+                          </button>
+
+                          {allContactOwners
+                            .filter(ownerName => !contactOwnerSearchQuery.trim() || ownerName.toLowerCase().includes(contactOwnerSearchQuery.trim().toLowerCase()))
+                            .map(ownerName => {
+                              const count = contactOwnerCounts[ownerName] || contactOwnerCounts[ownerName.toLowerCase()] || 0;
+                              return (
+                                <button
+                                  key={ownerName}
+                                  type="button"
+                                  className={`pipeline-filter-item-btn ${contactOwnerFilter.toLowerCase() === ownerName.toLowerCase() ? 'selected' : ''}`}
+                                  onClick={() => {
+                                    setContactOwnerFilter(ownerName);
+                                    setIsContactOwnerDropdownOpen(false);
+                                    setContactOwnerSearchQuery('');
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: 18,
+                                      height: 18,
+                                      borderRadius: '50%',
+                                      background: '#e0f2fe',
+                                      color: '#0284c7',
+                                      fontSize: '10px',
+                                      fontWeight: 700,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center'
+                                    }}
+                                  >
+                                    {ownerName.charAt(0).toUpperCase()}
+                                  </div>
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ownerName}</span>
+                                  <span className="pipeline-filter-item-badge">{count}</span>
+                                  {contactOwnerFilter.toLowerCase() === ownerName.toLowerCase() && (
+                                    <Check size={14} style={{ color: '#0284c7' }} />
+                                  )}
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Filter by Status Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${contactStatusFilter !== 'all' ? 'filter-active' : ''} ${isContactStatusDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsContactSortDropdownOpen(false);
+                        setIsContactOwnerDropdownOpen(false);
+                        setIsContactOriginDropdownOpen(false);
+                        setIsContactDateDropdownOpen(false);
+                        setIsContactStatusDropdownOpen(prev => !prev);
+                      }}
+                      title="Filter by status"
+                    >
+                      <Tag size={14} />
+                      <span>{contactStatusFilter === 'all' ? 'All statuses' : contactStatusFilter}</span>
+                      <ChevronDown size={13} style={{ color: contactStatusFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isContactStatusDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" style={{ minWidth: '200px' }} onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Filter by Status</div>
+                        <div className="pipeline-filter-items-scroll">
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${contactStatusFilter === 'all' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setContactStatusFilter('all');
+                              setIsContactStatusDropdownOpen(false);
+                            }}
+                          >
+                            <span>All statuses</span>
+                            {contactStatusFilter === 'all' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                          {(['New', 'Contacted', 'In Progress', 'Qualified', 'Unqualified', 'Won', 'Lost', ...leadStatuses.filter(s => !['New', 'Contacted', 'In Progress', 'Qualified', 'Unqualified', 'Won', 'Lost'].some(x => x.toLowerCase() === s.toLowerCase()))]).map(status => (
+                            <button
+                              key={status}
+                              type="button"
+                              className={`pipeline-filter-item-btn ${contactStatusFilter.toLowerCase() === status.toLowerCase() ? 'selected' : ''}`}
+                              onClick={() => {
+                                setContactStatusFilter(status);
+                                setIsContactStatusDropdownOpen(false);
+                              }}
+                            >
+                              <span>{status}</span>
+                              {contactStatusFilter.toLowerCase() === status.toLowerCase() && (
+                                <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Filter by Origin Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${contactOriginFilter !== 'all' ? 'filter-active' : ''} ${isContactOriginDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsContactSortDropdownOpen(false);
+                        setIsContactOwnerDropdownOpen(false);
+                        setIsContactStatusDropdownOpen(false);
+                        setIsContactDateDropdownOpen(false);
+                        setIsContactOriginDropdownOpen(prev => !prev);
+                      }}
+                      title="Filter contacts by origin"
+                    >
+                      <Globe size={14} />
+                      <span>{contactOriginFilter === 'all' ? 'All origins' : contactOriginFilter}</span>
+                      <ChevronDown size={13} style={{ color: contactOriginFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isContactOriginDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" style={{ minWidth: '200px' }} onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Filter by Origin</div>
+                        <div className="pipeline-filter-items-scroll">
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${contactOriginFilter === 'all' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setContactOriginFilter('all');
+                              setIsContactOriginDropdownOpen(false);
+                            }}
+                          >
+                            <span>All origins</span>
+                            <span className="pipeline-filter-item-badge">{contactOriginCounts.all}</span>
+                            {contactOriginFilter === 'all' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${contactOriginFilter === 'Domestic' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setContactOriginFilter('Domestic');
+                              setIsContactOriginDropdownOpen(false);
+                            }}
+                          >
+                            <span>Domestic</span>
+                            <span className="pipeline-filter-item-badge">{contactOriginCounts.domestic}</span>
+                            {contactOriginFilter === 'Domestic' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                          <button
+                            type="button"
+                            className={`pipeline-filter-item-btn ${contactOriginFilter === 'International' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setContactOriginFilter('International');
+                              setIsContactOriginDropdownOpen(false);
+                            }}
+                          >
+                            <span>International</span>
+                            <span className="pipeline-filter-item-badge">{contactOriginCounts.international}</span>
+                            {contactOriginFilter === 'International' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Date Filter Dropdown */}
+                  <div className="pipeline-filter-dropdown-wrap">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-btn ${contactDateFilter !== 'all' ? 'filter-active' : ''} ${isContactDateDropdownOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsContactSortDropdownOpen(false);
+                        setIsContactOwnerDropdownOpen(false);
+                        setIsContactStatusDropdownOpen(false);
+                        setIsContactOriginDropdownOpen(false);
+                        setIsContactDateDropdownOpen(prev => !prev);
+                      }}
+                      title="Filter contacts by date"
+                    >
+                      <Calendar size={14} />
+                      <span>{contactDateFilterLabel}</span>
+                      <ChevronDown size={13} style={{ color: contactDateFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                    </button>
+
+                    {isContactDateDropdownOpen && (
+                      <div className="pipeline-filter-menu-popover" style={{ minWidth: '230px' }} onClick={e => e.stopPropagation()}>
+                        <div className="pipeline-filter-menu-header">Filter by Creation Date</div>
+                        <div className="pipeline-filter-items-scroll">
+                          {[
+                            { id: 'all', label: 'All Dates (All Time)' },
+                            { id: 'today', label: 'Today' },
+                            { id: 'this_week', label: 'This Week' },
+                            { id: 'this_month', label: 'This Month' },
+                            { id: 'next_30_days', label: 'Next 30 Days' },
+                            { id: 'this_quarter', label: 'This Quarter' },
+                            { id: 'this_year', label: 'This Year' },
+                            { id: 'custom', label: 'Custom Date Range...' }
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              className={`pipeline-filter-item-btn ${contactDateFilter === opt.id ? 'selected' : ''}`}
+                              onClick={() => {
+                                setContactDateFilter(opt.id);
+                                if (opt.id !== 'custom') {
+                                  setIsContactDateDropdownOpen(false);
+                                }
+                              }}
+                            >
+                              <span>{opt.label}</span>
+                              {contactDateFilter === opt.id && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                            </button>
+                          ))}
+                        </div>
+
+                        {contactDateFilter === 'custom' && (
+                          <div className="pipeline-filter-date-custom-panel">
+                            <div className="pipeline-filter-date-input-group">
+                              <label className="pipeline-filter-date-label">From Date</label>
+                              <input
+                                type="date"
+                                className="pipeline-filter-date-input"
+                                value={customContactDateStart}
+                                onChange={e => setCustomContactDateStart(e.target.value)}
+                              />
+                            </div>
+                            <div className="pipeline-filter-date-input-group">
+                              <label className="pipeline-filter-date-label">To Date</label>
+                              <input
+                                type="date"
+                                className="pipeline-filter-date-input"
+                                value={customContactDateEnd}
+                                onChange={e => setCustomContactDateEnd(e.target.value)}
+                              />
+                            </div>
+                            <div className="pipeline-filter-date-actions">
+                              <button
+                                type="button"
+                                className="pipeline-filter-date-btn-cancel"
+                                onClick={() => {
+                                  setCustomContactDateStart('');
+                                  setCustomContactDateEnd('');
+                                  setContactDateFilter('all');
+                                  setIsContactDateDropdownOpen(false);
+                                }}
+                              >
+                                Clear
+                              </button>
+                              <button
+                                type="button"
+                                className="pipeline-filter-date-btn-apply"
+                                onClick={() => setIsContactDateDropdownOpen(false)}
+                              >
+                                Apply
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Reset / Clear All Filters */}
+                  {isAnyContactFilterActive && (
+                    <button
+                      type="button"
+                      className="pipeline-filter-clear-all-btn"
+                      onClick={handleResetContactFilters}
+                      title="Clear all filters"
+                    >
+                      <X size={13} />
+                      <span>Reset Filters</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="pipeline-toolbar-right">
+                  {/* Create Contacts Primary Button */}
+                  {canCreate && (
+                    <button
+                      type="button"
+                      className="pipeline-btn-create-deal"
+                      onClick={handleOpenCreateContact}
+                      title="Create new contact"
+                    >
+                      <Plus size={15} />
+                      <span>Create contacts</span>
+                      <ChevronDown size={13} />
+                    </button>
+                  )}
+
+                  {/* More Options */}
+                  {canCreate && (
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        type="button"
+                        className={`pipeline-btn-more ${isContactsToolbarMenuOpen ? 'active' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsContactsToolbarMenuOpen(prev => !prev);
+                        }}
+                        title="More Options"
+                      >
+                        <MoreHorizontal size={16} />
+                      </button>
+                      {isContactsToolbarMenuOpen && (
+                        <div
+                          className="pipeline-card-dropdown-menu"
+                          style={{ top: 'calc(100% + 6px)', right: 0, minWidth: '160px', zIndex: 100 }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="pipeline-card-menu-item"
+                            onClick={() => {
+                              setIsContactsToolbarMenuOpen(false);
+                              setShowAddStageModal(true);
+                            }}
+                          >
+                            <div className="pipeline-card-menu-item-left">
+                              <Plus size={14} style={{ color: '#0284c7' }} />
+                              <span>Add Stage</span>
+                            </div>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Contacts Content Body: Kanban Stage Columns or Table View */}
+              <div className="pipeline-board-container">
+                {isLoading ? (
+                  contactViewMode === 'kanban' ? renderKanbanSkeleton(effectiveContactStages.length || 4, true) : renderTableSkeleton(7)
+                ) : contactViewMode === 'kanban' ? (
+                  effectiveContactStages.length === 0 ? (
+                    <div className="pipeline-empty-state-card" style={{ maxWidth: '480px', margin: '40px auto' }}>
+                      <div className="pipeline-empty-icon-wrap" style={{ background: '#f0f9ff', color: '#0284c7' }}>
+                        <Users size={32} />
+                      </div>
+                      <h3 className="pipeline-empty-state-title">No Contact Stages</h3>
+                      <p className="pipeline-empty-state-desc">
+                        No contact stages currently exist. Click below to add a custom stage column.
+                      </p>
+                      <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '12px' }}>
+                        <button
+                          type="button"
+                          className="pipeline-empty-state-action-btn"
+                          onClick={() => setShowAddStageModal(true)}
+                        >
+                          <Plus size={14} />
+                          <span>Add Stage</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="pipeline-kanban-board">
+                      {effectiveContactStages.map((stage, sIndex) => {
+                        const activeStageNames = new Set(effectiveContactStages.map(s => (s.name || s.id || '').toLowerCase()));
+                        const stageContacts = filteredContacts.filter(c => {
+                          const cStage = (c.leadStage || '').toLowerCase().trim();
+                          const sName = (stage.name || '').toLowerCase().trim();
+                          const sId = (stage.id || '').toLowerCase().trim();
+                          if (cStage === sName || cStage === sId) return true;
+                          if ((!cStage || !activeStageNames.has(cStage)) && sIndex === 0) {
+                            return true;
+                          }
+                          return false;
+                        });
+
+                        return (
+                          <div
+                            key={stage.id}
+                            className={`pipeline-column ${dragOverContactColumnId === stage.id ? 'drag-over' : ''}`}
+                            onDragOver={e => handleContactDragOver(e, stage.id)}
+                            onDragLeave={e => handleContactDragLeave(e, stage.id)}
+                            onDrop={e => handleContactDrop(e, stage.name)}
+                          >
+                            {/* Column Header */}
+                            <div className="pipeline-column-header">
+                              {editingContactStageId === stage.id ? (
+                                <div className="pipeline-inline-edit-wrap">
+                                  <input
+                                    type="text"
+                                    className="pipeline-inline-edit-input"
+                                    value={editingContactStageName}
+                                    autoFocus
+                                    onChange={e => setEditingContactStageName(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleSaveEditContactStage(stage.id);
+                                      if (e.key === 'Escape') setEditingContactStageId(null);
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="pipeline-inline-save-btn"
+                                    onClick={() => handleSaveEditContactStage(stage.id)}
+                                    title="Save stage name"
+                                  >
+                                    <CheckCircle size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="pipeline-inline-cancel-btn"
+                                    onClick={() => setEditingContactStageId(null)}
+                                    title="Cancel"
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="pipeline-stage-info">
+                                    <h3 className="pipeline-stage-name" title={stage.name}>
+                                      {stage.name}
+                                    </h3>
+                                    <span className={`pipeline-stage-badge ${stage.badgeClass || 'new'}`}>
+                                      {stageContacts.length}
+                                    </span>
+                                  </div>
+
+                                  <div className="pipeline-col-header-actions" style={{ position: 'relative' }}>
+                                    <button
+                                      type="button"
+                                      className="pipeline-col-action-btn more"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveColMenuId(activeColMenuId === stage.id ? null : stage.id);
+                                      }}
+                                      title="Stage options"
+                                    >
+                                      <MoreHorizontal size={14} />
+                                    </button>
+
+                                    {activeColMenuId === stage.id && (
+                                      <div
+                                        className="pipeline-card-dropdown-menu"
+                                        style={{ top: 'calc(100% + 4px)', right: 0, minWidth: '160px', zIndex: 90 }}
+                                        onClick={e => e.stopPropagation()}
+                                      >
+                                        {canCreate && (
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-menu-item"
+                                            onClick={() => {
+                                              setActiveColMenuId(null);
+                                              handleOpenCreateContact();
+                                              setContactFormData(prev => ({ ...prev, leadStage: stage.name }));
+                                            }}
+                                          >
+                                            <div className="pipeline-card-menu-item-left">
+                                              <Plus size={13} style={{ color: '#0284c7' }} />
+                                              <span>Add Contact</span>
+                                            </div>
+                                          </button>
+                                        )}
+                                        {canUpdate && (
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-menu-item"
+                                            onClick={(e) => handleStartEditContactStage(stage, e)}
+                                          >
+                                            <div className="pipeline-card-menu-item-left">
+                                              <Edit2 size={13} style={{ color: '#64748b' }} />
+                                              <span>Edit Stage</span>
+                                            </div>
+                                          </button>
+                                        )}
+                                        {canDelete && (
+                                          <>
+                                            <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                            <button
+                                              type="button"
+                                              className="pipeline-card-menu-item danger"
+                                              onClick={(e) => handleDeleteContactStage(stage.id, e)}
+                                            >
+                                              <div className="pipeline-card-menu-item-left">
+                                                <Trash2 size={13} />
+                                                <span>Delete Stage</span>
+                                              </div>
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            {/* Contact Cards List */}
+                            <div
+                              className="pipeline-cards-list"
+                              onDragOver={e => handleContactDragOver(e, stage.id)}
+                              onDrop={e => handleContactDrop(e, stage.name)}
+                            >
+                              {stageContacts.length === 0 ? (
+                                <div className="pipeline-column-empty">
+                                  <p>No contacts in this stage</p>
+                                </div>
+                              ) : (
+                                stageContacts.map(contact => {
+                                  const countryObj = COUNTRY_CODES.find(c => c.code === contact.countryCode) || COUNTRY_CODES[0];
+                                  const displayName = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || 'Unnamed Contact';
+                                  const displayLocation = contact.location || ((contact.company && contact.company !== 'Direct Client') ? contact.company : '');
+
+                                  return (
+                                    <div
+                                      key={contact._id}
+                                      className={`pipeline-card ${activeContactMenuId === contact._id || activeContactStatusDropdownId === contact._id ? 'menu-active' : ''} ${hoveredActivityContactId === contact._id ? 'activity-hovered' : ''} ${draggedContactId === contact._id ? 'dragging' : ''}`}
+                                      draggable={canUpdate}
+                                      onDragStart={e => handleContactDragStart(e, contact._id)}
+                                      onDragEnd={handleContactDragEnd}
+                                    >
+                                      {/* 1. Card Top */}
+                                      <div className="pipeline-card-top">
+                                        <div className="pipeline-card-person" style={{ cursor: 'pointer', alignItems: 'flex-start', minWidth: 0, overflow: 'hidden', flex: 1 }} onClick={() => setDetailedContactId(contact._id)}>
+                                          {contact.avatar ? (
+                                            <img
+                                              src={contact.avatar}
+                                              alt={displayName}
+                                              className="pipeline-card-avatar"
+                                              onError={e => { e.target.style.display = 'none'; }}
+                                            />
+                                          ) : (
+                                            <div className="pipeline-card-avatar">
+                                              {contact.firstName ? contact.firstName.slice(0, 2).toUpperCase() : 'CO'}
+                                            </div>
+                                          )}
+                                          <div className="pipeline-card-name-wrap" style={{ minWidth: 0, overflow: 'hidden', flex: 1 }}>
+                                            <h4 className="pipeline-card-client-name" style={{ margin: 0 }}>
+                                              <button
+                                                type="button"
+                                                className="pipeline-card-client-name-link"
+                                                onClick={() => setDetailedContactId(contact._id)}
+                                                title={displayName}
+                                              >
+                                                {displayName}
+                                              </button>
+                                            </h4>
+
+                                            {/* Origin + Status badge directly below contact name */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
+                                              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '3.5px' }}>
+                                                <Globe size={11} style={{ color: contact.origin === 'International' ? '#ea580c' : '#0284c7', flexShrink: 0 }} />
+                                                <span>{contact.origin || 'Domestic'}</span>
+                                              </span>
+                                              <span
+                                                className={`pipeline-stage-badge ${(() => {
+                                                  const st = (contact.leadStatus || 'New').toLowerCase();
+                                                  if (st === 'won' || st === 'qualified' || st === 'active' || st === 'open') return 'won';
+                                                  if (st === 'lost' || st === 'unqualified' || st === 'spam') return 'lost';
+                                                  if (st === 'hot' || st === 'in progress' || st === 'contacted') return 'hot';
+                                                  return 'new';
+                                                })()
+                                                  }`}
+                                                style={{ fontSize: '8px', padding: '0.8px 5px', borderRadius: '999px', fontWeight: 600, letterSpacing: '0.2px', lineHeight: '1.1' }}
+                                              >
+                                                {contact.leadStatus || 'New'}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        <div className="pipeline-card-menu-container">
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-more-btn"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (activeContactMenuId === contact._id) {
+                                                setActiveContactMenuId(null);
+                                                setMoveSubmenuContactId(null);
+                                              } else {
+                                                setActiveContactMenuId(contact._id);
+                                                setMoveSubmenuContactId(null);
+                                              }
+                                            }}
+                                            title="Options"
+                                          >
+                                            <MoreHorizontal size={16} />
+                                          </button>
+
+                                          {/* Main Contact 3-dots Menu */}
+                                          {activeContactMenuId === contact._id && moveSubmenuContactId !== contact._id && (
+                                            <div className="pipeline-card-dropdown-menu" onClick={e => e.stopPropagation()}>
+                                              {canUpdate && (
+                                                <button
+                                                  type="button"
+                                                  className="pipeline-card-menu-item"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setMoveSubmenuContactId(contact._id);
+                                                  }}
+                                                >
+                                                  <div className="pipeline-card-menu-item-left">
+                                                    <ArrowRightLeft size={14} style={{ color: '#0284c7' }} />
+                                                    <span>Move</span>
+                                                  </div>
+                                                  <ChevronRight size={13} style={{ color: '#94a3b8' }} />
+                                                </button>
+                                              )}
+
+                                              <button
+                                                type="button"
+                                                className="pipeline-card-menu-item"
+                                                onClick={() => {
+                                                  setDetailedContactId(contact._id);
+                                                  setActiveContactMenuId(null);
+                                                }}
+                                              >
+                                                <div className="pipeline-card-menu-item-left">
+                                                  <Eye size={14} style={{ color: '#64748b' }} />
+                                                  <span>View Contact</span>
+                                                </div>
+                                              </button>
+
+                                              {canUpdate && (
+                                                <button
+                                                  type="button"
+                                                  className="pipeline-card-menu-item"
+                                                  onClick={(e) => handleOpenEditContact(contact, e)}
+                                                >
+                                                  <div className="pipeline-card-menu-item-left">
+                                                    <Edit2 size={14} style={{ color: '#64748b' }} />
+                                                    <span>Edit Contact</span>
+                                                  </div>
+                                                </button>
+                                              )}
+
+                                              {canDelete && (
+                                                <>
+                                                  <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                                  <button
+                                                    type="button"
+                                                    className="pipeline-card-menu-item danger"
+                                                    onClick={(e) => handleDeleteContact(contact._id, e)}
+                                                  >
+                                                    <div className="pipeline-card-menu-item-left">
+                                                      <Trash2 size={14} />
+                                                      <span>Delete Contact</span>
+                                                    </div>
+                                                  </button>
+                                                </>
+                                              )}
+                                            </div>
+                                          )}
+
+                                          {/* Nested Move Stage Submenu for Contact */}
+                                          {activeContactMenuId === contact._id && moveSubmenuContactId === contact._id && (
+                                            <div
+                                              className="pipeline-card-dropdown-menu submenu"
+                                              onClick={e => e.stopPropagation()}
+                                            >
+                                              <div className="pipeline-submenu-header">
+                                                <button
+                                                  type="button"
+                                                  className="pipeline-submenu-back"
+                                                  onClick={() => setMoveSubmenuContactId(null)}
+                                                >
+                                                  <ChevronsLeft size={12} />
+                                                  <span>Back</span>
+                                                </button>
+                                                <span className="pipeline-submenu-title">Move Stage</span>
+                                              </div>
+
+                                              {effectiveContactStages.map(s => {
+                                                const stageName = typeof s === 'string' ? s : (s.name || s.id);
+                                                const isCurrent = (contact.leadStage || '').toLowerCase() === stageName.toLowerCase();
+                                                return (
+                                                  <button
+                                                    key={s.id || stageName}
+                                                    type="button"
+                                                    className={`pipeline-card-menu-item ${isCurrent ? 'active' : ''}`}
+                                                    onClick={e => handleMoveContactStage(contact._id, stageName, e)}
+                                                  >
+                                                    <span className={`pipeline-menu-indicator ${s.badgeClass || 'new'}`} />
+                                                    <span>{stageName}</span>
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* 2. Card Body Fields with Ellipsis Truncation */}
+                                      <div className="pipeline-card-body" style={{ minWidth: 0, overflow: 'hidden' }}>
+                                        <div className="pipeline-card-field" style={{ minWidth: 0, overflow: 'hidden' }}>
+                                          <span className="pipeline-card-label">Email</span>
+                                          {contact.email ? (
+                                            <a
+                                              href={`mailto:${contact.email}`}
+                                              className="pipeline-card-val-strong"
+                                              title={contact.email}
+                                              style={{
+                                                color: '#0284c7',
+                                                textDecoration: 'none',
+                                                fontSize: '12px',
+                                                display: 'block',
+                                                width: '100%',
+                                                maxWidth: '100%',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                whiteSpace: 'nowrap'
+                                              }}
+                                            >
+                                              {contact.email}
+                                            </a>
+                                          ) : (
+                                            <span className="pipeline-card-val" style={{ color: '#94a3b8' }}>—</span>
+                                          )}
+                                        </div>
+
+                                        <div className="pipeline-card-field" style={{ minWidth: 0, overflow: 'hidden' }}>
+                                          <span className="pipeline-card-label">Phone</span>
+                                          <span
+                                            className="pipeline-card-val"
+                                            title={contact.phone ? `${countryObj.flag} ${formatPhoneNumber(contact.phone, contact.countryCode)}` : '—'}
+                                            style={{
+                                              display: 'block',
+                                              width: '100%',
+                                              maxWidth: '100%',
+                                              overflow: 'hidden',
+                                              textOverflow: 'ellipsis',
+                                              whiteSpace: 'nowrap'
+                                            }}
+                                          >
+                                            {contact.phone ? `${countryObj.flag} ${formatPhoneNumber(contact.phone, contact.countryCode)}` : '—'}
+                                          </span>
+                                        </div>
+
+                                        <div className="pipeline-card-field" style={{ minWidth: 0, overflow: 'hidden' }}>
+                                          <span className="pipeline-card-label">Added By</span>
+                                          <span
+                                            className="pipeline-card-val"
+                                            title={contact.addedBy || contact.owner || 'Admin System'}
+                                            style={{
+                                              display: 'block',
+                                              width: '100%',
+                                              maxWidth: '100%',
+                                              overflow: 'hidden',
+                                              textOverflow: 'ellipsis',
+                                              whiteSpace: 'nowrap'
+                                            }}
+                                          >
+                                            {contact.addedBy || contact.owner || 'Admin System'}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* 3. Card Bottom Actions */}
+                                      <div className="pipeline-card-actions">
+                                        <div className="pipeline-card-actions-left">
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-action-circle"
+                                            title="View Notes"
+                                            onClick={() => alert(`Notes for ${displayName}`)}
+                                          >
+                                            <FileText size={12} />
+                                          </button>
+                                          <a
+                                            href={`mailto:${contact.email}`}
+                                            className="pipeline-card-action-circle"
+                                            title="Send Mail"
+                                          >
+                                            <Mail size={12} />
+                                          </a>
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-action-circle"
+                                            title="Send Message"
+                                            onClick={() => alert(`Message ${displayName}`)}
+                                          >
+                                            <MessageSquare size={12} />
+                                          </button>
+                                        </div>
+
+                                        <button
+                                          type="button"
+                                          className={`pipeline-card-view-activity-pill ${hoveredActivityContactId === contact._id ? 'active' : ''}`}
+                                          onMouseEnter={(e) => handleActivityMouseEnter(contact._id, 'contact', e)}
+                                          onMouseLeave={handleActivityMouseLeave}
+                                          onClick={() => {
+                                            setHoveredActivityDealId(null);
+                                            setHoveredActivityContactId(null);
+                                            setDetailedContactId(contact._id);
+                                          }}
+                                          title="View activity"
+                                        >
+                                          <span>View activity</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : (
+                  /* Table List View */
+                  filteredContacts.length === 0 ? (
+                    <div className="pipeline-empty-state-card" style={{ maxWidth: '480px', margin: '40px auto' }}>
+                      <div className="pipeline-empty-icon-wrap" style={{ background: '#f0f9ff', color: '#0284c7' }}>
+                        <Users size={32} />
+                      </div>
+                      <h3 className="pipeline-empty-state-title">No Contacts Found</h3>
+                      <p className="pipeline-empty-state-desc">
+                        {contactSearchQuery || contactStatusFilter !== 'all'
+                          ? 'No contacts match your current search or status filter.'
+                          : 'No contacts registered yet. Click below to add your first contact.'}
+                      </p>
+                      <button
+                        type="button"
+                        className="pipeline-empty-state-action-btn"
+                        onClick={handleOpenCreateContact}
+                      >
+                        <Plus size={14} />
+                        <span>Add Contact</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="pipeline-table-view">
+                      <div className="pipeline-table-card">
+                        <table className="pipeline-table">
+                          <thead>
+                            <tr>
+                              <th>Contact Name</th>
+                              <th>Email Address</th>
+                              <th>Phone Number</th>
+                              <th>Origin</th>
+                              <th>Company</th>
+                              <th>Lead Stage</th>
+                              <th>Lead Status</th>
+                              <th>Source</th>
+                              <th>Added By</th>
+                              <th style={{ textAlign: 'right' }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredContacts.map(contact => {
+                              const countryObj = COUNTRY_CODES.find(c => c.code === contact.countryCode) || COUNTRY_CODES[0];
+                              const displayName = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || 'Unnamed Contact';
+                              return (
+                                <tr key={contact._id}>
+                                  <td>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '9px', cursor: 'pointer' }} onClick={() => setDetailedContactId(contact._id)}>
+                                      <div className="pipeline-card-avatar" style={{ width: '30px', height: '30px', fontSize: '12px' }}>
+                                        {contact.firstName ? contact.firstName.charAt(0) : 'C'}
+                                      </div>
+                                      <span className="pipeline-card-client-name" style={{ fontWeight: 600, color: '#0284c7', cursor: 'pointer' }}>
+                                        {displayName}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <a href={`mailto:${contact.email}`} style={{ color: '#0284c7', textDecoration: 'none', fontWeight: 500 }}>
+                                      {contact.email}
+                                    </a>
+                                  </td>
+                                  <td>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                      <span>{countryObj.flag}</span>
+                                      <span style={{ fontWeight: 500, color: '#334155' }}>
+                                        {contact.phone ? formatPhoneNumber(contact.phone, contact.countryCode) : '—'}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <span
+                                      className={`pipeline-stage-badge ${contact.origin === 'International' ? 'hot' : 'new'}`}
+                                      style={{ fontSize: '11px', padding: '2px 8px' }}
+                                    >
+                                      {contact.origin || 'Domestic'}
+                                    </span>
+                                  </td>
+                                  <td>{(contact.company && contact.company !== 'Direct Client') ? contact.company : '—'}</td>
+                                  <td>
+                                    <span className="pipeline-stage-badge new">{contact.leadStage}</span>
+                                  </td>
+                                  <td>
+                                    <span
+                                      className={`pipeline-stage-badge ${(() => {
+                                        const st = (contact.leadStatus || 'New').toLowerCase();
+                                        if (st === 'won' || st === 'qualified' || st === 'active' || st === 'open') return 'won';
+                                        if (st === 'lost' || st === 'unqualified' || st === 'spam') return 'lost';
+                                        if (st === 'hot' || st === 'in progress' || st === 'contacted') return 'hot';
+                                        return 'new';
+                                      })()
+                                        }`}
+                                      style={{ fontSize: '11px', padding: '2px 8px' }}
+                                    >
+                                      {contact.leadStatus || 'New'}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <span className="pipeline-contact-source-tag">{contact.contactSource}</span>
+                                  </td>
+                                  <td>{contact.addedBy || contact.owner || '—'}</td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
+                                      <button
+                                        type="button"
+                                        style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer' }}
+                                        onClick={() => setDetailedContactId(contact._id)}
+                                        title="View details"
+                                      >
+                                        <Eye size={12} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer' }}
+                                        onClick={(e) => handleOpenEditContact(contact, e)}
+                                        title="Edit contact"
+                                      >
+                                        <Edit2 size={12} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #fee2e2', background: '#fef2f2', color: '#ef4444', cursor: 'pointer' }}
+                                        onClick={(e) => handleDeleteContact(contact._id, e)}
+                                        title="Delete contact"
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+          )
+        )}
+
+        {/* COMPANIES TAB VIEW */}
+        {activeTab === 'companies' && (
+          <div className="pipeline-tab-page-view">
+            {/* Top Header */}
+            <div className="pipeline-top-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <h1 className="pipeline-deals-count-title">
+                  Companies Management<span className="pipeline-title-count-pill"></span>
+                </h1>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {/* View Switcher: List Table or Cards Grid */}
+                <div className="pipeline-view-switcher">
+                  <button
+                    type="button"
+                    className={`pipeline-view-btn ${companyViewMode === 'list' ? 'active' : ''}`}
+                    onClick={() => setCompanyViewMode('list')}
+                    title="List Table View"
+                  >
+                    <List size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`pipeline-view-btn ${companyViewMode === 'grid' ? 'active' : ''}`}
+                    onClick={() => setCompanyViewMode('grid')}
+                    title="Cards Grid View"
+                  >
+                    <Kanban size={16} />
+                  </button>
+                </div>
+
+                {/* Export */}
+                <button
+                  type="button"
+                  className="pipeline-btn-export"
+                  onClick={handleExportCompanies}
+                  title="Export companies to CSV"
+                >
+                  <Download size={14} />
+                  <span>Export</span>
+                </button>
+
+                <NotificationBell filterType="CRM" />
+              </div>
+            </div>
+
+            {/* Action Toolbar */}
+            <div className="pipeline-toolbar-row">
+              <div className="pipeline-toolbar-left">
+                {/* Search Box */}
+                <div className="pipeline-contacts-search-box">
+                  <Search size={14} className="pipeline-search-icon" />
+                  <input
+                    type="text"
+                    placeholder="Search companies..."
+                    value={companySearchQuery}
+                    onChange={e => setCompanySearchQuery(e.target.value)}
+                    className="pipeline-contacts-search-input"
+                  />
+                  {companySearchQuery && (
+                    <button
+                      type="button"
+                      className="pipeline-search-clear-btn"
+                      onClick={() => setCompanySearchQuery('')}
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Sort by Dropdown */}
+                <div className="pipeline-filter-dropdown-wrap">
+                  <button
+                    type="button"
+                    className={`pipeline-tool-btn ${companySortBy !== 'newest' ? 'filter-active' : ''} ${isCompanySortDropdownOpen ? 'active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsCompanyIndustryDropdownOpen(false);
+                      setIsCompanyOwnerDropdownOpen(false);
+                      setIsCompanyDateDropdownOpen(false);
+                      setIsCompanySortDropdownOpen(prev => !prev);
+                    }}
+                    title="Sort Companies"
+                  >
+                    <ArrowUpDown size={14} />
+                    <span>{companySortBy !== 'newest' ? `Sort: ${companySortLabel}` : 'Sort by'}</span>
+                    <ChevronDown size={13} style={{ color: companySortBy !== 'newest' ? '#0284c7' : '#94a3b8' }} />
+                  </button>
+
+                  {isCompanySortDropdownOpen && (
+                    <div className="pipeline-filter-menu-popover" onClick={e => e.stopPropagation()}>
+                      <div className="pipeline-filter-menu-header">Sort companies by</div>
+                      <div className="pipeline-filter-items-scroll">
+                        {[
+                          { id: 'newest', label: 'Newest first' },
+                          { id: 'oldest', label: 'Oldest first' },
+                          { id: 'name_asc', label: 'Company Name (A - Z)' },
+                          { id: 'name_desc', label: 'Company Name (Z - A)' },
+                          { id: 'industry', label: 'Industry (A - Z)' },
+                          { id: 'country', label: 'Country (A - Z)' }
+                        ].map(opt => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            className={`pipeline-filter-item-btn ${companySortBy === opt.id ? 'selected' : ''}`}
+                            onClick={() => {
+                              setCompanySortBy(opt.id);
+                              setIsCompanySortDropdownOpen(false);
+                            }}
+                          >
+                            <span>{opt.label}</span>
+                            {companySortBy === opt.id && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* All Industries Dropdown */}
+                <div className="pipeline-filter-dropdown-wrap">
+                  <button
+                    type="button"
+                    className={`pipeline-tool-btn ${companyIndustryFilter !== 'all' ? 'filter-active' : ''} ${isCompanyIndustryDropdownOpen ? 'active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsCompanySortDropdownOpen(false);
+                      setIsCompanyOwnerDropdownOpen(false);
+                      setIsCompanyDateDropdownOpen(false);
+                      setIsCompanyIndustryDropdownOpen(prev => !prev);
+                    }}
+                    title="Filter by Industry"
+                  >
+                    <Building size={14} />
+                    <span>{companyIndustryFilter === 'all' ? 'All industries' : companyIndustryFilter}</span>
+                    <ChevronDown size={13} style={{ color: companyIndustryFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                  </button>
+
+                  {isCompanyIndustryDropdownOpen && (
+                    <div className="pipeline-filter-menu-popover" style={{ minWidth: '220px' }} onClick={e => e.stopPropagation()}>
+                      <div className="pipeline-filter-menu-header">Filter by Industry</div>
+                      <div className="pipeline-filter-items-scroll">
+                        <button
+                          type="button"
+                          className={`pipeline-filter-item-btn ${companyIndustryFilter === 'all' ? 'selected' : ''}`}
+                          onClick={() => {
+                            setCompanyIndustryFilter('all');
+                            setIsCompanyIndustryDropdownOpen(false);
+                          }}
+                        >
+                          <Building2 size={14} style={{ color: '#64748b' }} />
+                          <span>All industries</span>
+                          <span className="pipeline-filter-item-badge">{companies.filter(c => isItemOwnedByUser(c, 'company')).length}</span>
+                          {companyIndustryFilter === 'all' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                        </button>
+                        {industryOptions.map(ind => {
+                          const count = companyIndustryCounts[ind] || companyIndustryCounts[ind.toLowerCase()] || 0;
+                          return (
+                            <button
+                              key={ind}
+                              type="button"
+                              className={`pipeline-filter-item-btn ${companyIndustryFilter.toLowerCase() === ind.toLowerCase() ? 'selected' : ''}`}
+                              onClick={() => {
+                                setCompanyIndustryFilter(ind);
+                                setIsCompanyIndustryDropdownOpen(false);
+                              }}
+                            >
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ind}</span>
+                              <span className="pipeline-filter-item-badge">{count}</span>
+                              {companyIndustryFilter.toLowerCase() === ind.toLowerCase() && (
+                                <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* All Company Owners Dropdown */}
+                <div className="pipeline-filter-dropdown-wrap">
+                  <button
+                    type="button"
+                    className={`pipeline-tool-btn ${companyOwnerFilter !== 'all' ? 'filter-active' : ''} ${isCompanyOwnerDropdownOpen ? 'active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsCompanySortDropdownOpen(false);
+                      setIsCompanyIndustryDropdownOpen(false);
+                      setIsCompanyDateDropdownOpen(false);
+                      setIsCompanyOwnerDropdownOpen(prev => !prev);
+                    }}
+                    title="Filter by company owners"
+                  >
+                    <User size={14} />
+                    <span>{companyOwnerFilter === 'all' ? 'All company owners' : companyOwnerFilter}</span>
+                    <ChevronDown size={13} style={{ color: companyOwnerFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                  </button>
+
+                  {isCompanyOwnerDropdownOpen && (
+                    <div className="pipeline-filter-menu-popover" style={{ minWidth: '240px' }} onClick={e => e.stopPropagation()}>
+                      <div className="pipeline-filter-menu-header">Filter by Company Owner</div>
+                      {allCompanyOwners.length > 5 && (
+                        <div className="pipeline-filter-search-wrap">
+                          <input
+                            type="text"
+                            className="pipeline-filter-search-input"
+                            placeholder="Search company owner..."
+                            value={companyOwnerSearchQuery}
+                            onChange={e => setCompanyOwnerSearchQuery(e.target.value)}
+                            autoFocus
+                          />
+                        </div>
+                      )}
+                      <div className="pipeline-filter-items-scroll">
+                        <button
+                          type="button"
+                          className={`pipeline-filter-item-btn ${companyOwnerFilter === 'all' ? 'selected' : ''}`}
+                          onClick={() => {
+                            setCompanyOwnerFilter('all');
+                            setIsCompanyOwnerDropdownOpen(false);
+                            setCompanyOwnerSearchQuery('');
+                          }}
+                        >
+                          <User size={14} style={{ color: '#64748b' }} />
+                          <span>All company owners</span>
+                          <span className="pipeline-filter-item-badge">{companies.filter(c => isItemOwnedByUser(c, 'company')).length}</span>
+                          {companyOwnerFilter === 'all' && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                        </button>
+
+                        {allCompanyOwners
+                          .filter(ownerName => !companyOwnerSearchQuery.trim() || ownerName.toLowerCase().includes(companyOwnerSearchQuery.trim().toLowerCase()))
+                          .map(ownerName => {
+                            const count = companyOwnerCounts[ownerName] || companyOwnerCounts[ownerName.toLowerCase()] || 0;
+                            return (
+                              <button
+                                key={ownerName}
+                                type="button"
+                                className={`pipeline-filter-item-btn ${companyOwnerFilter.toLowerCase() === ownerName.toLowerCase() ? 'selected' : ''}`}
+                                onClick={() => {
+                                  setCompanyOwnerFilter(ownerName);
+                                  setIsCompanyOwnerDropdownOpen(false);
+                                  setCompanyOwnerSearchQuery('');
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: '50%',
+                                    background: '#e0f2fe',
+                                    color: '#0284c7',
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                  }}
+                                >
+                                  {ownerName.charAt(0).toUpperCase()}
+                                </div>
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ownerName}</span>
+                                <span className="pipeline-filter-item-badge">{count}</span>
+                                {companyOwnerFilter.toLowerCase() === ownerName.toLowerCase() && (
+                                  <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />
+                                )}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Date Filter Dropdown */}
+                <div className="pipeline-filter-dropdown-wrap">
+                  <button
+                    type="button"
+                    className={`pipeline-tool-btn ${companyDateFilter !== 'all' ? 'filter-active' : ''} ${isCompanyDateDropdownOpen ? 'active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsCompanySortDropdownOpen(false);
+                      setIsCompanyIndustryDropdownOpen(false);
+                      setIsCompanyOwnerDropdownOpen(false);
+                      setIsCompanyDateDropdownOpen(prev => !prev);
+                    }}
+                    title="Filter companies by date"
+                  >
+                    <Calendar size={14} />
+                    <span>{companyDateFilterLabel}</span>
+                    <ChevronDown size={13} style={{ color: companyDateFilter !== 'all' ? '#0284c7' : '#94a3b8' }} />
+                  </button>
+
+                  {isCompanyDateDropdownOpen && (
+                    <div className="pipeline-filter-menu-popover" style={{ minWidth: '230px' }} onClick={e => e.stopPropagation()}>
+                      <div className="pipeline-filter-menu-header">Filter by Creation Date</div>
+                      <div className="pipeline-filter-items-scroll">
+                        {[
+                          { id: 'all', label: 'All Dates (All Time)' },
+                          { id: 'today', label: 'Today' },
+                          { id: 'this_week', label: 'This Week' },
+                          { id: 'this_month', label: 'This Month' },
+                          { id: 'next_30_days', label: 'Next 30 Days' },
+                          { id: 'this_quarter', label: 'This Quarter' },
+                          { id: 'this_year', label: 'This Year' },
+                          { id: 'custom', label: 'Custom Date Range...' }
+                        ].map(opt => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            className={`pipeline-filter-item-btn ${companyDateFilter === opt.id ? 'selected' : ''}`}
+                            onClick={() => {
+                              setCompanyDateFilter(opt.id);
+                              if (opt.id !== 'custom') {
+                                setIsCompanyDateDropdownOpen(false);
+                              }
+                            }}
+                          >
+                            <span>{opt.label}</span>
+                            {companyDateFilter === opt.id && <Check size={14} style={{ marginLeft: 'auto', color: '#0284c7' }} />}
+                          </button>
+                        ))}
+                      </div>
+
+                      {companyDateFilter === 'custom' && (
+                        <div className="pipeline-filter-date-custom-panel">
+                          <div className="pipeline-filter-date-input-group">
+                            <label className="pipeline-filter-date-label">From Date</label>
+                            <input
+                              type="date"
+                              className="pipeline-filter-date-input"
+                              value={customCompanyDateStart}
+                              onChange={e => setCustomCompanyDateStart(e.target.value)}
+                            />
+                          </div>
+                          <div className="pipeline-filter-date-input-group">
+                            <label className="pipeline-filter-date-label">To Date</label>
+                            <input
+                              type="date"
+                              className="pipeline-filter-date-input"
+                              value={customCompanyDateEnd}
+                              onChange={e => setCustomCompanyDateEnd(e.target.value)}
+                            />
+                          </div>
+                          <div className="pipeline-filter-date-actions">
+                            <button
+                              type="button"
+                              className="pipeline-filter-date-btn-cancel"
+                              onClick={() => {
+                                setCustomCompanyDateStart('');
+                                setCustomCompanyDateEnd('');
+                                setCompanyDateFilter('all');
+                                setIsCompanyDateDropdownOpen(false);
+                              }}
+                            >
+                              Clear
+                            </button>
+                            <button
+                              type="button"
+                              className="pipeline-filter-date-btn-apply"
+                              onClick={() => setIsCompanyDateDropdownOpen(false)}
+                            >
+                              Apply
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Reset / Clear All Filters */}
+                {isAnyCompanyFilterActive && (
+                  <button
+                    type="button"
+                    className="pipeline-filter-clear-all-btn"
+                    onClick={handleResetCompanyFilters}
+                    title="Clear all filters"
+                  >
+                    <X size={13} />
+                    <span>Reset Filters</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="pipeline-toolbar-right">
+                {/* Create Company Primary Button */}
+                {canCreate && (
+                  <button
+                    type="button"
+                    className="pipeline-btn-create-deal"
+                    onClick={handleOpenCreateCompany}
+                    title="Create new company"
+                  >
+                    <Plus size={15} />
+                    <span>Create companies</span>
+                    <ChevronDown size={13} />
+                  </button>
+                )}
+
+                {/* More Options */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    type="button"
+                    className={`pipeline-btn-more ${isCompaniesToolbarMenuOpen ? 'active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsCompaniesToolbarMenuOpen(prev => !prev);
+                    }}
+                    title="More Options"
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+                  {isCompaniesToolbarMenuOpen && (
+                    <div
+                      className="pipeline-card-dropdown-menu"
+                      style={{ top: 'calc(100% + 6px)', right: 0, minWidth: '160px', zIndex: 100 }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {canCreate && (
+                        <button
+                          type="button"
+                          className="pipeline-card-menu-item"
+                          onClick={() => {
+                            setIsCompaniesToolbarMenuOpen(false);
+                            handleOpenCreateCompany();
+                          }}
+                        >
+                          <div className="pipeline-card-menu-item-left">
+                            <Plus size={13} style={{ color: '#0284c7' }} />
+                            <span>Add Company</span>
+                          </div>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="pipeline-card-menu-item"
+                        onClick={() => {
+                          setIsCompaniesToolbarMenuOpen(false);
+                          handleExportCompanies();
+                        }}
+                      >
+                        <div className="pipeline-card-menu-item-left">
+                          <Download size={13} style={{ color: '#64748b' }} />
+                          <span>Export Companies</span>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Content Body: Grid View or Table View */}
+            <div className="pipeline-board-container" style={{ padding: '20px 28px 40px 28px' }}>
+              {isLoading ? (
+                companyViewMode === 'grid' ? renderCompanyGridSkeleton(8) : renderTableSkeleton(7)
+              ) : filteredCompanies.length === 0 ? (
+                <div className="pipeline-empty-state-card" style={{ maxWidth: '480px', margin: '40px auto' }}>
+                  <div className="pipeline-empty-icon-wrap">
+                    <Building2 size={32} />
+                  </div>
+                  <h3 className="pipeline-empty-state-title">No Companies Found</h3>
+                  <p className="pipeline-empty-state-desc">
+                    {isAnyCompanyFilterActive
+                      ? 'No companies match your current search or filter criteria.'
+                      : 'No company accounts registered yet. Click below to add your first company.'}
+                  </p>
+                  <button
+                    type="button"
+                    className="pipeline-empty-state-action-btn"
+                    onClick={handleOpenCreateCompany}
+                  >
+                    <Plus size={14} />
+                    <span>Add Company</span>
+                  </button>
+                </div>
+              ) : companyViewMode === 'grid' ? (
+                <div className="pipeline-company-grid">
+                  {filteredCompanies.map(company => {
+                    const displayLocation = [company.city, company.state, company.country].filter(Boolean).join(', ') || 'Not specified';
+                    return (
+                      <div key={company._id} className="pipeline-company-card">
+                        {/* Top Info */}
+                        <div className="pipeline-company-card-top">
+                          <div className="pipeline-company-info-wrap">
+                            <div className="pipeline-company-logo-avatar">
+                              {company.name ? company.name.charAt(0).toUpperCase() : 'C'}
+                            </div>
+                            <div>
+                              <h3 className="pipeline-company-name-title">{company.name}</h3>
+                              {company.domain ? (
+                                <a
+                                  href={`https://${company.domain.replace(/^https?:\/\//, '')}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="pipeline-company-domain-link"
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  <span>{company.domain}</span>
+                                  <ExternalLink size={11} />
+                                </a>
+                              ) : (
+                                <span style={{ fontSize: '12px', color: '#94a3b8' }}>No domain</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* 3-dots Menu */}
+                          <div style={{ position: 'relative' }}>
+                            <button
+                              type="button"
+                              className="pipeline-card-more-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveCompanyMenuId(activeCompanyMenuId === company._id ? null : company._id);
+                              }}
+                              title="Company options"
+                            >
+                              <MoreHorizontal size={16} />
+                            </button>
+
+                            {activeCompanyMenuId === company._id && (
+                              <div className="pipeline-card-dropdown-menu" onClick={e => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  className="pipeline-card-menu-item"
+                                  onClick={() => {
+                                    setViewingCompany(company);
+                                    setActiveCompanyMenuId(null);
+                                  }}
+                                >
+                                  <div className="pipeline-card-menu-item-left">
+                                    <Eye size={14} style={{ color: '#64748b' }} />
+                                    <span>View Details</span>
+                                  </div>
+                                </button>
+
+                                {canUpdate && (
+                                  <button
+                                    type="button"
+                                    className="pipeline-card-menu-item"
+                                    onClick={(e) => handleOpenEditCompany(company, e)}
+                                  >
+                                    <div className="pipeline-card-menu-item-left">
+                                      <Edit2 size={14} style={{ color: '#64748b' }} />
+                                      <span>Edit Company</span>
+                                    </div>
+                                  </button>
+                                )}
+
+                                {canDelete && (
+                                  <>
+                                    <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                    <button
+                                      type="button"
+                                      className="pipeline-card-menu-item danger"
+                                      onClick={(e) => handleDeleteCompany(company._id, e)}
+                                    >
+                                      <div className="pipeline-card-menu-item-left">
+                                        <Trash2 size={14} />
+                                        <span>Delete Company</span>
+                                      </div>
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Body Details */}
+                        <div className="pipeline-company-card-body">
+                          <div className="pipeline-company-detail-row">
+                            <span className="pipeline-company-detail-label">Industry</span>
+                            <span className="pipeline-company-industry-tag">{company.industry || 'General'}</span>
+                          </div>
+
+                          <div className="pipeline-company-detail-row">
+                            <span className="pipeline-company-detail-label">Location</span>
+                            <span className="pipeline-company-detail-val" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <MapPin size={11} style={{ color: '#64748b' }} />
+                              {displayLocation}
+                            </span>
+                          </div>
+
+                          {company.postalCode && (
+                            <div className="pipeline-company-detail-row">
+                              <span className="pipeline-company-detail-label">Postal Code</span>
+                              <span className="pipeline-company-detail-val">{company.postalCode}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Footer */}
+                        <div className="pipeline-company-card-footer">
+                          <div className="pipeline-company-owner-badge" style={{ flexWrap: 'wrap', gap: '4px' }}>
+                            <User size={13} style={{ color: '#0284c7', flexShrink: 0 }} />
+                            <CompanyOwnerDisplay owner={company.owner} fallback="Artiflow" />
+                          </div>
+
+                          <button
+                            type="button"
+                            className="pipeline-company-btn-action"
+                            onClick={() => setViewingCompany(company)}
+                          >
+                            <span>View details</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                /* Table List View */
+                <div className="pipeline-table-view">
+                  <div className="pipeline-table-card">
+                    <table className="pipeline-table">
+                      <thead>
+                        <tr>
+                          <th>Company Name</th>
+                          <th>Domain</th>
+                          <th>Industry</th>
+                          <th>Location</th>
+                          <th>Postal Code</th>
+                          <th>Company Owner</th>
+                          <th style={{ textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCompanies.map(company => (
+                          <tr key={company._id}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+                                <div className="pipeline-company-logo-avatar" style={{ width: '32px', height: '32px', fontSize: '13px', borderRadius: '8px' }}>
+                                  {company.name ? company.name.charAt(0).toUpperCase() : 'C'}
+                                </div>
+                                <span style={{ fontWeight: 600, color: '#0f172a' }}>{company.name}</span>
+                              </div>
+                            </td>
+                            <td>
+                              {company.domain ? (
+                                <a
+                                  href={`https://${company.domain.replace(/^https?:\/\//, '')}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{ color: '#0284c7', textDecoration: 'none', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                >
+                                  <span>{company.domain}</span>
+                                  <ExternalLink size={11} />
+                                </a>
+                              ) : (
+                                <span style={{ color: '#94a3b8' }}>—</span>
+                              )}
+                            </td>
+                            <td>
+                              <span className="pipeline-company-industry-tag">{company.industry || 'General'}</span>
+                            </td>
+                            <td>{[company.city, company.state, company.country].filter(Boolean).join(', ') || '—'}</td>
+                            <td>{company.postalCode || '—'}</td>
+                            <td>
+                              <CompanyOwnerDisplay owner={company.owner} fallback="Artiflow" />
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
+                                <button
+                                  type="button"
+                                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer' }}
+                                  onClick={() => setViewingCompany(company)}
+                                  title="View details"
+                                >
+                                  <Eye size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer' }}
+                                  onClick={(e) => handleOpenEditCompany(company, e)}
+                                  title="Edit company"
+                                >
+                                  <Edit2 size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #fee2e2', background: '#fef2f2', color: '#ef4444', cursor: 'pointer' }}
+                                  onClick={(e) => handleDeleteCompany(company._id, e)}
+                                  title="Delete company"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TASKS TAB (Complete CRM Task Management) */}
+        {activeTab === 'tasks' && (
+          <div className="pipeline-tab-page-view">
+            {/* Top Header */}
+            <div className="pipeline-top-header">
+              <h1 className="pipeline-deals-count-title">Tasks Management</h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <NotificationBell filterType="CRM" />
+              </div>
+            </div>
+
+            {/* Action Toolbar */}
+            <div className="pipeline-toolbar-row">
+              <div className="pipeline-toolbar-left">
+                {/* Search Tasks */}
+                <div className="pipeline-contacts-search-box">
+                  <Search size={14} className="pipeline-search-icon" />
+                  <input
+                    type="text"
+                    placeholder="Search tasks, deals, contacts..."
+                    value={taskSearchQuery}
+                    onChange={e => setTaskSearchQuery(e.target.value)}
+                    className="pipeline-contacts-search-input"
+                  />
+                  {taskSearchQuery && (
+                    <button
+                      type="button"
+                      className="pipeline-search-clear-btn"
+                      onClick={() => setTaskSearchQuery('')}
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter by Status */}
+                <button
+                  type="button"
+                  className="pipeline-tool-btn"
+                  onClick={() => {
+                    const stList = ['all', 'Pending', 'In Progress', 'Completed'];
+                    const idx = stList.indexOf(taskStatusFilter);
+                    setTaskStatusFilter(stList[(idx + 1) % stList.length]);
+                  }}
+                  title="Filter by Status"
+                >
+                  <CheckCircle size={14} />
+                  <span>{taskStatusFilter === 'all' ? 'All Statuses' : taskStatusFilter}</span>
+                  <ChevronDown size={13} style={{ color: '#94a3b8' }} />
+                </button>
+
+                {/* Filter by Priority */}
+                <button
+                  type="button"
+                  className="pipeline-tool-btn"
+                  onClick={() => {
+                    const prList = ['all', 'High', 'Medium', 'Low'];
+                    const idx = prList.indexOf(taskPriorityFilter);
+                    setTaskPriorityFilter(prList[(idx + 1) % prList.length]);
+                  }}
+                  title="Filter by Priority"
+                >
+                  <Tag size={14} />
+                  <span>{taskPriorityFilter === 'all' ? 'All Priorities' : `${taskPriorityFilter} Priority`}</span>
+                  <ChevronDown size={13} style={{ color: '#94a3b8' }} />
+                </button>
+
+                {/* Filter by Type */}
+                <button
+                  type="button"
+                  className="pipeline-tool-btn"
+                  onClick={() => {
+                    const tList = ['all', ...TASK_TYPE_OPTIONS];
+                    const idx = tList.indexOf(taskTypeFilter);
+                    setTaskTypeFilter(tList[(idx + 1) % tList.length]);
+                  }}
+                  title="Filter by Type"
+                >
+                  <Filter size={14} />
+                  <span>{taskTypeFilter === 'all' ? 'All Types' : taskTypeFilter}</span>
+                  <ChevronDown size={13} style={{ color: '#94a3b8' }} />
+                </button>
+
+                {/* Sort by */}
+                <button
+                  type="button"
+                  className="pipeline-tool-btn"
+                  onClick={() => {
+                    setTaskSortBy(prev => (prev === 'dueDate_asc' ? 'dueDate_desc' : prev === 'dueDate_desc' ? 'priority' : 'dueDate_asc'));
+                  }}
+                  title="Sort Tasks"
+                >
+                  <ArrowUpDown size={14} />
+                  <span>
+                    Sort: {taskSortBy === 'dueDate_asc' ? 'Due Soonest' : taskSortBy === 'dueDate_desc' ? 'Due Latest' : 'Priority (High)'}
+                  </span>
+                </button>
+              </div>
+
+              <div className="pipeline-toolbar-right">
+                {/* View Switcher: List Table or Kanban Board */}
+                <div className="pipeline-view-switcher">
+                  <button
+                    type="button"
+                    className={`pipeline-view-btn ${taskViewMode === 'list' ? 'active' : ''}`}
+                    onClick={() => setTaskViewMode('list')}
+                    title="List Table View"
+                  >
+                    <List size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`pipeline-view-btn ${taskViewMode === 'kanban' ? 'active' : ''}`}
+                    onClick={() => setTaskViewMode('kanban')}
+                    title="Kanban Board View"
+                  >
+                    <Kanban size={16} />
+                  </button>
+                </div>
+
+                {/* Export */}
+                <button
+                  type="button"
+                  className="pipeline-btn-export"
+                  onClick={handleExportTasks}
+                  title="Export tasks to CSV"
+                >
+                  <Download size={14} />
+                  <span>Export</span>
+                </button>
+
+                {/* Create Task Primary Button */}
+                {canCreate && (
+                  <button
+                    type="button"
+                    className="pipeline-btn-create-deal"
+                    onClick={() => handleOpenCreateTask()}
+                    title="Create new task"
+                  >
+                    <Plus size={15} />
+                    <span>Create tasks</span>
+                    <ChevronDown size={13} />
+                  </button>
+                )}
+
+                {/* More Options */}
+                {canCreate && (
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      type="button"
+                      className={`pipeline-btn-more ${isTasksToolbarMenuOpen ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsTasksToolbarMenuOpen(prev => !prev);
+                      }}
+                      title="More Options"
+                    >
+                      <MoreHorizontal size={16} />
+                    </button>
+                    {isTasksToolbarMenuOpen && (
+                      <div
+                        className="pipeline-card-dropdown-menu"
+                        style={{ top: 'calc(100% + 6px)', right: 0, minWidth: '160px', zIndex: 100 }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          className="pipeline-card-menu-item"
+                          onClick={() => {
+                            setIsTasksToolbarMenuOpen(false);
+                            handleOpenCreateTask();
+                          }}
+                        >
+                          <div className="pipeline-card-menu-item-left">
+                            <Plus size={13} style={{ color: '#0284c7' }} />
+                            <span>Add Task</span>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          className="pipeline-card-menu-item"
+                          onClick={() => {
+                            setIsTasksToolbarMenuOpen(false);
+                            handleExportTasks();
+                          }}
+                        >
+                          <div className="pipeline-card-menu-item-left">
+                            <Download size={13} style={{ color: '#64748b' }} />
+                            <span>Export Tasks</span>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Metrics Row */}
+            <div className="pipeline-tasks-metrics-row">
+              <div className="pipeline-task-stat-card">
+                <div className="pipeline-task-stat-icon total">
+                  <CheckSquare size={18} />
+                </div>
+                <div>
+                  <span className="pipeline-task-stat-label">Total Tasks</span>
+                  <h4 className="pipeline-task-stat-value">{tasks.length}</h4>
+                </div>
+              </div>
+              <div className="pipeline-task-stat-card">
+                <div className="pipeline-task-stat-icon pending">
+                  <Clock size={18} />
+                </div>
+                <div>
+                  <span className="pipeline-task-stat-label">Pending / In Progress</span>
+                  <h4 className="pipeline-task-stat-value">{tasks.filter(t => !t.completed).length}</h4>
+                </div>
+              </div>
+              <div className="pipeline-task-stat-card">
+                <div className="pipeline-task-stat-icon completed">
+                  <CheckCircle size={18} />
+                </div>
+                <div>
+                  <span className="pipeline-task-stat-label">Completed</span>
+                  <h4 className="pipeline-task-stat-value">{tasks.filter(t => t.completed).length}</h4>
+                </div>
+              </div>
+              <div className="pipeline-task-stat-card">
+                <div className="pipeline-task-stat-icon high">
+                  <AlertCircle size={18} />
+                </div>
+                <div>
+                  <span className="pipeline-task-stat-label">High Priority</span>
+                  <h4 className="pipeline-task-stat-value">{tasks.filter(t => t.priority === 'High' && !t.completed).length}</h4>
+                </div>
+              </div>
+            </div>
+
+            {/* Content Body: List View or Kanban View */}
+            <div className="pipeline-board-container" style={{ padding: '0 28px 40px 28px' }}>
+              {isLoading ? (
+                taskViewMode === 'list' ? renderTaskListSkeleton(7) : renderKanbanSkeleton(3, false)
+              ) : filteredTasks.length === 0 ? (
+                <div className="pipeline-empty-state-card" style={{ maxWidth: '480px', margin: '40px auto' }}>
+                  <div className="pipeline-empty-icon-wrap" style={{ background: '#eef2ff', color: '#6366f1' }}>
+                    <CheckSquare size={32} />
+                  </div>
+                  <h3 className="pipeline-empty-state-title">No Tasks Found</h3>
+                  <p className="pipeline-empty-state-desc">
+                    {taskSearchQuery || taskStatusFilter !== 'all' || taskPriorityFilter !== 'all' || taskTypeFilter !== 'all'
+                      ? 'No tasks match your current search and filter criteria.'
+                      : 'You have no scheduled tasks. Keep deals moving by scheduling follow-ups, calls, or meetings.'}
+                  </p>
+                  <button
+                    type="button"
+                    className="pipeline-empty-state-action-btn"
+                    onClick={() => handleOpenCreateTask()}
+                  >
+                    <Plus size={14} />
+                    <span>Create Your First Task</span>
+                  </button>
+                </div>
+              ) : taskViewMode === 'list' ? (
+                /* Table List View */
+                <div className="pipeline-table-view">
+                  <div className="pipeline-table-card">
+                    <table className="pipeline-table compact-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '38px', textAlign: 'center', whiteSpace: 'nowrap' }}>Done</th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Task Title</th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Type</th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Associated Deal</th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Associated Contact</th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Due Date</th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Priority</th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Assignee</th>
+                          <th style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredTasks.map(task => {
+                          const isOverdue = task.dueDate && !task.completed && new Date(task.dueDate) < new Date(new Date().setHours(0, 0, 0, 0));
+                          return (
+                            <tr key={task._id} className={task.completed ? 'task-row-completed' : ''}>
+                              <td style={{ textAlign: 'center', width: '38px' }}>
+                                <label className="pipeline-task-checkbox-wrap" onClick={e => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!task.completed}
+                                    onChange={(e) => handleToggleTaskComplete(task._id, e)}
+                                  />
+                                  <span className="pipeline-task-checkmark"></span>
+                                </label>
+                              </td>
+                              <td style={{ whiteSpace: 'nowrap' }}>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', maxWidth: '320px' }}>
+                                  <span
+                                    style={{
+                                      fontWeight: 600,
+                                      fontSize: '12px',
+                                      color: task.completed ? '#94a3b8' : '#0f172a',
+                                      textDecoration: task.completed ? 'line-through' : 'none',
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis'
+                                    }}
+                                    title={task.title}
+                                  >
+                                    {task.title}
+                                  </span>
+                                  {task.description && (
+                                    <span
+                                      style={{
+                                        fontSize: '11px',
+                                        color: '#64748b',
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        maxWidth: '160px',
+                                        opacity: 0.85
+                                      }}
+                                      title={task.description}
+                                    >
+                                      — {task.description}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ whiteSpace: 'nowrap' }}>
+                                <span className={`pipeline-task-type-badge ${(task.type || 'follow-up').toLowerCase()}`} style={{ fontSize: '10.5px', padding: '1.5px 7px', whiteSpace: 'nowrap' }}>
+                                  {task.type || 'Follow-up'}
+                                </span>
+                              </td>
+                              <td style={{ whiteSpace: 'nowrap' }}>
+                                {task.associatedDealId || task.associatedDealName ? (
+                                  <button
+                                    type="button"
+                                    className="pipeline-task-entity-link deal"
+                                    style={{ fontSize: '11px', padding: '2px 7px', whiteSpace: 'nowrap' }}
+                                    onClick={() => {
+                                      const matchedD = deals.find(d => d._id === task.associatedDealId || (d.dealName || d.clientName) === task.associatedDealName);
+                                      if (matchedD) {
+                                        setDetailedContactId(null);
+                                        setDetailedDealId(matchedD._id);
+                                        setActiveTab('deals');
+                                      }
+                                    }}
+                                    title="Open Deal"
+                                  >
+                                    <Briefcase size={10} style={{ flexShrink: 0 }} />
+                                    <span style={{ maxWidth: '130px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {task.associatedDealName || 'View Deal'}
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <span style={{ color: '#94a3b8', fontSize: '11.5px' }}>—</span>
+                                )}
+                              </td>
+                              <td style={{ whiteSpace: 'nowrap' }}>
+                                {task.associatedContactId || task.associatedContactName ? (
+                                  <button
+                                    type="button"
+                                    className="pipeline-task-entity-link contact"
+                                    style={{ fontSize: '11px', padding: '2px 7px', whiteSpace: 'nowrap' }}
+                                    onClick={() => {
+                                      const matchedC = contacts.find(c => c._id === task.associatedContactId || `${c.firstName} ${c.lastName}`.trim() === task.associatedContactName);
+                                      if (matchedC) {
+                                        setDetailedDealId(null);
+                                        setDetailedContactId(matchedC._id);
+                                        setActiveTab('contacts');
+                                      }
+                                    }}
+                                    title="Open Contact"
+                                  >
+                                    <User size={10} style={{ flexShrink: 0 }} />
+                                    <span style={{ maxWidth: '130px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {task.associatedContactName || 'View Contact'}
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <span style={{ color: '#94a3b8', fontSize: '11.5px' }}>—</span>
+                                )}
+                              </td>
+                              <td style={{ whiteSpace: 'nowrap' }}>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', color: isOverdue ? '#dc2626' : '#475569', fontWeight: isOverdue ? 700 : 500, whiteSpace: 'nowrap' }}>
+                                  <Clock size={11} style={{ flexShrink: 0 }} />
+                                  <span>{task.dueDate ? formatDateDDMMYYYY(task.dueDate) : '—'}</span>
+                                  {isOverdue && (
+                                    <span style={{ fontSize: '9.5px', background: '#fee2e2', color: '#dc2626', padding: '1px 4.5px', borderRadius: '4px', fontWeight: 700, whiteSpace: 'nowrap', lineHeight: '1.2' }}>
+                                      Overdue
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ whiteSpace: 'nowrap' }}>
+                                <span className={`pipeline-task-priority-pill ${(task.priority || 'medium').toLowerCase()}`} style={{ fontSize: '10.5px', padding: '1.5px 7px', whiteSpace: 'nowrap' }}>
+                                  {task.priority || 'Medium'}
+                                </span>
+                              </td>
+                              <td style={{ whiteSpace: 'nowrap' }}>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}>
+                                  <div className="pipeline-owner-pill-avatar" style={{ width: '20px', height: '20px', fontSize: '9.5px', flexShrink: 0 }}>
+                                    {(task.assignee || 'A').charAt(0)}
+                                  </div>
+                                  <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {task.assignee || 'Artiflow'}
+                                  </span>
+                                </div>
+                              </td>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                <div style={{ display: 'inline-flex', justifyContent: 'flex-end', gap: '4px' }}>
+                                  {canUpdate && (
+                                    <button
+                                      type="button"
+                                      className="pipeline-mini-icon-btn"
+                                      style={{ width: '24px', height: '24px' }}
+                                      onClick={(e) => handleOpenEditTask(task, e)}
+                                      title="Edit Task"
+                                    >
+                                      <Edit2 size={11} />
+                                    </button>
+                                  )}
+                                  {canDelete && (
+                                    <button
+                                      type="button"
+                                      className="pipeline-mini-icon-btn danger"
+                                      style={{ width: '24px', height: '24px' }}
+                                      onClick={(e) => handleDeleteTask(task._id, e)}
+                                      title="Delete Task"
+                                    >
+                                      <Trash2 size={11} />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                /* Kanban Columns Board View */
+                <div className="pipeline-task-kanban-board">
+                  {['Pending', 'In Progress', 'Completed'].map(colStatus => {
+                    const colTasks = filteredTasks.filter(t => {
+                      if (colStatus === 'Completed') return t.completed || t.status === 'Completed';
+                      if (colStatus === 'In Progress') return !t.completed && t.status === 'In Progress';
+                      return !t.completed && t.status !== 'In Progress';
+                    });
+                    return (
+                      <div key={colStatus} className="pipeline-task-kanban-col">
+                        <div className="pipeline-task-kanban-col-header">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span className={`pipeline-task-status-dot ${colStatus.toLowerCase().replace(/\s+/g, '-')}`} />
+                            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>{colStatus}</h4>
+                          </div>
+                          <span className="pipeline-col-count">{colTasks.length}</span>
+                        </div>
+
+                        <div className="pipeline-task-kanban-col-body">
+                          {colTasks.map(task => (
+                            <div key={task._id} className={`pipeline-task-kanban-card ${task.completed ? 'completed' : ''}`}>
+                              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+                                <span className={`pipeline-task-type-badge ${(task.type || 'follow-up').toLowerCase()}`}>
+                                  {task.type || 'Follow-up'}
+                                </span>
+                                <span className={`pipeline-task-priority-pill ${(task.priority || 'medium').toLowerCase()}`}>
+                                  {task.priority || 'Medium'}
+                                </span>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' }}>
+                                <label className="pipeline-task-checkbox-wrap" onClick={e => e.stopPropagation()} style={{ marginTop: '2px' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!task.completed}
+                                    disabled={!canUpdate}
+                                    onChange={(e) => canUpdate && handleToggleTaskComplete(task._id, e)}
+                                  />
+                                  <span className="pipeline-task-checkmark"></span>
+                                </label>
+                                <h4 className={`pipeline-task-card-title ${task.completed ? 'done' : ''}`}>
+                                  {task.title}
+                                </h4>
+                              </div>
+
+                              {task.description && (
+                                <p className="pipeline-task-card-desc">{task.description}</p>
+                              )}
+
+                              {(task.associatedDealName || task.associatedContactName) && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', margin: '8px 0' }}>
+                                  {task.associatedDealName && (
+                                    <span className="pipeline-task-entity-link deal">
+                                      <Briefcase size={10} /> {task.associatedDealName}
+                                    </span>
+                                  )}
+                                  {task.associatedContactName && (
+                                    <span className="pipeline-task-entity-link contact">
+                                      <User size={10} /> {task.associatedContactName}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
+                              <div className="pipeline-task-card-footer">
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11.5px', color: '#64748b' }}>
+                                  <Clock size={11} />
+                                  <span>{task.dueDate ? formatDateDDMMYYYY(task.dueDate) : 'No date'}</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <div className="pipeline-owner-pill-avatar" style={{ width: '20px', height: '20px', fontSize: '10px' }} title={task.assignee}>
+                                    {(task.assignee || 'A').charAt(0)}
+                                  </div>
+                                  {canUpdate && (
+                                    <button
+                                      type="button"
+                                      className="pipeline-mini-icon-btn"
+                                      onClick={(e) => handleOpenEditTask(task, e)}
+                                      title="Edit"
+                                    >
+                                      <Edit2 size={11} />
+                                    </button>
+                                  )}
+                                  {canDelete && (
+                                    <button
+                                      type="button"
+                                      className="pipeline-mini-icon-btn danger"
+                                      onClick={(e) => handleDeleteTask(task._id, e)}
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={11} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* ------------------------------------------------------------------
+        4. Activity Hover Popover (Fixed Position floating outside cards)
+        ------------------------------------------------------------------ */}
+      {(hoveredDeal || hoveredContact) && (() => {
+        const isDeal = !!hoveredDeal;
+        const itemName = isDeal
+          ? (hoveredDeal.clientName || hoveredDeal.dealName || 'Deal')
+          : (`${hoveredContact.firstName || ''} ${hoveredContact.lastName || ''}`.trim() || 'Contact');
+        const itemEmail = isDeal
+          ? (hoveredDeal.email || hoveredDeal.associatedContact || '')
+          : (hoveredContact.email || '');
+        const itemPhone = isDeal ? (hoveredDeal.phone || '') : (hoveredContact.phone || '');
+        const nextTask = hoveredUpcomingTasks && hoveredUpcomingTasks.length > 0 ? hoveredUpcomingTasks[0] : null;
+
+        return (
+          <div
+            className={`pipeline-activity-hover-popover fixed ${popoverCoords.placement}`}
+            style={{
+              top: `${popoverCoords.top}px`,
+              left: `${popoverCoords.left}px`,
+              '--arrow-top': `${popoverCoords.arrowTop}px`
+            }}
+            onMouseEnter={() => {
+              if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+            }}
+            onMouseLeave={handleActivityMouseLeave}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Left Column: Previous activity */}
+            <div className="pipeline-act-popover-left">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <h4 className="pipeline-act-popover-title" style={{ margin: 0 }}>Previous activity</h4>
+                {hoveredActivities.length > 0 && (
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, background: '#f1f5f9', padding: '1px 6px', borderRadius: '999px' }}>
+                    {hoveredActivities.length}
+                  </span>
+                )}
+              </div>
+
+              <div className="pipeline-act-timeline">
+                {hoveredActivities.length === 0 ? (
+                  <div className="pipeline-act-empty">
+                    <Clock size={20} style={{ color: '#cbd5e1', marginBottom: '4px' }} />
+                    <span>No previous activity recorded</span>
+                  </div>
+                ) : (
+                  hoveredActivities.slice(0, 3).map((act, actIdx) => {
+                    const actIcon = (() => {
+                      if (act.type === 'payment') return <CreditCard size={12} className="pipeline-act-icon" />;
+                      if (act.type === 'note') return <FileText size={12} className="pipeline-act-icon" />;
+                      if (act.type === 'email') return <Mail size={12} className="pipeline-act-icon" />;
+                      if (act.type === 'message') return <MessageSquare size={12} className="pipeline-act-icon" />;
+                      if (act.type === 'task') return <CheckSquare size={12} className="pipeline-act-icon" />;
+                      if (act.type === 'deal') return <Briefcase size={12} className="pipeline-act-icon" />;
+                      if (act.type === 'contact') return <User size={12} className="pipeline-act-icon" />;
+                      if (act.type === 'company') return <Building2 size={12} className="pipeline-act-icon" />;
+                      return <Tag size={12} className="pipeline-act-icon" />;
+                    })();
+
+                    const displayTitle = act.title || (act.type === 'note' ? 'Internal Note' : act.type === 'email' ? 'Email' : 'Activity');
+                    const relativeTimeStr = formatRelativeActivityTime(act);
+
+                    return (
+                      <div key={act.id || `${act.title}-${actIdx}`} className="pipeline-act-item">
+                        <div className={`pipeline-act-icon-wrap ${act.type || 'activity'}`}>
+                          {actIcon}
+                        </div>
+                        <div className="pipeline-act-details">
+                          <a
+                            href="#activity"
+                            className="pipeline-act-link"
+                            title={`${displayTitle}${act.content ? `\n${act.content}` : ''}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setHoveredActivityDealId(null);
+                              setHoveredActivityContactId(null);
+                              if (isDeal) {
+                                setDetailedDealId(hoveredDeal._id);
+                              } else {
+                                setDetailedContactId(hoveredContact._id);
+                              }
+                            }}
+                          >
+                            {displayTitle}
+                          </a>
+                          <span className="pipeline-act-time" title={formatActivityTimestamp(act)}>
+                            {relativeTimeStr}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <button
+                type="button"
+                className="pipeline-act-view-all-btn"
+                onClick={(e) => {
+                  setHoveredActivityDealId(null);
+                  setHoveredActivityContactId(null);
+                  if (isDeal) {
+                    setDetailedDealId(hoveredDeal._id);
+                  } else {
+                    setDetailedContactId(hoveredContact._id);
+                  }
+                }}
+              >
+                <span>View all activity</span>
+                <ExternalLink size={12} />
+              </button>
+            </div>
+
+            {/* Right Column: Upcoming next step + Quick Actions */}
+            <div className="pipeline-act-popover-right">
+              <h4 className="pipeline-act-popover-title">
+                {nextTask ? 'Upcoming next step' : 'No upcoming next step'}
+              </h4>
+
+              {nextTask ? (
+                <div className="pipeline-act-next-step-box" style={{ marginBottom: '12px', padding: '10px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: '#0f172a' }}>
+                    <CheckSquare size={13} style={{ color: '#0284c7', flexShrink: 0 }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nextTask.title}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', fontSize: '10.5px', color: '#64748b' }}>
+                    <span>Due: {nextTask.dueDate ? formatDateDDMMYYYY(nextTask.dueDate) : 'No due date'}</span>
+                    <span>•</span>
+                    <span>{nextTask.assignee || 'Assigned'}</span>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="pipeline-act-quick-buttons">
+                <button
+                  type="button"
+                  className="pipeline-act-circle-btn"
+                  title="Add Note"
+                  onClick={() => {
+                    setHoveredActivityDealId(null);
+                    setHoveredActivityContactId(null);
+                    if (isDeal) {
+                      setDetailedDealId(hoveredDeal._id);
+                    } else {
+                      setDetailedContactId(hoveredContact._id);
+                    }
+                    setDetailActiveTab('notes');
+                    setNewActivityType('note');
+                    setIsComposingActivity(true);
+                  }}
+                >
+                  <FileText size={15} />
+                </button>
+
+                <a
+                  href={`mailto:${itemEmail || 'contact@example.com'}`}
+                  className="pipeline-act-circle-btn"
+                  title="Send Email"
+                >
+                  <Mail size={15} />
+                </a>
+
+                <button
+                  type="button"
+                  className="pipeline-act-circle-btn"
+                  title="Create Task"
+                  onClick={() => {
+                    setHoveredActivityDealId(null);
+                    setHoveredActivityContactId(null);
+                    handleOpenCreateTask(isDeal ? hoveredDeal._id : '', isDeal ? '' : hoveredContact._id);
+                  }}
+                >
+                  <CheckSquare size={15} />
+                </button>
+
+                <button
+                  type="button"
+                  className="pipeline-act-circle-btn"
+                  title="Schedule Meeting - Feature will be implemented soon"
+                  style={{ opacity: 0.55, cursor: 'not-allowed' }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                >
+                  <Calendar size={15} />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ------------------------------------------------------------------
+        5. View Deal Details Modal
+        ------------------------------------------------------------------ */}
+      {viewingDeal && (
+        <div className="pipeline-modal-backdrop" onClick={() => setViewingDeal(null)}>
+          <div className="pipeline-modal-card pipeline-view-deal-modal" onClick={e => e.stopPropagation()}>
+            <div className="pipeline-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div className="pipeline-card-avatar" style={{ width: '44px', height: '44px', fontSize: '17px', borderRadius: '12px' }}>
+                  {viewingDeal.clientName.charAt(0)}
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '19px', margin: 0, fontWeight: 700 }}>{viewingDeal.clientName}</h3>
+                  <p className="pipeline-modal-subtitle" style={{ margin: '2px 0 0 0' }}>
+                    {(() => {
+                      const raw = viewingDeal.dealName || viewingDeal.clientName || '';
+                      const dt = (viewingDeal.dealType || 'New Business').trim();
+                      const regex = new RegExp(`\\s*-\\s*${dt}$`, 'i');
+                      if (regex.test(raw)) return raw.replace(regex, '').trim();
+                      return raw.replace(/\s*-\s*New Business$/i, '').trim();
+                    })()}
+                  </p>
+                </div>
+              </div>
+              <button
+                className="pipeline-modal-close-btn"
+                onClick={() => setViewingDeal(null)}
+                title="Close"
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <div className="pipeline-modal-body">
+              <div className="pipeline-view-details-grid">
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Stage</span>
+                  <span className="pipeline-view-detail-value font-semibold">{viewingDeal.pipeline || 'Sales Pipeline'}</span>
+                </div>
+
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Status</span>
+                  <div>
+                    <span className={`pipeline-stage-badge ${(viewingDeal.stage || 'new').toLowerCase()}`}>
+                      {viewingDeal.stage}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pipeline-view-detail-card highlight">
+                  <span className="pipeline-view-detail-label">Deal Value</span>
+                  <span className="pipeline-view-detail-value price">
+                    {viewingDeal.currency || '$'} {Number(viewingDeal.dealValue || 0).toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Deal Type</span>
+                  <span className="pipeline-view-detail-value">{viewingDeal.dealType || 'New Business'}</span>
+                </div>
+
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Expected Close Date</span>
+                  <span className="pipeline-view-detail-value">{formatDateDDMMYYYY(viewingDeal.expectedCloseDate)}</span>
+                </div>
+
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Deal Owner</span>
+                  <span className="pipeline-view-detail-value">{viewingDeal.salesOwner || 'Artiflow'}</span>
+                </div>
+
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Email</span>
+                  <span className="pipeline-view-detail-value">{viewingDeal.email || '—'}</span>
+                </div>
+
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Phone</span>
+                  <span className="pipeline-view-detail-value">{viewingDeal.phone || '—'}</span>
+                </div>
+
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Location</span>
+                  <span className="pipeline-view-detail-value">
+                    {(() => {
+                      const comp = companies.find(c => c.name && viewingDeal.associatedCompany && c.name.toLowerCase() === viewingDeal.associatedCompany.toLowerCase());
+                      if (comp?.city || comp?.state || comp?.country) {
+                        return [comp.city, comp.state, comp.country].filter(Boolean).join(', ');
+                      }
+                      if (viewingDeal.location && viewingDeal.location !== 'Pembroke Pines' && viewingDeal.location !== 'Pune, India' && viewingDeal.location !== 'solar panel comp') {
+                        return viewingDeal.location;
+                      }
+                      return '-';
+                    })()}
+                  </span>
+                </div>
+
+                {viewingDeal.associatedContact && (
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Associated Contact</span>
+                    <span
+                      className="pipeline-view-detail-value font-semibold"
+                      style={{
+                        color: '#0284c7',
+                        cursor: 'pointer',
+                        textDecoration: 'none',
+                        display: 'inline-block'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                      onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                      onClick={() => {
+                        const targetEmail = (viewingDeal.associatedContact || '').trim().toLowerCase();
+                        const targetName = (viewingDeal.clientName || '').trim().toLowerCase();
+                        const matched = contacts.find(c => {
+                          if (viewingDeal.contactId && c._id === viewingDeal.contactId) return true;
+                          const ce = (c.email || '').trim().toLowerCase();
+                          const cn = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+                          return (ce && ce === targetEmail) || (cn && (cn === targetEmail || cn === targetName));
+                        });
+                        setViewingDeal(null);
+                        setDetailedDealId(null);
+                        if (matched) {
+                          setActiveTab('contacts');
+                          setDetailedContactId(matched._id);
+                        } else {
+                          setActiveTab('contacts');
+                          setDetailedContactId(null);
+                        }
+                      }}
+                      title="Click to view contact details"
+                    >
+                      {viewingDeal.associatedContact}
+                    </span>
+                  </div>
+                )}
+
+                {viewingDeal.associatedCompany && (
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Associated Company</span>
+                    <span className="pipeline-view-detail-value font-semibold">{viewingDeal.associatedCompany}</span>
+                  </div>
+                )}
+
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Added By</span>
+                  <span className="pipeline-view-detail-value">
+                    {viewingDeal.addedBy || (viewingDeal.createdBy?.firstName ? `${viewingDeal.createdBy.firstName} ${viewingDeal.createdBy.lastName || ''}`.trim() : '') || viewingDeal.salesOwner || 'Admin System'}
+                  </span>
+                </div>
+
+                <div className="pipeline-view-detail-card">
+                  <span className="pipeline-view-detail-label">Created On</span>
+                  <span className="pipeline-view-detail-value">
+                    {formatISTDateTime(viewingDeal.createdAt || viewingDeal.createdDate || viewingDeal.date)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pipeline-modal-footer">
+              <button
+                type="button"
+                className="pipeline-btn-cancel"
+                onClick={() => setViewingDeal(null)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="pipeline-btn-save"
+                onClick={() => {
+                  const target = viewingDeal;
+                  setViewingDeal(null);
+                  handleOpenEditDeal(target);
+                }}
+              >
+                Edit Deal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------
+          5. Create / Edit Deal Modal (with Associate Deal with section)
+          ------------------------------------------------------------------ */}
+      {showCreateModal && (
+        <div className="pipeline-modal-backdrop" onClick={() => { setShowCreateModal(false); setEditingDeal(null); }}>
+          <div className="pipeline-modal-card pipeline-modal-wide" onClick={e => e.stopPropagation()}>
+            <div className="pipeline-modal-header">
+              <div>
+                <h3 className="pipeline-modal-title">{editingDeal ? 'Edit Deal' : 'Create New Deal'}</h3>
+                <p className="pipeline-modal-subtitle">
+                  {editingDeal ? 'Update the details for this deal opportunity.' : 'Fill in the details below to add a new opportunity.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="pipeline-modal-close-btn"
+                onClick={() => { setShowCreateModal(false); setEditingDeal(null); }}
+                title="Close"
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateDealSubmit}>
+              <div className="pipeline-modal-body">
+                {/* Row 1: Deal Name & Deal Owner */}
+                <div className="pipeline-form-row-grid">
+                  <div className="pipeline-form-group">
+                    <label>Deal Name <span className="pipeline-required">*</span></label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Enter deal name"
+                      className="pipeline-form-input"
+                      value={formData.clientName}
+                      onChange={e => setFormData({ ...formData, clientName: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="pipeline-form-group">
+                    <label>Deal Owner <span className="pipeline-required">*</span></label>
+                    <CreatableSelect
+                      value={formData.salesOwner}
+                      onChange={val => setFormData({ ...formData, salesOwner: val })}
+                      options={ownerOptions}
+                      placeholder="Select deal owner..."
+                      isSearchable={false}
+                      isCreatable={false}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Row 2: Stage & Status */}
+                <div className="pipeline-form-row-grid">
+                  <div className="pipeline-form-group">
+                    <label>Stage <span className="pipeline-required">*</span></label>
+                    <CreatableSelect
+                      value={formData.pipeline}
+                      onChange={val => setFormData({ ...formData, pipeline: val })}
+                      options={pipelineOptions}
+                      placeholder="Select or add stage..."
+                      onCreateOption={handleCreatePipelineOption}
+                      isSearchable={true}
+                      isCreatable={true}
+                      required
+                    />
+                  </div>
+
+                  <div className="pipeline-form-group">
+                    <label>Status <span className="pipeline-required">*</span></label>
+                    <CreatableSelect
+                      value={modalStage}
+                      onChange={val => {
+                        setModalStage(val);
+                        setFormData({ ...formData, stage: val });
+                      }}
+                      options={stages.map(s => s.name)}
+                      placeholder="Select or add status..."
+                      onCreateOption={handleCreateStageOption}
+                      isSearchable={true}
+                      isCreatable={true}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Row 3: Deal Type & Deal Value */}
+                <div className="pipeline-form-row-grid">
+                  <div className="pipeline-form-group">
+                    <label>Deal Type <span className="pipeline-required">*</span></label>
+                    <CreatableSelect
+                      value={formData.dealType}
+                      onChange={val => setFormData({ ...formData, dealType: val })}
+                      options={dealTypes}
+                      placeholder="Select or add type..."
+                      onCreateOption={handleCreateDealTypeOption}
+                      isSearchable={true}
+                      isCreatable={true}
+                      required
+                    />
+                  </div>
+
+                  <div className="pipeline-form-group">
+                    <label>Deal Value <span className="pipeline-required">*</span></label>
+                    <div className="pipeline-amount-custom-group">
+                      {/* Currency Selector Dropdown Card */}
+                      <div className="pipeline-currency-picker-wrap" ref={currencyRef}>
+                        <button
+                          type="button"
+                          className="pipeline-currency-trigger-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsCurrencyOpen(prev => !prev);
+                          }}
+                        >
+                          <span className="pipeline-currency-curr-label">{formData.currency || '$'}</span>
+                          <ChevronDown size={14} className={`pipeline-chevron-icon ${isCurrencyOpen ? 'open' : ''}`} />
+                        </button>
+
+                        {isCurrencyOpen && (
+                          <div className="pipeline-creatable-dropdown pipeline-currency-dropdown placement-bottom">
+                            <div className="pipeline-creatable-options-list">
+                              {CURRENCY_OPTIONS.map((c) => {
+                                const isSelected = (formData.currency || '$') === c.symbol;
+                                return (
+                                  <div
+                                    key={c.code}
+                                    className={`pipeline-creatable-option ${isSelected ? 'selected' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setFormData({ ...formData, currency: c.symbol });
+                                      setIsCurrencyOpen(false);
+                                    }}
+                                  >
+                                    <span className="pipeline-creatable-opt-text">{c.label}</span>
+                                    {isSelected && <CheckCircle size={14} className="pipeline-creatable-opt-check" />}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Numeric Amount Input */}
+                      <input
+                        type="number"
+                        required
+                        min="0"
+                        step="any"
+                        placeholder="Enter amount"
+                        className="pipeline-amount-number-input"
+                        value={formData.dealValue}
+                        onChange={e => setFormData({ ...formData, dealValue: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Row 4: Close Date */}
+                <div className="pipeline-form-row-grid">
+                  <div className="pipeline-form-group">
+                    <label>Close Date <span className="pipeline-required">*</span></label>
+                    <div className="pipeline-date-input-wrap">
+                      <input
+                        type="text"
+                        required
+                        placeholder="DD-MM-YYYY"
+                        className="pipeline-form-input"
+                        value={formData.expectedCloseDate}
+                        onChange={e => setFormData({ ...formData, expectedCloseDate: e.target.value })}
+                      />
+                      <input
+                        type="date"
+                        tabIndex={-1}
+                        className="pipeline-hidden-date-picker"
+                        onChange={e => {
+                          if (e.target.value) {
+                            const [y, m, d] = e.target.value.split('-');
+                            setFormData({ ...formData, expectedCloseDate: `${d}-${m}-${y}` });
+                          }
+                        }}
+                      />
+                      <Calendar size={16} className="pipeline-date-picker-icon" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section Divider & Associate Deal with Header */}
+                <hr className="pipeline-modal-section-divider" />
+                <h4 className="pipeline-modal-section-title">Associate Deal with</h4>
+
+                {/* Row 5: Associate with Contact & Associate with Company */}
+                <div className="pipeline-form-row-grid">
+                  {/* Contact Dropdown */}
+                  <div className="pipeline-form-group">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <label style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                        Contact <span className="pipeline-required">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingContact(null);
+                          setSelectedCountry(COUNTRY_CODES[0]);
+                          setContactFormData({
+                            firstName: formData.clientName ? formData.clientName.split(' ')[0] : '',
+                            lastName: formData.clientName ? formData.clientName.split(' ').slice(1).join(' ') : '',
+                            email: formData.email || '',
+                            countryCode: '+1',
+                            phone: formData.phone || '',
+                            contactSource: 'Direct Reference',
+                            leadStage: effectiveContactStages.length > 0 ? (typeof effectiveContactStages[0] === 'string' ? effectiveContactStages[0] : effectiveContactStages[0].name) : 'Lead',
+                            leadStatus: 'New',
+                            owner: formData.salesOwner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Artiflow' : 'Artiflow'),
+                            company: formData.associatedCompany || ''
+                          });
+                          setShowCreateContactModal(true);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: '0',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          color: '#0284c7',
+                          cursor: 'pointer',
+                          textDecoration: 'none'
+                        }}
+                        title="Add a new contact via modal"
+                      >
+                        Add+
+                      </button>
+                    </div>
+                    <CreatableSelect
+                      value={formData.associatedContact}
+                      onChange={val => {
+                        const valLower = (val || '').trim().toLowerCase();
+                        const matchedContact = contacts.find(c => {
+                          const cEmail = (c.email || '').trim().toLowerCase();
+                          const cName = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+                          const cPhone = (c.phone || '').trim();
+                          const cFullPhone = `${c.countryCode ? `${c.countryCode} ` : ''}${cPhone}`.trim().toLowerCase();
+                          return (
+                            (cEmail && cEmail === valLower) ||
+                            (c._id && c._id === val) ||
+                            (cName && cName === valLower) ||
+                            (cPhone && cPhone === valLower) ||
+                            (cFullPhone && cFullPhone === valLower)
+                          );
+                        });
+                        if (matchedContact) {
+                          setFormData({
+                            ...formData,
+                            associatedContact: val,
+                            clientName: formData.clientName || `${matchedContact.firstName || ''} ${matchedContact.lastName || ''}`.trim(),
+                            email: matchedContact.email || formData.email,
+                            phone: matchedContact.phone ? `${matchedContact.countryCode || '+1'} ${matchedContact.phone}`.trim() : formData.phone,
+                            associatedCompany: (matchedContact.company && matchedContact.company !== 'Direct Client') ? matchedContact.company : formData.associatedCompany
+                          });
+                        } else {
+                          setFormData({ ...formData, associatedContact: val });
+                        }
+                      }}
+                      options={contactOptions}
+                      placeholder="Search by name, email, or phone..."
+                      isSearchable={true}
+                      isCreatable={true}
+                      placement="top"
+                      required={true}
+                    />
+                  </div>
+
+                  {/* Company Dropdown */}
+                  <div className="pipeline-form-group">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <label style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        Company <Info size={13} className="pipeline-info-icon" title="Select or type associated company name" />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingCompany(null);
+                          setCompanyFormData({
+                            name: formData.associatedCompany || '',
+                            domain: '',
+                            owner: [],
+                            industry: 'Software & Tech',
+                            country: 'United States',
+                            state: '',
+                            city: formData.location || '',
+                            postalCode: ''
+                          });
+                          setShowCreateCompanyModal(true);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: '0',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          color: '#0284c7',
+                          cursor: 'pointer',
+                          textDecoration: 'none'
+                        }}
+                        title="Add a new company via modal"
+                      >
+                        Add+
+                      </button>
+                    </div>
+                    <CreatableSelect
+                      value={formData.associatedCompany}
+                      onChange={val => setFormData({ ...formData, associatedCompany: val })}
+                      options={companyOptions}
+                      placeholder="Search"
+                      isSearchable={true}
+                      isCreatable={true}
+                      placement="top"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pipeline-modal-footer">
+                <button
+                  type="button"
+                  className="pipeline-btn-cancel"
+                  onClick={() => { setShowCreateModal(false); setEditingDeal(null); }}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="pipeline-btn-save">
+                  {editingDeal ? 'Save Changes' : 'Create Deal'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------
+          6. Create & Edit Contact Modal (Wide Professional Balanced Layout)
+          ------------------------------------------------------------------ */}
+      {showCreateContactModal && (
+        <div className="pipeline-modal-backdrop" onClick={() => { setShowCreateContactModal(false); setEditingContact(null); }}>
+          <div className="pipeline-modal-card pipeline-modal-wide" onClick={e => e.stopPropagation()}>
+            <div className="pipeline-modal-header">
+              <div>
+                <h3 className="pipeline-modal-title">{editingContact ? 'Edit Contact' : 'Create Contact'}</h3>
+                <p className="pipeline-modal-subtitle">
+                  {editingContact ? 'Update contact and lead qualification details' : 'Add a new client lead, contact, or partner to your CRM database'}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="pipeline-modal-close-btn"
+                onClick={() => { setShowCreateContactModal(false); setEditingContact(null); }}
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleContactSubmit}>
+              <div className="pipeline-modal-body">
+                {/* Row 1: First Name & Last Name */}
+                <div className="pipeline-form-row-grid">
+                  <div className="pipeline-form-group">
+                    <label>First Name <span className="pipeline-required">*</span></label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Enter first name"
+                      className="pipeline-form-input"
+                      value={contactFormData.firstName}
+                      onChange={e => setContactFormData({ ...contactFormData, firstName: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="pipeline-form-group">
+                    <label>Last Name <span className="pipeline-required">*</span></label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Enter last name"
+                      className="pipeline-form-input"
+                      value={contactFormData.lastName}
+                      onChange={e => setContactFormData({ ...contactFormData, lastName: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                {/* Row 2: Email Address & Phone Number with Real-time Validation */}
+                {(() => {
+                  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+                  const cleanEmail = (contactFormData.email || '').trim().toLowerCase();
+                  const isEmailValid = emailRegex.test(cleanEmail);
+                  const isEmailDirty = Boolean(cleanEmail.length > 0);
+                  const isDuplicateEmail = Boolean(
+                    cleanEmail &&
+                    contacts.some(c =>
+                      (c.email || '').trim().toLowerCase() === cleanEmail &&
+                      (!editingContact || (c._id && editingContact._id && c._id.toString() !== editingContact._id.toString()))
+                    )
+                  );
+                  const isEmailInvalidOrDuplicate = isEmailDirty && (!isEmailValid || isDuplicateEmail);
+
+                  const cleanPhoneDigits = (contactFormData.phone || '').replace(/\D/g, '');
+                  const requiredPhoneDigits = selectedCountry?.maxDigits || 10;
+                  const isPhoneValid = cleanPhoneDigits.length === requiredPhoneDigits;
+                  const isPhoneDirty = cleanPhoneDigits.length > 0;
+
+                  return (
+                    <>
+                      <div className="pipeline-form-row-grid">
+                        {/* Email Address */}
+                        <div className="pipeline-form-group">
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <label style={{ margin: 0 }}>Email Address</label>
+                            {isDuplicateEmail && (
+                              <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 600 }}>Already exists</span>
+                            )}
+                          </div>
+                          <div className="pipeline-input-with-icon">
+                            <input
+                              type="email"
+                              placeholder="Enter email address"
+                              className="pipeline-form-input"
+                              value={contactFormData.email}
+                              onChange={e => setContactFormData({ ...contactFormData, email: e.target.value })}
+                              style={{
+                                borderColor: isEmailDirty ? (isEmailInvalidOrDuplicate ? '#ef4444' : '#10b981') : undefined,
+                                borderWidth: isEmailDirty ? '1.5px' : undefined,
+                                boxShadow: 'none',
+                                backgroundColor: '#ffffff'
+                              }}
+                            />
+                            {isEmailDirty && isEmailValid && !isDuplicateEmail ? (
+                              <CheckCircle size={16} className="pipeline-field-icon" style={{ color: '#16a34a' }} />
+                            ) : (
+                              <Mail size={16} className="pipeline-field-icon" style={{ color: isEmailInvalidOrDuplicate ? '#ef4444' : undefined }} />
+                            )}
+                          </div>
+                          {isEmailDirty && !isEmailValid && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px', fontSize: '11px', color: '#ef4444' }}>
+                              <AlertCircle size={12} />
+                              <span>Please enter a complete and valid email address.</span>
+                            </div>
+                          )}
+                          {isEmailDirty && isEmailValid && isDuplicateEmail && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px', fontSize: '11px', color: '#ef4444' }}>
+                              <AlertCircle size={12} />
+                              <span>This email already belongs to an existing contact. Duplicate emails are not allowed.</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Phone Number with Real-time Count & Country Limit */}
+                        <div className="pipeline-form-group">
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <label style={{ margin: 0 }}>Phone Number</label>
+                          </div>
+
+                          <div
+                            className="pipeline-phone-input-combo"
+                            style={{
+                              borderColor: isPhoneDirty ? (isPhoneValid ? '#10b981' : '#ef4444') : undefined,
+                              borderWidth: isPhoneDirty ? '1.5px' : undefined,
+                              boxShadow: 'none',
+                              backgroundColor: '#ffffff'
+                            }}
+                          >
+                            {/* Country Code Dropdown Trigger */}
+                            <div className="pipeline-country-picker-wrap" ref={countryCodeRef}>
+                              <button
+                                type="button"
+                                className="pipeline-country-trigger-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsCountryCodeOpen(prev => !prev);
+                                }}
+                                title="Select Country Code"
+                              >
+                                <span className="pipeline-country-flag">{selectedCountry?.flag}</span>
+                                <span className="pipeline-country-code-text">{selectedCountry?.code}</span>
+                                <ChevronDown size={14} className={`pipeline-chevron-icon ${isCountryCodeOpen ? 'open' : ''}`} />
+                              </button>
+
+                              {isCountryCodeOpen && (
+                                <div className="pipeline-creatable-dropdown pipeline-country-dropdown placement-bottom">
+                                  <div className="pipeline-creatable-options-list">
+                                    {COUNTRY_CODES.map((country) => {
+                                      const isSelected = selectedCountry?.code === country.code;
+                                      return (
+                                        <div
+                                          key={country.code + country.country}
+                                          className={`pipeline-creatable-option ${isSelected ? 'selected' : ''}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSelectCountry(country);
+                                          }}
+                                        >
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <span style={{ fontSize: '15px' }}>{country.flag}</span>
+                                            <span className="pipeline-creatable-opt-text">{country.country}</span>
+                                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>({country.code})</span>
+                                          </div>
+                                          {isSelected && <CheckCircle size={14} className="pipeline-creatable-opt-check" />}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Numeric Phone Number Input */}
+                            <div className="pipeline-phone-input-box" style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
+                              <input
+                                type="tel"
+                                placeholder={selectedCountry?.formatPlaceholder || `Enter ${requiredPhoneDigits} digits`}
+                                className="pipeline-phone-input-field"
+                                value={contactFormData.phone}
+                                onChange={handlePhoneChange}
+                                maxLength={requiredPhoneDigits}
+                              />
+                              {isPhoneDirty && isPhoneValid && (
+                                <CheckCircle size={15} style={{ color: '#16a34a', marginRight: '10px', flexShrink: 0 }} />
+                              )}
+                            </div>
+                          </div>
+                          {isPhoneDirty && !isPhoneValid && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px', fontSize: '11px', color: '#d97706' }}>
+                              <Info size={12} />
+                              <span>Requires exactly {requiredPhoneDigits} digits for {selectedCountry?.country || 'selected country'} ({cleanPhoneDigits.length} entered)</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Row 3: Company Dropdown with Add Text Button & Origin Dropdown */}
+                      <div className="pipeline-form-row-grid">
+                        <div className="pipeline-form-group">
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                            <label style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                              Company / Organization
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCompany(null);
+                                setCompanyFormData({
+                                  name: '',
+                                  domain: '',
+                                  owner: [],
+                                  industry: '',
+                                  country: selectedCountry?.country || 'United States',
+                                  state: '',
+                                  city: '',
+                                  postalCode: ''
+                                });
+                                setShowCreateCompanyModal(true);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                padding: '0',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                color: '#0284c7',
+                                cursor: 'pointer',
+                                textDecoration: 'none'
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.color = '#0369a1'}
+                              onMouseLeave={e => e.currentTarget.style.color = '#0284c7'}
+                              title="Add a new company via modal"
+                            >
+                              Add Company +
+                            </button>
+                          </div>
+                          <CreatableSelect
+                            value={contactFormData.company}
+                            onChange={val => setContactFormData({ ...contactFormData, company: val })}
+                            options={companyOptions}
+                            placeholder="Select company..."
+                            isSearchable={false}
+                            isCreatable={false}
+                          />
+                        </div>
+
+                        <div className="pipeline-form-group">
+                          <label>Origin <span className="pipeline-required">*</span></label>
+                          <CreatableSelect
+                            value={contactFormData.origin || 'Domestic'}
+                            onChange={val => setContactFormData({ ...contactFormData, origin: val })}
+                            options={['Domestic', 'International']}
+                            placeholder="Select origin..."
+                            isSearchable={false}
+                            isCreatable={false}
+                            required
+                          />
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {/* Row 4: Contact Source & Lead Stage */}
+                <div className="pipeline-form-row-grid">
+                  <div className="pipeline-form-group">
+                    <label>Contact Source <span className="pipeline-required">*</span></label>
+                    <CreatableSelect
+                      value={contactFormData.contactSource}
+                      onChange={val => setContactFormData({ ...contactFormData, contactSource: val })}
+                      onCreateOption={newOpt => setContactSources(prev => Array.from(new Set([...prev, newOpt])))}
+                      options={contactSources}
+                      placeholder="Select or enter source..."
+                      isSearchable={true}
+                      isCreatable={true}
+                      required
+                    />
+                  </div>
+
+                  <div className="pipeline-form-group">
+                    <label>Lead Stage <span className="pipeline-required">*</span></label>
+                    <CreatableSelect
+                      value={contactFormData.leadStage}
+                      onChange={val => handleLeadStageChangeOrAdd(val)}
+                      onCreateOption={newOpt => handleLeadStageChangeOrAdd(newOpt)}
+                      options={contactStageOptions}
+                      placeholder="Select or enter lead stage..."
+                      isSearchable={true}
+                      isCreatable={true}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Row 5: Lead Status */}
+                <div className="pipeline-form-row-grid">
+                  <div className="pipeline-form-group">
+                    <label>Lead Status <span className="pipeline-required">*</span></label>
+                    <CreatableSelect
+                      value={contactFormData.leadStatus}
+                      onChange={val => setContactFormData({ ...contactFormData, leadStatus: val })}
+                      onCreateOption={newOpt => setLeadStatuses(prev => Array.from(new Set([...prev, newOpt])))}
+                      options={leadStatuses}
+                      placeholder="Select or enter status..."
+                      isSearchable={true}
+                      isCreatable={true}
+                      placement="top"
+                      required
+                    />
+                  </div>
+                  <div className="pipeline-form-group" style={{ visibility: 'hidden' }}></div>
+                </div>
+              </div>
+
+              <div className="pipeline-modal-footer">
+                <button
+                  type="button"
+                  className="pipeline-btn-cancel"
+                  onClick={() => { setShowCreateContactModal(false); setEditingContact(null); }}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="pipeline-btn-save">
+                  {editingContact ? 'Save Changes' : 'Create Contact'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div >
+      )
+      }
+
+      {/* ------------------------------------------------------------------
+          7. View Contact Details Modal
+          ------------------------------------------------------------------ */}
+      {
+        viewingContact && (
+          <div className="pipeline-modal-backdrop" onClick={() => setViewingContact(null)}>
+            <div className="pipeline-modal-card pipeline-view-deal-modal" onClick={e => e.stopPropagation()}>
+              <div className="pipeline-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div className="pipeline-card-avatar" style={{ width: '46px', height: '46px', fontSize: '18px', borderRadius: '12px' }}>
+                    {viewingContact.firstName?.charAt(0)}{viewingContact.lastName?.charAt(0)}
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '19px', margin: 0, fontWeight: 700 }}>
+                      {viewingContact.firstName} {viewingContact.lastName}
+                    </h3>
+                    <p className="pipeline-modal-subtitle" style={{ margin: '2px 0 0 0' }}>
+                      {(viewingContact.company && viewingContact.company !== 'Direct Client') ? `${viewingContact.company} • ` : ''}{viewingContact.leadStage}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-modal-close-btn"
+                  onClick={() => setViewingContact(null)}
+                  title="Close"
+                >
+                  <X size={19} />
+                </button>
+              </div>
+
+              <div className="pipeline-modal-body">
+                <div className="pipeline-view-details-grid">
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Email Address</span>
+                    <a href={`mailto:${viewingContact.email}`} className="pipeline-view-detail-value" style={{ color: '#0284c7', textDecoration: 'none', fontWeight: 600 }}>
+                      {viewingContact.email}
+                    </a>
+                  </div>
+
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Phone Number</span>
+                    <span className="pipeline-view-detail-value font-semibold">
+                      {viewingContact.countryCode} {viewingContact.phone}
+                    </span>
+                  </div>
+
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Company</span>
+                    <span className="pipeline-view-detail-value">
+                      {(viewingContact.company && viewingContact.company !== 'Direct Client') ? viewingContact.company : '—'}
+                    </span>
+                  </div>
+
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Lead Stage</span>
+                    <div>
+                      <span className="pipeline-stage-badge new">
+                        {viewingContact.leadStage}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Lead Status</span>
+                    <div>
+                      <span className="pipeline-stage-badge won">
+                        {viewingContact.leadStatus}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Contact Source</span>
+                    <span className="pipeline-view-detail-value">{viewingContact.contactSource}</span>
+                  </div>
+
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Added By</span>
+                    <span className="pipeline-view-detail-value">{viewingContact.addedBy || viewingContact.owner || '—'}</span>
+                  </div>
+
+                  <div className="pipeline-view-detail-card">
+                    <span className="pipeline-view-detail-label">Created On</span>
+                    <span className="pipeline-view-detail-value">
+                      {formatISTDateTime(viewingContact.createdAt || viewingContact.createdDate || viewingContact.date)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pipeline-modal-footer">
+                <button
+                  type="button"
+                  className="pipeline-btn-cancel"
+                  onClick={() => setViewingContact(null)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="pipeline-btn-save"
+                  onClick={(e) => {
+                    const c = viewingContact;
+                    setViewingContact(null);
+                    handleOpenEditContact(c, e);
+                  }}
+                >
+                  Edit Contact
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* ------------------------------------------------------------------
+          8. Create & Edit Company Modal (Wide Professional 2-Column Layout)
+          ------------------------------------------------------------------ */}
+      {
+        showCreateCompanyModal && (
+          <div className="pipeline-modal-backdrop" style={{ zIndex: 10050 }} onClick={() => { setShowCreateCompanyModal(false); setEditingCompany(null); }}>
+            <div className="pipeline-modal-card pipeline-modal-wide" onClick={e => e.stopPropagation()}>
+              <div className="pipeline-modal-header">
+                <div>
+                  <h3 className="pipeline-modal-title">{editingCompany ? 'Edit Company' : 'Create Company'}</h3>
+                  <p className="pipeline-modal-subtitle">
+                    {editingCompany ? 'Update corporate account and organization details' : 'Register a new enterprise client, account, or parent organization'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-modal-close-btn"
+                  onClick={() => { setShowCreateCompanyModal(false); setEditingCompany(null); }}
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleCompanySubmit}>
+                <div className="pipeline-modal-body">
+                  {/* Row 1: Company Name & Company Domain */}
+                  <div className="pipeline-form-row-grid">
+                    <div className="pipeline-form-group">
+                      <label>Company Name <span className="pipeline-required">*</span></label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Enter company name"
+                        className="pipeline-form-input"
+                        value={companyFormData.name}
+                        onChange={e => setCompanyFormData({ ...companyFormData, name: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label>Company Domain</label>
+                      <div className="pipeline-input-with-icon">
+                        <input
+                          type="text"
+                          placeholder="Enter domain name"
+                          className="pipeline-form-input"
+                          style={
+                            companyFormData.domain && companyFormData.domain.trim()
+                              ? isValidCompanyDomain(companyFormData.domain)
+                                ? { borderColor: '#10b981', boxShadow: '0 0 0 2px rgba(16, 185, 129, 0.15)' }
+                                : { borderColor: '#ef4444', boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.15)' }
+                              : {}
+                          }
+                          value={companyFormData.domain}
+                          onChange={e => setCompanyFormData({ ...companyFormData, domain: e.target.value })}
+                        />
+                        <Globe
+                          size={16}
+                          className="pipeline-field-icon"
+                          style={{
+                            color: companyFormData.domain && companyFormData.domain.trim()
+                              ? isValidCompanyDomain(companyFormData.domain)
+                                ? '#10b981'
+                                : '#ef4444'
+                              : undefined
+                          }}
+                        />
+                      </div>
+                      {companyFormData.domain && companyFormData.domain.trim() && (
+                        isValidCompanyDomain(companyFormData.domain) ? (
+                          showValidDomainMsg && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px', fontSize: '11px', color: '#10b981', fontWeight: 500, animation: 'pipelineModalFade 0.2s ease-out' }}>
+                              <Check size={12} /> Valid domain
+                            </div>
+                          )
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px', fontSize: '11px', color: '#ef4444', fontWeight: 500 }}>
+                            <AlertCircle size={12} /> Please enter a valid domain.
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Row 2: Company Owner & Industry Type */}
+                  <div className="pipeline-form-row-grid">
+                    <div className="pipeline-form-group">
+                      <label>Company Owner <span className="pipeline-required">*</span></label>
+                      <MultiSelectContactEmails
+                        values={companyFormData.owner}
+                        onChange={vals => setCompanyFormData({ ...companyFormData, owner: vals })}
+                        options={contactEmailOptions}
+                        placeholder="Select contact emails..."
+                        isCreatable={true}
+                      />
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label>Industry Type <span className="pipeline-required">*</span></label>
+                      <CreatableSelect
+                        value={companyFormData.industry}
+                        onChange={val => setCompanyFormData({ ...companyFormData, industry: val })}
+                        options={industryOptions}
+                        placeholder="Select industry..."
+                        isSearchable={true}
+                        isCreatable={true}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 3: Country & State/Region (Cascading Dropdowns) */}
+                  <div className="pipeline-form-row-grid">
+                    <div className="pipeline-form-group">
+                      <label>Country <span className="pipeline-required">*</span></label>
+                      <CreatableSelect
+                        value={companyFormData.country}
+                        onChange={val => {
+                          const newStates = COUNTRY_STATE_MAP[val] || [];
+                          const keepState = newStates.includes(companyFormData.state) ? companyFormData.state : '';
+                          setCompanyFormData({
+                            ...companyFormData,
+                            country: val,
+                            state: keepState
+                          });
+                        }}
+                        options={countryListOptions}
+                        placeholder="Select country..."
+                        isSearchable={true}
+                        isCreatable={true}
+                        required
+                      />
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label>State / Region</label>
+                      <CreatableSelect
+                        value={companyFormData.state}
+                        onChange={val => setCompanyFormData({ ...companyFormData, state: val })}
+                        options={availableCompanyStates}
+                        placeholder={companyFormData.country ? "Select state / region..." : "Select country first"}
+                        isSearchable={true}
+                        isCreatable={true}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 4: City & Postal Code */}
+                  <div className="pipeline-form-row-grid">
+                    <div className="pipeline-form-group">
+                      <label>City</label>
+                      <input
+                        type="text"
+                        placeholder="Enter city"
+                        className="pipeline-form-input"
+                        value={companyFormData.city}
+                        onChange={e => setCompanyFormData({ ...companyFormData, city: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label>Postal Code</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        placeholder="Enter postal code"
+                        className="pipeline-form-input"
+                        value={companyFormData.postalCode}
+                        onChange={e => {
+                          const numericVal = e.target.value.replace(/\D/g, '');
+                          setCompanyFormData({ ...companyFormData, postalCode: numericVal });
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pipeline-modal-footer">
+                  <button
+                    type="button"
+                    className="pipeline-btn-cancel"
+                    onClick={() => { setShowCreateCompanyModal(false); setEditingCompany(null); }}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="pipeline-btn-save">
+                    {editingCompany ? 'Save Changes' : 'Create Company'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
+      {/* ------------------------------------------------------------------
+          9. View Company Details Modal
+          ------------------------------------------------------------------ */}
+      {
+        viewingCompany && (
+          <div className="pipeline-modal-backdrop" onClick={() => setViewingCompany(null)}>
+            <div
+              className="pipeline-modal-card"
+              style={{
+                maxWidth: '820px',
+                width: '100%',
+                borderRadius: '16px',
+                overflow: 'hidden',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                display: 'flex',
+                flexDirection: 'column',
+                maxHeight: '90vh'
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div
+                className="pipeline-modal-header"
+                style={{
+                  padding: '20px 24px',
+                  borderBottom: '1px solid #f1f5f9',
+                  background: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '12px',
+                      background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '20px',
+                      fontWeight: '700',
+                      boxShadow: '0 4px 10px rgba(2, 132, 199, 0.25)',
+                      flexShrink: 0
+                    }}
+                  >
+                    {viewingCompany.name ? viewingCompany.name.charAt(0).toUpperCase() : 'C'}
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '18px', margin: 0, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.01em' }}>
+                      {viewingCompany.name}
+                    </h3>
+                    {viewingCompany.domain && (
+                      <a
+                        href={`https://${viewingCompany.domain.replace(/^https?:\/\//, '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          color: '#0284c7',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          textDecoration: 'none',
+                          marginTop: '4px',
+                          padding: '2px 8px',
+                          background: '#f0f9ff',
+                          borderRadius: '6px',
+                          border: '1px solid #e0f2fe',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <span>{viewingCompany.domain}</span>
+                        <ExternalLink size={11} />
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-modal-close-btn"
+                  onClick={() => setViewingCompany(null)}
+                  title="Close"
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '50%',
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    color: '#64748b'
+                  }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div
+                className="pipeline-modal-body"
+                style={{
+                  padding: '24px',
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '20px',
+                  background: '#ffffff'
+                }}
+              >
+                {/* 3-Column Minimal Grid for Company Attributes */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: '12px'
+                  }}
+                >
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid #f1f5f9',
+                      borderRadius: '10px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b' }}>
+                      Industry
+                    </span>
+                    <div>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          background: '#e0f2fe',
+                          color: '#0369a1',
+                          padding: '2px 8px',
+                          borderRadius: '5px',
+                          fontSize: '12px',
+                          fontWeight: 600
+                        }}
+                      >
+                        {viewingCompany.industry || 'General'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid #f1f5f9',
+                      borderRadius: '10px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b' }}>
+                      Company Owner
+                    </span>
+                    <div style={{ marginTop: '2px' }}>
+                      <CompanyOwnerDisplay owner={viewingCompany.owner} fallback="Artiflow" />
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid #f1f5f9',
+                      borderRadius: '10px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b' }}>
+                      Country
+                    </span>
+                    <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#0f172a' }}>
+                      {viewingCompany.country || 'United States'}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid #f1f5f9',
+                      borderRadius: '10px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b' }}>
+                      State / Region
+                    </span>
+                    <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#0f172a' }}>
+                      {viewingCompany.state || '—'}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid #f1f5f9',
+                      borderRadius: '10px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b' }}>
+                      City
+                    </span>
+                    <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#0f172a' }}>
+                      {viewingCompany.city || '—'}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid #f1f5f9',
+                      borderRadius: '10px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b' }}>
+                      Postal Code
+                    </span>
+                    <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#0f172a' }}>
+                      {viewingCompany.postalCode || '—'}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid #f1f5f9',
+                      borderRadius: '10px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      gridColumn: 'span 3'
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b' }}>
+                      Created Date
+                    </span>
+                    <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#0f172a' }}>
+                      {viewingCompany.createdDate || '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Associated Contacts & Deals Section for Company */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {(() => {
+                    const targetCompName = (viewingCompany.name || '').trim().toLowerCase();
+                    const compContacts = targetCompName
+                      ? contacts.filter(c => {
+                        const cComp = (c.company || '').trim().toLowerCase();
+                        return cComp && cComp === targetCompName;
+                      })
+                      : [];
+
+                    const compDeals = targetCompName
+                      ? deals.filter(d => {
+                        const assocComp = (d.associatedCompany || '').trim().toLowerCase();
+                        const comp = (d.company || '').trim().toLowerCase();
+                        return (assocComp && assocComp === targetCompName) ||
+                          (comp && comp === targetCompName);
+                      })
+                      : [];
+
+                    return (
+                      <>
+                        {/* Associated Contacts Box */}
+                        <div
+                          style={{
+                            background: '#fbfcfd',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '12px',
+                            padding: '16px'
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: '12px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div
+                                style={{
+                                  width: '26px',
+                                  height: '26px',
+                                  borderRadius: '6px',
+                                  background: '#f0f9ff',
+                                  color: '#0284c7',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                              >
+                                <Users size={14} />
+                              </div>
+                              <span style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>
+                                Associated Contacts
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  background: '#e2e8f0',
+                                  color: '#475569',
+                                  padding: '1px 6px',
+                                  borderRadius: '10px'
+                                }}
+                              >
+                                {compContacts.length}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const targetCompany = viewingCompany.name;
+                                setViewingCompany(null);
+                                setEditingContact(null);
+                                setSelectedCountry(COUNTRY_CODES[0]);
+                                setContactFormData({
+                                  firstName: '',
+                                  lastName: '',
+                                  email: '',
+                                  countryCode: '+1',
+                                  phone: '',
+                                  contactSource: 'Direct Reference',
+                                  leadStage: effectiveContactStages.length > 0 ? (typeof effectiveContactStages[0] === 'string' ? effectiveContactStages[0] : effectiveContactStages[0].name) : 'Lead',
+                                  leadStatus: 'New',
+                                  owner: viewingCompany.owner || 'Artiflow',
+                                  company: targetCompany
+                                });
+                                setShowCreateContactModal(true);
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '11.5px',
+                                fontWeight: 600,
+                                color: '#0284c7',
+                                background: '#ffffff',
+                                border: '1px solid #bae6fd',
+                                borderRadius: '6px',
+                                padding: '4px 9px',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease'
+                              }}
+                              title="Add contact for this company"
+                            >
+                              <Plus size={12} />
+                              <span>Add Contact</span>
+                            </button>
+                          </div>
+
+                          {compContacts.length > 0 ? (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '8px' }}>
+                              {compContacts.map(c => (
+                                <div
+                                  key={c._id}
+                                  onClick={() => {
+                                    setViewingCompany(null);
+                                    setDetailedDealId(null);
+                                    setActiveTab('contacts');
+                                    setDetailedContactId(c._id);
+                                  }}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '8px',
+                                    background: '#ffffff',
+                                    border: '1px solid #e2e8f0',
+                                    borderRadius: '8px',
+                                    padding: '8px 10px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  onMouseEnter={e => {
+                                    e.currentTarget.style.borderColor = '#0284c7';
+                                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(2, 132, 199, 0.08)';
+                                  }}
+                                  onMouseLeave={e => {
+                                    e.currentTarget.style.borderColor = '#e2e8f0';
+                                    e.currentTarget.style.boxShadow = 'none';
+                                  }}
+                                  title="Click to view contact profile"
+                                >
+                                  <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontWeight: 600, color: '#0f172a', fontSize: '12.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {c.firstName} {c.lastName}
+                                    </span>
+                                    {(c.email || c.phone) && (
+                                      <span style={{ color: '#64748b', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {c.email || c.phone}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <ChevronRight size={14} style={{ color: '#94a3b8', flexShrink: 0 }} />
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', fontStyle: 'italic' }}>
+                              No contacts linked to this company yet.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Associated Deals Box */}
+                        <div
+                          style={{
+                            background: '#fbfcfd',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '12px',
+                            padding: '16px'
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: '12px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div
+                                style={{
+                                  width: '26px',
+                                  height: '26px',
+                                  borderRadius: '6px',
+                                  background: '#f0fdf4',
+                                  color: '#16a34a',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                              >
+                                <Briefcase size={14} />
+                              </div>
+                              <span style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>
+                                Associated Deals
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  background: '#e2e8f0',
+                                  color: '#475569',
+                                  padding: '1px 6px',
+                                  borderRadius: '10px'
+                                }}
+                              >
+                                {compDeals.length}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const targetCompany = viewingCompany.name;
+                                setViewingCompany(null);
+                                setEditingDeal(null);
+                                setModalStage('New');
+                                setFormData({
+                                  clientName: targetCompany,
+                                  pipeline: pipelines[0] ? pipelines[0].name : 'Sales Pipeline',
+                                  stage: 'New',
+                                  dealType: 'New Business',
+                                  currency: '$',
+                                  expectedCloseDate: getFutureDateDDMMYYYY(14),
+                                  dealValue: '',
+                                  salesOwner: viewingCompany.owner || 'Artiflow',
+                                  location: viewingCompany.city || '',
+                                  dealName: `${targetCompany} Deal`,
+                                  email: '',
+                                  phone: '',
+                                  associatedContact: '',
+                                  associatedCompany: targetCompany
+                                });
+                                setShowCreateModal(true);
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '11.5px',
+                                fontWeight: 600,
+                                color: '#0284c7',
+                                background: '#ffffff',
+                                border: '1px solid #bae6fd',
+                                borderRadius: '6px',
+                                padding: '4px 9px',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease'
+                              }}
+                              title="Add deal for this company"
+                            >
+                              <Plus size={12} />
+                              <span>Add Deal</span>
+                            </button>
+                          </div>
+
+                          {compDeals.length > 0 ? (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '8px' }}>
+                              {compDeals.map(d => (
+                                <div
+                                  key={d._id}
+                                  onClick={() => {
+                                    setViewingCompany(null);
+                                    setDetailedContactId(null);
+                                    setActiveTab('deals');
+                                    setDetailedDealId(d._id);
+                                  }}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '8px',
+                                    background: '#ffffff',
+                                    border: '1px solid #e2e8f0',
+                                    borderRadius: '8px',
+                                    padding: '8px 10px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  onMouseEnter={e => {
+                                    e.currentTarget.style.borderColor = '#0284c7';
+                                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(2, 132, 199, 0.08)';
+                                  }}
+                                  onMouseLeave={e => {
+                                    e.currentTarget.style.borderColor = '#e2e8f0';
+                                    e.currentTarget.style.boxShadow = 'none';
+                                  }}
+                                  title="Click to view deal board"
+                                >
+                                  <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontWeight: 600, color: '#0f172a', fontSize: '12.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {d.dealName || d.clientName}
+                                    </span>
+                                    <span style={{ color: '#16a34a', fontWeight: 700, fontSize: '11.5px' }}>
+                                      {d.currency || '$'}{Number(d.dealValue || 0).toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <span className={`pipeline-stage-badge ${(d.stage || 'new').toLowerCase()}`} style={{ padding: '2px 6px', fontSize: '10px', flexShrink: 0 }}>
+                                    {d.stage}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', fontStyle: 'italic' }}>
+                              No deals linked to this company yet.
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div
+                className="pipeline-modal-footer"
+                style={{
+                  padding: '16px 24px',
+                  borderTop: '1px solid #f1f5f9',
+                  background: '#f8fafc',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '10px'
+                }}
+              >
+                <button
+                  type="button"
+                  className="pipeline-btn-cancel"
+                  onClick={() => setViewingCompany(null)}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '13px'
+                  }}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="pipeline-btn-save"
+                  onClick={(e) => {
+                    const c = viewingCompany;
+                    setViewingCompany(null);
+                    handleOpenEditCompany(c, e);
+                  }}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Edit2 size={13} />
+                  <span>Edit Company</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* ------------------------------------------------------------------
+        Add Pipeline Modal
+        ------------------------------------------------------------------ */}
+      {
+        showAddPipelineModal && (
+          <div className="pipeline-modal-backdrop" onClick={() => setShowAddPipelineModal(false)}>
+            <div className="pipeline-modal-card" style={{ maxWidth: '440px' }} onClick={e => e.stopPropagation()}>
+              <div className="pipeline-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div className="pipeline-modal-icon-badge" style={{ background: '#f0f9ff', color: '#0284c7' }}>
+                    <Plus size={18} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>Add New Pipeline</h3>
+                    <p className="pipeline-modal-subtitle">Create a dedicated pipeline board for your deals</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-modal-close-btn"
+                  onClick={() => setShowAddPipelineModal(false)}
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={(e) => { e.preventDefault(); handleAddPipeline(addPipelineModalName); }}>
+                <div className="pipeline-modal-body" style={{ padding: '20px 24px' }}>
+                  <div className="pipeline-form-group">
+                    <label className="pipeline-form-label">
+                      Pipeline Name <span className="required-star">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="pipeline-form-input"
+                      placeholder="e.g. Enterprise Sales, Partnership Pipeline"
+                      value={addPipelineModalName}
+                      onChange={e => setAddPipelineModalName(e.target.value)}
+                      autoFocus
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="pipeline-modal-footer">
+                  <button
+                    type="button"
+                    className="pipeline-btn-cancel"
+                    onClick={() => {
+                      setShowAddPipelineModal(false);
+                      setAddPipelineModalName('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="pipeline-btn-save"
+                    disabled={!addPipelineModalName.trim()}
+                  >
+                    Create Pipeline
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
+      {/* ------------------------------------------------------------------
+        Add Contact Stage Modal
+        ------------------------------------------------------------------ */}
+      {
+        showAddStageModal && (
+          <div className="pipeline-modal-backdrop" onClick={() => setShowAddStageModal(false)}>
+            <div className="pipeline-modal-card" style={{ maxWidth: '440px' }} onClick={e => e.stopPropagation()}>
+              <div className="pipeline-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div className="pipeline-modal-icon-badge" style={{ background: '#f0f9ff', color: '#0284c7' }}>
+                    <Plus size={18} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>
+                      {activeTab === 'contacts' ? 'Add Contact Stage' : 'Add Deal Stage'}
+                    </h3>
+                    <p className="pipeline-modal-subtitle">
+                      {activeTab === 'contacts' ? 'Add a new stage column to the contacts board' : 'Add a new stage option to the deal pipeline'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-modal-close-btn"
+                  onClick={() => setShowAddStageModal(false)}
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                if (activeTab === 'contacts') {
+                  await handleAddContactStage(addStageModalName);
+                } else {
+                  await handleAddPipeline(addStageModalName);
+                  await handleCreateStageOption(addStageModalName);
+                  setShowAddStageModal(false);
+                  setAddStageModalName('');
+                }
+              }}>
+                <div className="pipeline-modal-body" style={{ padding: '20px 24px' }}>
+                  <div className="pipeline-form-group">
+                    <label className="pipeline-form-label">
+                      Stage Name <span className="required-star">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="pipeline-form-input"
+                      placeholder="e.g. Inbound Lead, Proposal Sent, Customer"
+                      value={addStageModalName}
+                      onChange={e => setAddStageModalName(e.target.value)}
+                      autoFocus
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="pipeline-modal-footer">
+                  <button
+                    type="button"
+                    className="pipeline-btn-cancel"
+                    onClick={() => {
+                      setShowAddStageModal(false);
+                      setAddStageModalName('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="pipeline-btn-save"
+                    disabled={!addStageModalName.trim()}
+                  >
+                    Create Stage
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
+      {/* ------------------------------------------------------------------
+        Create / Edit Task Modal
+        ------------------------------------------------------------------ */}
+      {
+        showCreateTaskModal && (
+          <div className="pipeline-modal-backdrop" onClick={() => { setShowCreateTaskModal(false); setEditingTask(null); }}>
+            <div className="pipeline-modal-card" style={{ maxWidth: '720px', width: '92%' }} onClick={e => e.stopPropagation()}>
+              <div className="pipeline-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div className="pipeline-modal-icon-badge" style={{ background: '#eef2ff', color: '#6366f1' }}>
+                    <CheckSquare size={18} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>
+                      {editingTask ? 'Edit Task' : 'Create New Task'}
+                    </h3>
+                    <p className="pipeline-modal-subtitle">Schedule follow-ups, calls, meetings, or deal milestones</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-modal-close-btn"
+                  onClick={() => { setShowCreateTaskModal(false); setEditingTask(null); }}
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleTaskSubmit}>
+                <div className="pipeline-modal-body" style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                  <div className="pipeline-form-group">
+                    <label className="pipeline-form-label">
+                      Task Title <span className="required-star">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="pipeline-form-input"
+                      placeholder="Enter task title"
+                      value={taskFormData.title}
+                      onChange={e => setTaskFormData(prev => ({ ...prev, title: e.target.value }))}
+                      autoFocus
+                      required
+                    />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Task Type</label>
+                      <CreatableSelect
+                        value={taskFormData.type}
+                        onChange={val => setTaskFormData(prev => ({ ...prev, type: val }))}
+                        options={TASK_TYPE_OPTIONS}
+                        placeholder="Select task type..."
+                        isSearchable={false}
+                        isCreatable={false}
+                      />
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Due Date</label>
+                      <input
+                        type="date"
+                        className="pipeline-form-input"
+                        value={taskFormData.dueDate}
+                        onChange={e => setTaskFormData(prev => ({ ...prev, dueDate: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Priority</label>
+                      <CreatableSelect
+                        value={taskFormData.priority ? `${taskFormData.priority} Priority` : 'Medium Priority'}
+                        onChange={val => {
+                          const clean = val.replace(/\s*Priority\s*/i, '').trim();
+                          setTaskFormData(prev => ({ ...prev, priority: clean || val }));
+                        }}
+                        options={TASK_PRIORITY_OPTIONS.map(opt => `${opt} Priority`)}
+                        placeholder="Select priority..."
+                        isSearchable={false}
+                        isCreatable={false}
+                      />
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Status</label>
+                      <CreatableSelect
+                        value={taskFormData.status}
+                        onChange={val => setTaskFormData(prev => ({ ...prev, status: val }))}
+                        options={TASK_STATUS_OPTIONS}
+                        placeholder="Select status..."
+                        isSearchable={false}
+                        isCreatable={false}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Associated Deal and Contact Selection */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                    {/* Associated Deal */}
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Associated Deal</label>
+                      {(() => {
+                        // Case 1: Deal context (Deal is locked)
+                        if (taskLockedContext.dealId) {
+                          const lockedDeal = deals.find(d => d._id === taskLockedContext.dealId || d._id === taskFormData.associatedDealId) || detailedDeal;
+                          const dealName = lockedDeal ? (lockedDeal.dealName || lockedDeal.clientName) : (taskFormData.associatedDealId || 'Selected Deal');
+                          return (
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '8px 12px',
+                                backgroundColor: '#f8fafc',
+                                border: '1.5px solid #e2e8f0',
+                                borderRadius: '8px',
+                                minHeight: '38px',
+                                boxSizing: 'border-box'
+                              }}
+                              title="Associated deal is pre-selected for this task"
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', minWidth: 0 }}>
+                                <div style={{
+                                  width: '24px',
+                                  height: '24px',
+                                  borderRadius: '6px',
+                                  background: '#e0f2fe',
+                                  color: '#0284c7',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  flexShrink: 0
+                                }}>
+                                  <Briefcase size={13} strokeWidth={2.2} />
+                                </div>
+                                <span style={{
+                                  fontSize: '13.5px',
+                                  fontWeight: 600,
+                                  color: '#1e293b',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis'
+                                }}>
+                                  {dealName}
+                                </span>
+                              </div>
+                              {lockedDeal && (
+                                <span
+                                  className={`pipeline-stage-badge ${(lockedDeal.stage || 'new').toLowerCase()}`}
+                                  style={{ fontSize: '10.5px', padding: '1px 7px', flexShrink: 0, fontWeight: 600 }}
+                                >
+                                  {lockedDeal.stage || 'Deal'}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        // Case 2: Contact context
+                        const targetContactId = taskFormData.associatedContactId || taskLockedContext.contactId;
+                        if (targetContactId) {
+                          const contactAssocDeals = getContactAssociatedDeals(targetContactId);
+                          if (contactAssocDeals.length === 1) {
+                            // Single deal: display as locked card without dropdown
+                            const singleD = contactAssocDeals[0];
+                            const dealName = singleD.dealName || singleD.clientName || 'Associated Deal';
+                            return (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '8px 12px',
+                                  backgroundColor: '#f8fafc',
+                                  border: '1.5px solid #e2e8f0',
+                                  borderRadius: '8px',
+                                  minHeight: '38px',
+                                  boxSizing: 'border-box'
+                                }}
+                                title="Associated deal for this contact"
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', minWidth: 0 }}>
+                                  <div style={{
+                                    width: '24px',
+                                    height: '24px',
+                                    borderRadius: '6px',
+                                    background: '#e0f2fe',
+                                    color: '#0284c7',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0
+                                  }}>
+                                    <Briefcase size={13} strokeWidth={2.2} />
+                                  </div>
+                                  <span style={{
+                                    fontSize: '13.5px',
+                                    fontWeight: 600,
+                                    color: '#1e293b',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis'
+                                  }}>
+                                    {dealName}
+                                  </span>
+                                </div>
+                                {singleD.stage && (
+                                  <span
+                                    className={`pipeline-stage-badge ${(singleD.stage || 'new').toLowerCase()}`}
+                                    style={{ fontSize: '10.5px', padding: '1px 7px', flexShrink: 0, fontWeight: 600 }}
+                                  >
+                                    {singleD.stage}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          } else if (contactAssocDeals.length > 1) {
+                            // Multiple deals: show multi-select dropdown strictly for this contact's deals
+                            return (
+                              <MultiSelectContactDeals
+                                deals={contactAssocDeals}
+                                selectedIds={taskFormData.associatedDealIds || []}
+                                onChange={ids => setTaskFormData(prev => ({
+                                  ...prev,
+                                  associatedDealIds: ids,
+                                  associatedDealId: ids[0] || ''
+                                }))}
+                                placeholder="Select associated deals..."
+                              />
+                            );
+                          } else {
+                            // 0 deals linked to contact
+                            return (
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '8px 12px',
+                                backgroundColor: '#f8fafc',
+                                border: '1.5px dashed #cbd5e1',
+                                borderRadius: '8px',
+                                minHeight: '38px',
+                                color: '#64748b',
+                                fontSize: '13px'
+                              }}>
+                                <Briefcase size={14} style={{ color: '#94a3b8' }} />
+                                <span>No deals associated with this contact</span>
+                              </div>
+                            );
+                          }
+                        }
+
+                        // Case 3: Generic task creation
+                        return (
+                          <CreatableSelect
+                            value={deals.find(d => d._id === taskFormData.associatedDealId)?.dealName || deals.find(d => d._id === taskFormData.associatedDealId)?.clientName || ''}
+                            onChange={val => {
+                              const matched = deals.find(d => d._id === val || (d.dealName || d.clientName) === val);
+                              setTaskFormData(prev => ({
+                                ...prev,
+                                associatedDealId: matched ? matched._id : val,
+                                associatedDealIds: matched ? [matched._id] : (val ? [val] : []),
+                                associatedContactId: prev.associatedContactId || (matched ? (matched.associatedContactId || matched.contactId || '') : '')
+                              }));
+                            }}
+                            options={deals.map(d => ({ id: d._id, label: d.dealName || d.clientName }))}
+                            placeholder="Select associated deal..."
+                            isSearchable={true}
+                            isCreatable={false}
+                          />
+                        );
+                      })()}
+                    </div>
+
+                    {/* Associated Contact */}
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Associated Contact</label>
+                      {(() => {
+                        const targetDealId = taskFormData.associatedDealId || taskLockedContext.dealId;
+                        const dealAssocContacts = targetDealId ? getDealAssociatedContacts(targetDealId) : [];
+
+                        // Case 1: In Deal context
+                        if (targetDealId) {
+                          if (dealAssocContacts.length === 1) {
+                            // Single contact: display as locked card without dropdown
+                            const singleC = dealAssocContacts[0];
+                            const name = `${singleC.firstName || ''} ${singleC.lastName || ''}`.trim() || singleC.email || singleC.company || 'Associated Contact';
+                            return (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '8px 12px',
+                                  backgroundColor: '#f8fafc',
+                                  border: '1.5px solid #e2e8f0',
+                                  borderRadius: '8px',
+                                  minHeight: '38px',
+                                  boxSizing: 'border-box'
+                                }}
+                                title="Associated contact for this deal"
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', minWidth: 0 }}>
+                                  <div style={{
+                                    width: '24px',
+                                    height: '24px',
+                                    borderRadius: '6px',
+                                    background: '#f0fdf4',
+                                    color: '#16a34a',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0
+                                  }}>
+                                    <User size={13} strokeWidth={2.2} />
+                                  </div>
+                                  <span style={{
+                                    fontSize: '13.5px',
+                                    fontWeight: 600,
+                                    color: '#1e293b',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis'
+                                  }}>
+                                    {name}
+                                  </span>
+                                </div>
+                                {singleC.email && (
+                                  <span style={{ fontSize: '11.5px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>
+                                    {singleC.email}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          } else if (dealAssocContacts.length > 1) {
+                            // Multiple contacts: show multi-select dropdown strictly for this deal's contacts
+                            return (
+                              <MultiSelectDealContacts
+                                contacts={dealAssocContacts}
+                                selectedIds={taskFormData.associatedContactIds || []}
+                                onChange={ids => setTaskFormData(prev => ({
+                                  ...prev,
+                                  associatedContactIds: ids,
+                                  associatedContactId: ids[0] || ''
+                                }))}
+                                placeholder="Select associated contacts..."
+                              />
+                            );
+                          } else {
+                            // 0 contacts linked to deal
+                            return (
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '8px 12px',
+                                backgroundColor: '#f8fafc',
+                                border: '1.5px dashed #cbd5e1',
+                                borderRadius: '8px',
+                                minHeight: '38px',
+                                color: '#64748b',
+                                fontSize: '13px'
+                              }}>
+                                <User size={14} style={{ color: '#94a3b8' }} />
+                                <span>No contacts associated with this deal</span>
+                              </div>
+                            );
+                          }
+                        }
+
+                        // Case 2: In Contact context (without deal)
+                        if (taskLockedContext.contactId && !taskLockedContext.dealId) {
+                          const lockedContact = contacts.find(c => c._id === taskLockedContext.contactId) || detailedContact;
+                          const contactName = lockedContact ? `${lockedContact.firstName || ''} ${lockedContact.lastName || ''}`.trim() || lockedContact.company : 'Selected Contact';
+                          return (
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '8px 12px',
+                                backgroundColor: '#f8fafc',
+                                border: '1.5px solid #e2e8f0',
+                                borderRadius: '8px',
+                                minHeight: '38px',
+                                boxSizing: 'border-box'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', minWidth: 0 }}>
+                                <div style={{
+                                  width: '24px',
+                                  height: '24px',
+                                  borderRadius: '6px',
+                                  background: '#f0fdf4',
+                                  color: '#16a34a',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  flexShrink: 0
+                                }}>
+                                  <User size={13} strokeWidth={2.2} />
+                                </div>
+                                <span style={{
+                                  fontSize: '13.5px',
+                                  fontWeight: 600,
+                                  color: '#1e293b',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis'
+                                }}>
+                                  {contactName}
+                                </span>
+                              </div>
+                              {lockedContact?.leadStage && (
+                                <span className="pipeline-stage-badge new" style={{ fontSize: '10.5px', padding: '1px 7px', flexShrink: 0 }}>
+                                  {lockedContact.leadStage}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        // Case 3: Generic task creation
+                        return (
+                          <CreatableSelect
+                            value={(() => {
+                              const c = contacts.find(item => item._id === taskFormData.associatedContactId);
+                              return c ? `${c.firstName} ${c.lastName}`.trim() : '';
+                            })()}
+                            onChange={val => {
+                              const matched = contacts.find(c => c._id === val || `${c.firstName} ${c.lastName}`.trim() === val);
+                              setTaskFormData(prev => ({
+                                ...prev,
+                                associatedContactId: matched ? matched._id : val,
+                                associatedContactIds: matched ? [matched._id] : (val ? [val] : [])
+                              }));
+                            }}
+                            options={contacts.map(c => ({
+                              id: c._id,
+                              label: `${c.firstName} ${c.lastName}${c.company || c.email ? ` (${c.company || c.email})` : ''}`.trim()
+                            }))}
+                            placeholder="Select associated contact..."
+                            isSearchable={true}
+                            isCreatable={false}
+                          />
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Assignee Selection with "Assign someone?" Checkbox directly */}
+                  <div className="pipeline-form-group">
+                    <label className="pipeline-form-checkbox-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none', fontWeight: 600, fontSize: '13.5px', color: '#1e293b', margin: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={isAssignCustom}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setIsAssignCustom(checked);
+                          if (!checked) {
+                            const defaultAssignee = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || (detailedDeal ? detailedDeal.salesOwner : '') || 'Admin System';
+                            setTaskFormData(prev => ({ ...prev, assignee: defaultAssignee }));
+                          } else {
+                            if (!taskFormData.assignee || taskFormData.assignee === 'Artiflow' || taskFormData.assignee === 'Admin System') {
+                              const firstEmp = activeSalesEmployees[0];
+                              if (firstEmp) {
+                                const name = `${firstEmp.firstName || ''} ${firstEmp.lastName || ''}`.trim();
+                                setTaskFormData(prev => ({ ...prev, assignee: name }));
+                              }
+                            }
+                          }
+                        }}
+                        style={{ width: '16px', height: '16px', accentColor: '#0284c7', cursor: 'pointer' }}
+                      />
+                      <span>Assign someone?</span>
+                    </label>
+
+                    {isAssignCustom && (
+                      <div style={{ marginTop: '10px' }}>
+                        <label className="pipeline-form-label" style={{ fontSize: '12px', color: '#475569', marginBottom: '4px', fontWeight: 600 }}>
+                          Assign to <span className="required-star">*</span>
+                        </label>
+                        <CreatableSelect
+                          value={taskFormData.assignee}
+                          onChange={val => setTaskFormData(prev => ({ ...prev, assignee: val }))}
+                          options={
+                            activeSalesEmployees.length > 0
+                              ? activeSalesEmployees.map(emp => {
+                                const fullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
+                                const empId = emp.employeeId || emp.empId || emp.employee_id || emp.emp_id || '';
+                                const metaParts = [emp.designation, empId].filter(Boolean);
+                                const metaStr = metaParts.length > 0 ? ` (${metaParts.join(' - ')})` : '';
+                                return {
+                                  id: fullName,
+                                  label: `${fullName}${metaStr}`.trim()
+                                };
+                              })
+                              : (ownerOptions && ownerOptions.length > 0
+                                ? ownerOptions.map(name => ({ id: name, label: name }))
+                                : (employees || []).filter(emp => emp && emp.isActive !== false && emp.status !== 'Inactive' && emp.status !== 'inactive').map(emp => {
+                                  const fullName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
+                                  const empId = emp.employeeId || emp.empId || emp.employee_id || emp.emp_id || '';
+                                  const metaParts = [emp.designation, empId].filter(Boolean);
+                                  const metaStr = metaParts.length > 0 ? ` (${metaParts.join(' - ')})` : '';
+                                  return { id: fullName, label: `${fullName}${metaStr}`.trim() };
+                                })
+                              )
+                          }
+                          placeholder="Select sales employee..."
+                          isSearchable={true}
+                          isCreatable={false}
+                          required={isAssignCustom}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pipeline-form-group">
+                    <label className="pipeline-form-label">Description</label>
+                    <textarea
+                      className="pipeline-activity-composer-textarea"
+                      style={{ minHeight: '110px', fontSize: '13.5px', lineHeight: '1.5' }}
+                      placeholder="Enter description"
+                      value={taskFormData.description}
+                      onChange={e => setTaskFormData(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="pipeline-modal-footer">
+                  <button
+                    type="button"
+                    className="pipeline-btn-cancel"
+                    onClick={() => { setShowCreateTaskModal(false); setEditingTask(null); }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="pipeline-btn-save"
+                    disabled={!taskFormData.title.trim()}
+                  >
+                    {editingTask ? 'Update Task' : 'Create Task'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
+      {/* ====================================================================
+          MILESTONE PAYMENT RECORDS MODAL
+          ==================================================================== */}
+      {
+        showMilestoneModal && createPortal(
+          <div
+            className="pipeline-milestone-modal-overlay"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowMilestoneModal(false); }}
+          >
+            <div className="pipeline-milestone-modal-card">
+              {/* Modal Header */}
+              <div className="pipeline-milestone-modal-header">
+                <div className="pipeline-milestone-modal-header-left">
+                  <div className="pipeline-milestone-modal-icon">
+                    <CreditCard size={20} />
+                  </div>
+                  <div>
+                    <h2 className="pipeline-milestone-modal-title">Payment Milestones & Records</h2>
+                    <p className="pipeline-milestone-modal-subtitle">
+                      {(() => {
+                        if (!milestoneModalDealId) return 'All Payment Records';
+                        const foundDeal = deals.find(d => d._id === milestoneModalDealId);
+                        if (foundDeal) return `Deal: ${foundDeal.dealName || foundDeal.clientName || 'Unknown Deal'}`;
+                        const foundContact = contacts.find(c => `contact_${c._id}` === milestoneModalDealId || c._id === milestoneModalDealId) || detailedContact;
+                        if (foundContact) return `Contact: ${`${foundContact.firstName || ''} ${foundContact.lastName || ''}`.trim() || foundContact.company || 'Client'}`;
+                        return 'All Payment Records';
+                      })()}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-milestone-modal-close-btn"
+                  onClick={() => setShowMilestoneModal(false)}
+                  title="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Summary Tiles */}
+              {(() => {
+                const targetDeal = (() => {
+                  if (milestoneModalDealId) {
+                    const found = deals.find(d => d._id === milestoneModalDealId);
+                    if (found) return found;
+                    const foundContact = contacts.find(c => `contact_${c._id}` === milestoneModalDealId || c._id === milestoneModalDealId) || detailedContact;
+                    if (foundContact) {
+                      const matchedDeal = deals.find(d =>
+                        d.contactId === foundContact._id ||
+                        (d.clientName && foundContact.firstName && (
+                          d.clientName.toLowerCase().includes(foundContact.firstName.toLowerCase()) ||
+                          foundContact.firstName.toLowerCase().includes(d.clientName.toLowerCase())
+                        )) ||
+                        (d.clientName && foundContact.company && d.clientName.toLowerCase().includes(foundContact.company.toLowerCase()))
+                      );
+                      if (matchedDeal) return matchedDeal;
+                      return {
+                        _id: `contact_${foundContact._id}`,
+                        clientName: `${foundContact.firstName || ''} ${foundContact.lastName || ''}`.trim() || foundContact.company || 'Client',
+                        clientEmail: foundContact.email,
+                        dealName: foundContact.company ? `${foundContact.company} Deployment` : `${foundContact.firstName || 'Client'} Deployment`,
+                        dealValue: 0,
+                        currency: '₹',
+                        expectedCloseDate: new Date(Date.now() + 86400000 * 30).toISOString()
+                      };
+                    }
+                  }
+                  return detailedDeal || {};
+                })();
+
+                const records = (() => {
+                  if (milestoneModalDealId && !milestoneModalDealId.startsWith('contact_')) {
+                    const d = deals.find(x => x._id === milestoneModalDealId) || detailedDeal;
+                    if (d) return getDealPaymentRecords(d);
+                  }
+                  if (detailedDeal && (!milestoneModalDealId || milestoneModalDealId === detailedDeal._id)) {
+                    return getDealPaymentRecords(detailedDeal);
+                  }
+                  if (detailedContact) {
+                    return getContactPaymentRecords(detailedContact);
+                  }
+                  const foundContact = contacts.find(c => `contact_${c._id}` === milestoneModalDealId || c._id === milestoneModalDealId);
+                  if (foundContact) {
+                    return getContactPaymentRecords(foundContact);
+                  }
+                  return paymentRecords[milestoneModalDealId] || [];
+                })();
+
+                const dealValue = parsePaymentAmount(targetDeal.dealValue);
+                const paidAmount = records
+                  .filter(r => (r.paymentStatus || '').toLowerCase() === 'paid')
+                  .reduce((sum, r) => sum + parsePaymentAmount(r.paidAmount), 0);
+
+                const pendingRecordsAmount = records
+                  .filter(r => (r.paymentStatus || '').toLowerCase() !== 'paid')
+                  .reduce((sum, r) => sum + parsePaymentAmount(r.paidAmount), 0);
+
+                const totalAmount = dealValue > 0 ? dealValue : (paidAmount + pendingRecordsAmount);
+                const pendingAmount = dealValue > 0 ? Math.max(0, dealValue - paidAmount) : pendingRecordsAmount;
+                const currency = targetDeal.currency || '₹';
+
+                return (
+                  <div className="pipeline-milestone-modal-summary-row">
+                    <div className="pipeline-milestone-summary-tile">
+                      <div className="pipeline-milestone-summary-tile-label">Total Amount</div>
+                      <div className="pipeline-milestone-summary-tile-val blue">{currency} {totalAmount.toLocaleString()}</div>
+                    </div>
+                    <div className="pipeline-milestone-summary-tile">
+                      <div className="pipeline-milestone-summary-tile-label">Paid Amount</div>
+                      <div className="pipeline-milestone-summary-tile-val green">{currency} {paidAmount.toLocaleString()}</div>
+                    </div>
+                    <div className="pipeline-milestone-summary-tile">
+                      <div className="pipeline-milestone-summary-tile-label">Pending Amount</div>
+                      <div className="pipeline-milestone-summary-tile-val orange">{currency} {pendingAmount.toLocaleString()}</div>
+                    </div>
+                    <div className="pipeline-milestone-summary-tile">
+                      <div className="pipeline-milestone-summary-tile-label">Payment Records</div>
+                      <div className="pipeline-milestone-summary-tile-val">{records.length}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Modal Body */}
+              <div className="pipeline-milestone-modal-body">
+                {/* Toolbar */}
+                <div className="pipeline-milestone-modal-toolbar">
+                  <span className="pipeline-milestone-modal-toolbar-title">All Payment Records</span>
+                  <button
+                    type="button"
+                    className="pipeline-add-payment-btn"
+                    onClick={() => {
+                      const deal = (() => {
+                        if (milestoneModalDealId) {
+                          const found = deals.find(d => d._id === milestoneModalDealId);
+                          if (found) return found;
+                          const foundContact = contacts.find(c => `contact_${c._id}` === milestoneModalDealId || c._id === milestoneModalDealId) || detailedContact;
+                          if (foundContact) {
+                            const matchedDeal = deals.find(d =>
+                              d.contactId === foundContact._id ||
+                              (d.clientName && foundContact.firstName && (
+                                d.clientName.toLowerCase().includes(foundContact.firstName.toLowerCase()) ||
+                                foundContact.firstName.toLowerCase().includes(d.clientName.toLowerCase())
+                              )) ||
+                              (d.clientName && foundContact.company && d.clientName.toLowerCase().includes(foundContact.company.toLowerCase()))
+                            );
+                            if (matchedDeal) return matchedDeal;
+                            return {
+                              _id: `contact_${foundContact._id}`,
+                              clientName: `${foundContact.firstName || ''} ${foundContact.lastName || ''}`.trim() || foundContact.company || 'Client',
+                              clientEmail: foundContact.email,
+                              dealName: foundContact.company ? `${foundContact.company} Deployment` : `${foundContact.firstName || 'Client'} Deployment`,
+                              dealValue: 5000,
+                              currency: '$',
+                              expectedCloseDate: new Date(Date.now() + 86400000 * 30).toISOString()
+                            };
+                          }
+                        }
+                        return detailedDeal || {};
+                      })();
+                      const matchedContact = contacts.find(c =>
+                        (deal.contactId && c._id === deal.contactId) ||
+                        (deal.clientName && c.firstName && (
+                          `${c.firstName} ${c.lastName || ''}`.trim().toLowerCase() === deal.clientName.toLowerCase() ||
+                          deal.clientName.toLowerCase().includes(c.firstName.toLowerCase()) ||
+                          c.firstName.toLowerCase().includes(deal.clientName.toLowerCase())
+                        )) ||
+                        (deal.clientName && c.company && c.company.toLowerCase() === deal.clientName.toLowerCase())
+                      );
+                      const clientEmail = deal.clientEmail || (matchedContact && matchedContact.email) || `${(deal.clientName || 'client').toLowerCase().replace(/[^a-z0-9]/g, '.')}@bhoomi.com`;
+                      const clientDisplayName = deal.clientName || 'Client';
+                      const clientWithEmail = `${clientDisplayName} (${clientEmail})`;
+                      const projectNameVal = deal.dealName ? `${deal.dealName} Deployment` : (deal.clientName ? `${deal.clientName} Deployment` : 'Deployment');
+
+                      setNewPaymentData({
+                        clientName: clientWithEmail,
+                        clientEmail: clientEmail,
+                        projectName: projectNameVal,
+                        paidAmount: '', paymentMode: 'Bank Transfer',
+                        paymentStatus: 'Paid',
+                        paymentDate: new Date().toISOString().slice(0, 10),
+                        attachmentName: ''
+                      });
+                      setShowAddPaymentForm(prev => !prev);
+                      setAttachmentFile(null);
+                    }}
+                  >
+                    <Plus size={13} />
+                    <span>Add Payment Record</span>
+                  </button>
+                </div>
+
+                {/* Payment Records Table */}
+                <div className={`pipeline-milestone-table-wrap ${showAddPaymentForm ? 'compact-view' : ''}`}>
+                  <table className="pipeline-milestone-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '48px', textAlign: 'center' }}>Sr. No.</th>
+                        <th style={{ minWidth: '145px' }}>Client Name</th>
+                        <th style={{ minWidth: '135px' }}>Project Name</th>
+                        <th style={{ minWidth: '95px' }}>Paid Amount</th>
+                        <th style={{ minWidth: '95px' }}>Payment Mode</th>
+                        <th style={{ minWidth: '85px' }}>Status</th>
+                        <th style={{ minWidth: '90px' }}>Payment Date</th>
+                        <th style={{ minWidth: '105px' }}>Recorded On</th>
+                        <th style={{ width: '85px', textAlign: 'center' }}>Attachment</th>
+                        <th style={{ width: '36px', textAlign: 'center' }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const records = (() => {
+                          if (milestoneModalDealId && !milestoneModalDealId.startsWith('contact_')) {
+                            const d = deals.find(x => x._id === milestoneModalDealId) || detailedDeal;
+                            if (d) return getDealPaymentRecords(d);
+                          }
+                          if (detailedDeal && (!milestoneModalDealId || milestoneModalDealId === detailedDeal._id)) {
+                            return getDealPaymentRecords(detailedDeal);
+                          }
+                          if (detailedContact) {
+                            return getContactPaymentRecords(detailedContact);
+                          }
+                          const foundContact = contacts.find(c => `contact_${c._id}` === milestoneModalDealId || c._id === milestoneModalDealId);
+                          if (foundContact) {
+                            return getContactPaymentRecords(foundContact);
+                          }
+                          return paymentRecords[milestoneModalDealId] || [];
+                        })();
+
+                        if (records.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan="10" style={{ textAlign: 'center', padding: '36px 16px', color: '#94a3b8' }}>
+                                <CreditCard size={28} style={{ margin: '0 auto 8px', opacity: 0.45 }} />
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>No Payment Records Found</div>
+                                <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '3px' }}>
+                                  No payment records recorded yet. Click <strong>+ Add Payment Record</strong> to add one.
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return records.map((rec, idx) => {
+                          const rawName = rec.clientName || '';
+                          const cleanName = rawName.replace(/\s*\([^)]*@[^)]*\)\s*$/, '').trim() || rawName || 'Client';
+                          const rawEmail = rec.clientEmail || (rawName.match(/\(([^)]*@[^)]*)\)/) ? rawName.match(/\(([^)]*@[^)]*)\)/)[1] : '');
+
+                          return (
+                            <tr key={rec.id || rec._id || idx}>
+                              <td style={{ textAlign: 'center', fontWeight: 700, color: '#64748b', fontSize: '11.5px' }}>{idx + 1}</td>
+                              <td>
+                                <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '175px' }} title={cleanName}>
+                                  {cleanName}
+                                </div>
+                                {rawEmail && (
+                                  <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '175px' }} title={rawEmail}>
+                                    {rawEmail}
+                                  </div>
+                                )}
+                              </td>
+                              <td>
+                                <div style={{ fontWeight: 500, color: '#334155', fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }} title={rec.projectName}>
+                                  {rec.projectName || '—'}
+                                </div>
+                              </td>
+                              <td style={{ fontWeight: 700, fontSize: '12px', color: (rec.paymentStatus || '').toLowerCase() === 'paid' ? '#16a34a' : (rec.paymentStatus || '').toLowerCase() === 'pending' ? '#ea580c' : '#ca8a04', whiteSpace: 'nowrap' }}>
+                                {rec.paidAmount}
+                              </td>
+                              <td style={{ color: '#475569', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                {rec.paymentMode || '—'}
+                              </td>
+                              <td>
+                                <TableStatusPill
+                                  status={rec.paymentStatus || 'Pending'}
+                                  onSelectStatus={async (newStatus) => {
+                                    try {
+                                      if (rec._id || (rec.id && !rec.id.toString().startsWith('pay-sample-'))) {
+                                        await api.put(`/payment-records/${rec._id || rec.id}`, { paymentStatus: newStatus });
+                                      }
+                                    } catch (err) {
+                                      console.warn('Update payment record API sync:', err.message);
+                                    }
+                                    setPaymentRecords(prev => {
+                                      const updated = {};
+                                      Object.keys(prev).forEach(k => {
+                                        updated[k] = (prev[k] || []).map(r =>
+                                          (r._id === rec._id || r.id === rec.id) ? { ...r, paymentStatus: newStatus } : r
+                                        );
+                                      });
+                                      if (milestoneModalDealId && !updated[milestoneModalDealId]) {
+                                        updated[milestoneModalDealId] = (prev[milestoneModalDealId] || []).map((r, rIdx) =>
+                                          (r._id === rec._id || r.id === rec.id || rIdx === idx) ? { ...r, paymentStatus: newStatus } : r
+                                        );
+                                      }
+                                      return updated;
+                                    });
+                                  }}
+                                />
+                              </td>
+                              <td style={{ whiteSpace: 'nowrap', fontSize: '11.5px', color: '#334155' }}>
+                                {rec.paymentDate || '—'}
+                              </td>
+                              <td>
+                                <div style={{ fontWeight: 600, color: '#334155', fontSize: '11px', whiteSpace: 'nowrap' }}>{rec.recordedOnDate || rec.recordedOn || '—'}</div>
+                                {rec.recordedOnTime && <div style={{ fontSize: '10px', color: '#64748b', whiteSpace: 'nowrap' }}>{rec.recordedOnTime} (IST)</div>}
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  {rec.attachmentName || rec.attachmentUrl ? (
+                                    <button
+                                      type="button"
+                                      className="pipeline-attachment-view-badge"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setPreviewAttachment(rec);
+                                      }}
+                                      title={rec.attachmentName || 'View Attachment'}
+                                    >
+                                      <Eye size={12} />
+                                      <span>View</span>
+                                    </button>
+                                  ) : (
+                                    <span style={{ color: '#cbd5e1', fontSize: '13px' }}>—</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <button
+                                  type="button"
+                                  className="pipeline-table-row-delete-btn"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (window.confirm('Are you sure you want to delete this payment record?')) {
+                                      try {
+                                        if (rec._id || (rec.id && !rec.id.toString().startsWith('pay-sample-'))) {
+                                          await api.delete(`/payment-records/${rec._id || rec.id}`);
+                                        }
+                                      } catch (err) {
+                                        console.warn('Delete payment record API sync:', err.message);
+                                      }
+                                      setPaymentRecords(prev => {
+                                        const updated = {};
+                                        Object.keys(prev).forEach(k => {
+                                          updated[k] = (prev[k] || []).filter(r =>
+                                            r._id ? r._id !== rec._id : (r.id ? r.id !== rec.id : true)
+                                          );
+                                        });
+                                        if (milestoneModalDealId && updated[milestoneModalDealId]) {
+                                          updated[milestoneModalDealId] = (updated[milestoneModalDealId] || []).filter((r, rIdx) =>
+                                            r._id ? r._id !== rec._id : (r.id ? r.id !== rec.id : rIdx !== idx)
+                                          );
+                                        }
+                                        return updated;
+                                      });
+                                    }
+                                  }}
+                                  title="Delete Payment Record"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Add Payment Form */}
+                {showAddPaymentForm && (
+                  <div className="pipeline-add-payment-form-section">
+                    <div className="pipeline-add-payment-form-header">
+                      <span className="pipeline-add-payment-form-title">➕ Add New Payment Record</span>
+                      <button
+                        type="button"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', alignItems: 'center' }}
+                        onClick={() => setShowAddPaymentForm(false)}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                    <div className="pipeline-add-payment-form-body">
+                      {/* Sr No (auto) */}
+                      <div className="pipeline-add-payment-field">
+                        <label className="pipeline-add-payment-label">Sr. No.</label>
+                        <input
+                          type="text"
+                          className="pipeline-add-payment-input readonly"
+                          value={`#${(paymentRecords[milestoneModalDealId] || []).length + 1}`}
+                          readOnly
+                          style={{ background: '#f8fafc', color: '#64748b' }}
+                        />
+                      </div>
+
+                      {/* Client Name (Pre-filled & Non-editable) */}
+                      <div className="pipeline-add-payment-field">
+                        <label className="pipeline-add-payment-label">Client Name</label>
+                        <input
+                          type="text"
+                          className="pipeline-add-payment-input readonly"
+                          placeholder="Enter name"
+                          value={newPaymentData.clientName || (() => {
+                            const deal = deals.find(d => d._id === milestoneModalDealId) || detailedDeal || {};
+                            const matchedContact = contacts.find(c =>
+                              (deal.contactId && c._id === deal.contactId) ||
+                              (deal.clientName && c.firstName && (
+                                `${c.firstName} ${c.lastName || ''}`.trim().toLowerCase() === deal.clientName.toLowerCase() ||
+                                deal.clientName.toLowerCase().includes(c.firstName.toLowerCase()) ||
+                                c.firstName.toLowerCase().includes(deal.clientName.toLowerCase())
+                              )) ||
+                              (deal.clientName && c.company && c.company.toLowerCase() === deal.clientName.toLowerCase())
+                            );
+                            const clientEmail = deal.clientEmail || (matchedContact && matchedContact.email) || `${(deal.clientName || 'client').toLowerCase().replace(/[^a-z0-9]/g, '.')}@bhoomi.com`;
+                            return `${deal.clientName || 'Client'} (${clientEmail})`;
+                          })()}
+                          readOnly
+                          title="Client name and email are pre-filled and cannot be edited"
+                        />
+                      </div>
+
+                      {/* Project Name (Pre-filled & Non-editable) */}
+                      <div className="pipeline-add-payment-field">
+                        <label className="pipeline-add-payment-label">Project Name</label>
+                        <input
+                          type="text"
+                          className="pipeline-add-payment-input readonly"
+                          placeholder="Enter name"
+                          value={newPaymentData.projectName || (() => {
+                            const deal = deals.find(d => d._id === milestoneModalDealId) || detailedDeal || {};
+                            return deal.dealName ? `${deal.dealName} Deployment` : (deal.clientName ? `${deal.clientName} Deployment` : 'Deployment');
+                          })()}
+                          readOnly
+                          title="Project name is pre-filled and cannot be edited"
+                        />
+                      </div>
+
+                      {/* Paid Amount (Mandatory Numeric) */}
+                      <div className="pipeline-add-payment-field">
+                        <label className="pipeline-add-payment-label">
+                          Paid Amount <span style={{ color: '#ef4444', fontWeight: 'bold' }}>*</span>
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="pipeline-add-payment-input"
+                          placeholder="Enter amount"
+                          value={newPaymentData.paidAmount}
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                              setNewPaymentData(prev => ({ ...prev, paidAmount: val }));
+                            }
+                          }}
+                          required
+                        />
+                      </div>
+
+                      {/* Payment Mode (Mandatory) */}
+                      <div className="pipeline-add-payment-field">
+                        <label className="pipeline-add-payment-label">
+                          Payment Mode <span style={{ color: '#ef4444', fontWeight: 'bold' }}>*</span>
+                        </label>
+                        <CreatableSelect
+                          value={newPaymentData.paymentMode}
+                          onChange={val => setNewPaymentData(prev => ({ ...prev, paymentMode: val }))}
+                          options={[...DEFAULT_PAYMENT_MODES, ...customPaymentModes]}
+                          onCreateOption={newOpt => setCustomPaymentModes(prev => [...prev, newOpt])}
+                          placeholder="Select or enter payment mode"
+                          isSearchable={true}
+                          isCreatable={true}
+                          required={true}
+                        />
+                      </div>
+
+                      {/* Payment Status */}
+                      <div className="pipeline-add-payment-field">
+                        <label className="pipeline-add-payment-label">Payment Status</label>
+                        <CreatableSelect
+                          value={newPaymentData.paymentStatus}
+                          onChange={val => setNewPaymentData(prev => ({ ...prev, paymentStatus: val }))}
+                          options={['Paid', 'Pending', 'Partial', 'Overdue', 'Cancelled']}
+                          placeholder="Select payment status"
+                          isSearchable={false}
+                          isCreatable={false}
+                        />
+                      </div>
+
+                      {/* Payment Date (Mandatory) */}
+                      <div className="pipeline-add-payment-field">
+                        <label className="pipeline-add-payment-label">
+                          Payment Date <span style={{ color: '#ef4444', fontWeight: 'bold' }}>*</span>
+                        </label>
+                        <input
+                          type="date"
+                          className="pipeline-add-payment-input"
+                          value={newPaymentData.paymentDate}
+                          onChange={e => setNewPaymentData(prev => ({ ...prev, paymentDate: e.target.value }))}
+                          required
+                        />
+                      </div>
+
+                      {/* Attachment */}
+                      <div className="pipeline-add-payment-field">
+                        <label className="pipeline-add-payment-label">Attachment</label>
+                        <label className="pipeline-payment-attachment-label">
+                          <Paperclip size={13} />
+                          {attachmentFile ? attachmentFile.name : 'Click to upload file'}
+                          <input
+                            type="file"
+                            accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx"
+                            onChange={(e) => {
+                              const file = e.target.files[0];
+                              if (file) {
+                                setAttachmentFile(file);
+                                const reader = new FileReader();
+                                reader.onload = (uploadEvt) => {
+                                  setNewPaymentData(prev => ({
+                                    ...prev,
+                                    attachmentName: file.name,
+                                    attachmentUrl: uploadEvt.target?.result || '',
+                                    attachmentType: file.type || ''
+                                  }));
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="pipeline-add-payment-form-footer">
+                      <button
+                        type="button"
+                        className="pipeline-btn-cancel"
+                        style={{ padding: '7px 16px', fontSize: '12.5px' }}
+                        onClick={() => { setShowAddPaymentForm(false); setAttachmentFile(null); }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="pipeline-btn-save"
+                        style={{ padding: '7px 18px', fontSize: '12.5px' }}
+                        onClick={async () => {
+                          const amountVal = String(newPaymentData.paidAmount || '').trim();
+                          if (!amountVal || isNaN(Number(amountVal)) || Number(amountVal) <= 0) {
+                            alert('Please enter a valid numeric Paid Amount.');
+                            return;
+                          }
+                          if (!newPaymentData.paymentMode || !newPaymentData.paymentMode.trim()) {
+                            alert('Please select or enter a Payment Mode.');
+                            return;
+                          }
+                          if (!newPaymentData.paymentDate) {
+                            alert('Please select a Payment Date.');
+                            return;
+                          }
+
+                          const deal = deals.find(d => d._id === milestoneModalDealId) || detailedDeal || {};
+                          const clientNameFinal = newPaymentData.clientName || deal.clientName || 'Client';
+                          const projectNameFinal = newPaymentData.projectName || (deal.dealName ? `${deal.dealName} Deployment` : (deal.clientName ? `${deal.clientName} Deployment` : 'Deployment'));
+                          const currency = deal.currency || '₹';
+
+                          const now = new Date();
+                          const recordedDate = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+                          const recordedTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+
+                          const formattedPaidDate = newPaymentData.paymentDate
+                            ? new Date(newPaymentData.paymentDate).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+                            : recordedDate;
+
+                          const newPaymentPayload = {
+                            dealId: milestoneModalDealId && !milestoneModalDealId.startsWith('contact_') ? milestoneModalDealId : null,
+                            contactId: milestoneModalDealId && milestoneModalDealId.startsWith('contact_') ? milestoneModalDealId.replace('contact_', '') : null,
+                            srNo: (paymentRecords[milestoneModalDealId] || []).length + 1,
+                            clientName: clientNameFinal,
+                            clientEmail: deal.email || deal.clientEmail || '',
+                            projectName: projectNameFinal,
+                            paidAmount: `${currency} ${Number(amountVal).toLocaleString()}`,
+                            paymentMode: newPaymentData.paymentMode,
+                            paymentStatus: newPaymentData.paymentStatus || 'Paid',
+                            paymentDate: formattedPaidDate,
+                            recordedOnDate: recordedDate,
+                            recordedOnTime: recordedTime,
+                            recordedOn: `${recordedDate}, ${recordedTime}`,
+                            attachmentName: newPaymentData.attachmentName || '',
+                            attachmentUrl: newPaymentData.attachmentUrl || '',
+                            attachmentType: newPaymentData.attachmentType || (attachmentFile ? attachmentFile.type : '')
+                          };
+
+                          const targetKey = milestoneModalDealId || (deal._id ? String(deal._id) : 'general');
+                          try {
+                            const res = await api.post('/payment-records', newPaymentPayload);
+                            const savedRec = res.data || { id: `pay-${Date.now()}`, ...newPaymentPayload };
+                            setPaymentRecords(prev => ({
+                              ...prev,
+                              [targetKey]: [...(prev[targetKey] || []), savedRec]
+                            }));
+                            logActivity(targetKey, {
+                              type: 'payment',
+                              title: 'Payment Recorded',
+                              content: `Recorded payment of ${newPaymentPayload.paidAmount} via ${newPaymentPayload.paymentMode}. Status: ${newPaymentPayload.paymentStatus}.${newPaymentPayload.attachmentName ? ` (Attachment: ${newPaymentPayload.attachmentName})` : ''}`,
+                              author: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Admin System'
+                            });
+                          } catch (err) {
+                            console.warn('Save payment record API sync:', err.message);
+                            const fallbackRec = { id: `pay-${Date.now()}`, ...newPaymentPayload };
+                            setPaymentRecords(prev => ({
+                              ...prev,
+                              [targetKey]: [...(prev[targetKey] || []), fallbackRec]
+                            }));
+                            logActivity(targetKey, {
+                              type: 'payment',
+                              title: 'Payment Recorded',
+                              content: `Recorded payment of ${newPaymentPayload.paidAmount} via ${newPaymentPayload.paymentMode}. Status: ${newPaymentPayload.paymentStatus}.${newPaymentPayload.attachmentName ? ` (Attachment: ${newPaymentPayload.attachmentName})` : ''}`,
+                              author: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Admin System'
+                            });
+                          }
+
+                          setShowAddPaymentForm(false);
+                          setAttachmentFile(null);
+                          setNewPaymentData({
+                            clientName: '', projectName: '', paidAmount: '',
+                            paymentMode: 'Bank Transfer', paymentStatus: 'Paid',
+                            paymentDate: '', attachmentName: '', attachmentUrl: '', attachmentType: ''
+                          });
+                        }}
+                      >
+                        Save Payment Record
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      }
+
+      {/* Attachment Preview Lightbox / Modal */}
+      {previewAttachment &&
+        createPortal(
+          <div className="pipeline-preview-modal-backdrop" onClick={() => setPreviewAttachment(null)}>
+            <div className="pipeline-preview-modal-card" onClick={e => e.stopPropagation()}>
+              <div className="pipeline-preview-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+                  <div className="pipeline-preview-modal-icon">
+                    <Paperclip size={16} />
+                  </div>
+                  <div style={{ overflow: 'hidden' }}>
+                    <h4 style={{ margin: 0, fontSize: '14.5px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: '420px' }}>
+                      {previewAttachment.attachmentName || 'Attachment Document'}
+                    </h4>
+                    <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: '#64748b' }}>
+                      Payment Record • {previewAttachment.clientName ? previewAttachment.clientName.replace(/\s*\([^)]*@[^)]*\)\s*$/, '').trim() : ''}
+                    </p>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {previewAttachment.attachmentUrl && (
+                    <a
+                      href={previewAttachment.attachmentUrl}
+                      download={previewAttachment.attachmentName || 'attachment'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="pipeline-preview-btn-action"
+                      title="Download / Open file"
+                    >
+                      <Download size={13} />
+                      <span>Download</span>
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    className="pipeline-modal-close-btn"
+                    onClick={() => setPreviewAttachment(null)}
+                    title="Close preview"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+              <div className="pipeline-preview-modal-body">
+                {(() => {
+                  const url = previewAttachment.attachmentUrl;
+                  const name = (previewAttachment.attachmentName || '').toLowerCase();
+                  const isImage = url?.startsWith('data:image/') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png') || name.endsWith('.webp') || name.endsWith('.gif') || name.endsWith('.svg');
+                  const isPdf = url?.startsWith('data:application/pdf') || name.endsWith('.pdf');
+
+                  if (url && isImage) {
+                    return (
+                      <div className="pipeline-preview-img-container">
+                        <img
+                          src={url}
+                          alt={previewAttachment.attachmentName}
+                          className="pipeline-preview-img"
+                        />
+                      </div>
+                    );
+                  }
+
+                  if (url && isPdf) {
+                    return (
+                      <iframe
+                        src={url}
+                        title={previewAttachment.attachmentName}
+                        style={{ width: '100%', height: '62vh', border: 'none', borderRadius: '8px' }}
+                      />
+                    );
+                  }
+
+                  return (
+                    <div className="pipeline-preview-fallback-card">
+                      <div className="pipeline-preview-file-icon-box">
+                        {isPdf ? <FileText size={38} style={{ color: '#ef4444' }} /> : isImage ? <Paperclip size={38} style={{ color: '#0284c7' }} /> : <FileText size={38} style={{ color: '#6366f1' }} />}
+                      </div>
+                      <div style={{ textAlign: 'center', marginTop: '12px' }}>
+                        <h3 style={{ margin: '0 0 5px', fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                          {previewAttachment.attachmentName || 'Payment Receipt Document'}
+                        </h3>
+                        <span className="pipeline-preview-format-tag">
+                          {name.split('.').pop() || 'DOCUMENT'}
+                        </span>
+                      </div>
+                      <div className="pipeline-preview-meta-grid">
+                        <div>
+                          <span className="pipeline-preview-meta-label">Client Name</span>
+                          <span className="pipeline-preview-meta-val">{previewAttachment.clientName ? previewAttachment.clientName.replace(/\s*\([^)]*@[^)]*\)\s*$/, '').trim() : '—'}</span>
+                        </div>
+                        <div>
+                          <span className="pipeline-preview-meta-label">Project</span>
+                          <span className="pipeline-preview-meta-val">{previewAttachment.projectName || '—'}</span>
+                        </div>
+                        <div>
+                          <span className="pipeline-preview-meta-label">Amount Paid</span>
+                          <span className="pipeline-preview-meta-val" style={{ color: '#16a34a', fontWeight: 700 }}>{previewAttachment.paidAmount}</span>
+                        </div>
+                        <div>
+                          <span className="pipeline-preview-meta-label">Payment Mode</span>
+                          <span className="pipeline-preview-meta-val">{previewAttachment.paymentMode}</span>
+                        </div>
+                        <div>
+                          <span className="pipeline-preview-meta-label">Payment Date</span>
+                          <span className="pipeline-preview-meta-val">{previewAttachment.paymentDate}</span>
+                        </div>
+                        <div>
+                          <span className="pipeline-preview-meta-label">Status</span>
+                          <span className="pipeline-preview-meta-val" style={{ color: '#16a34a', fontWeight: 600 }}>{previewAttachment.paymentStatus}</span>
+                        </div>
+                      </div>
+                      {url ? (
+                        <a
+                          href={url}
+                          download={previewAttachment.attachmentName || 'document'}
+                          className="pipeline-preview-btn-download-main"
+                        >
+                          <Download size={14} />
+                          <span>Download Uploaded File</span>
+                        </a>
+                      ) : (
+                        <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: '#64748b' }}>
+                          <CheckCircle size={14} style={{ color: '#16a34a' }} />
+                          <span>Verified Payment Receipt Attachment • #{previewAttachment.srNo || '1'}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      }
+    </div >
+  );
+}
+
+export default Pipeline;
