@@ -38,6 +38,25 @@ function generateOfferLetterHTML(data = {}) {
     </div>
   `;
 
+  const footerHtml = `
+    <div class="lh-footer">
+      <svg class="lh-footer-bg" viewBox="0 0 13458825 1117600" preserveAspectRatio="none">
+        <!-- Left Green Polygon -->
+        <polygon points="0,0 4633823,0 3247301,1117600 0,1117600" fill="#009933" />
+        <!-- Right Green Polygon -->
+        <polygon points="10768203,0 13458825,0 13458825,1117600 9381680,1117600" fill="#009933" />
+        <!-- Center Black Polygon -->
+        <polygon points="3163140,0 11860556,0 10475891,1117600 1776609,1117600" fill="#000000" />
+      </svg>
+      <div class="lh-footer-content">
+        <div class="lh-footer-title">Bhoomi Techzone Pvt. Ltd.</div>
+        <div class="lh-footer-line">Registered Office: 2<sup>nd</sup> Floor A-43 Sector 63 Noida 201301</div>
+        <div class="lh-footer-line">Uttar Pradesh | GSTIN: 09AAMCB0572D1ZS | CIN: US5499UP2023PTC191784</div>
+        <div class="lh-footer-line"><a href="http://www.bhoomitechzone.in" class="lh-footer-link">www.bhoomitechzone.in</a></div>
+      </div>
+    </div>
+  `;
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -55,8 +74,8 @@ function generateOfferLetterHTML(data = {}) {
   }
   body {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 9.5pt;
-    line-height: 1.42;
+    font-size: 9.3pt;
+    line-height: 1.38;
     color: #111;
     background: #fff;
     -webkit-print-color-adjust: exact;
@@ -66,7 +85,7 @@ function generateOfferLetterHTML(data = {}) {
     width: 210mm;
     height: 297mm;
     max-height: 297mm;
-    padding: 10mm 16mm 10mm 16mm;
+    padding: 6mm 16mm 24mm 16mm;
     margin: 0 auto;
     position: relative;
     page-break-after: always;
@@ -93,6 +112,7 @@ function generateOfferLetterHTML(data = {}) {
     height: 100%;
     display: flex;
     flex-direction: column;
+    justify-content: flex-start;
   }
 
   /* Header */
@@ -100,7 +120,7 @@ function generateOfferLetterHTML(data = {}) {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }
   .lh-logo-wrap {
     flex: 0 0 auto;
@@ -131,8 +151,8 @@ function generateOfferLetterHTML(data = {}) {
   .lh-stripe {
     width: 100%;
     height: 8px;
-    margin-top: 4px;
-    margin-bottom: 10px;
+    margin-top: 3px;
+    margin-bottom: 6px;
     overflow: hidden;
   }
   .lh-stripe-img {
@@ -148,15 +168,15 @@ function generateOfferLetterHTML(data = {}) {
     font-size: 15pt;
     font-weight: bold;
     letter-spacing: 1.5px;
-    margin: 4px 0 10px 0;
+    margin: 2px 0 5px 0;
     color: #000;
   }
 
   /* To block */
   .to-block {
-    margin-bottom: 8px;
-    font-size: 9.5pt;
-    line-height: 1.45;
+    margin-bottom: 5px;
+    font-size: 9.3pt;
+    line-height: 1.42;
   }
   .to-block strong {
     font-weight: bold;
@@ -166,12 +186,12 @@ function generateOfferLetterHTML(data = {}) {
   .details-table {
     width: 100%;
     border-collapse: collapse;
-    margin: 8px 0 12px 0;
-    font-size: 8.5pt;
+    margin: 4px 0 8px 0;
+    font-size: 8.2pt;
   }
   .details-table th {
     border: 1px solid #000;
-    padding: 4px 8px;
+    padding: 3px 8px;
     background: #fff;
     font-size: 9pt;
     font-weight: bold;
@@ -180,7 +200,7 @@ function generateOfferLetterHTML(data = {}) {
   }
   .details-table td {
     border: 1px solid #000;
-    padding: 3.2px 8px;
+    padding: 2.2px 8px;
     vertical-align: middle;
   }
   .details-table td:first-child {
@@ -195,41 +215,41 @@ function generateOfferLetterHTML(data = {}) {
 
   /* Section styles */
   .sec-heading {
-    font-size: 9.5pt;
+    font-size: 9.3pt;
     font-weight: bold;
-    margin: 7px 0 3px 0;
+    margin: 4px 0 2px 0;
     color: #000;
   }
   .subsec-heading {
-    font-size: 9pt;
+    font-size: 8.8pt;
     font-weight: bold;
-    margin: 5px 0 2px 0;
+    margin: 3px 0 2px 0;
     color: #000;
   }
   p {
-    margin: 4px 0;
+    margin: 2.5px 0;
     text-align: justify;
-    line-height: 1.42;
-    font-size: 9.5pt;
+    line-height: 1.38;
+    font-size: 9.3pt;
   }
   .bullet-list {
-    margin-left: 12px;
-    margin-top: 3px;
-    margin-bottom: 5px;
+    margin-left: 10px;
+    margin-top: 2px;
+    margin-bottom: 4px;
   }
   .bullet-item {
     position: relative;
-    padding-left: 14px;
-    margin: 2px 0;
-    font-size: 9pt;
-    line-height: 1.38;
+    padding-left: 13px;
+    margin: 1.8px 0;
+    font-size: 8.8pt;
+    line-height: 1.35;
     text-align: justify;
   }
   .bullet-item::before {
     content: "•";
     position: absolute;
     left: 2px;
-    font-size: 9pt;
+    font-size: 8.8pt;
   }
 
   /* Signature & Acceptance block */
@@ -237,31 +257,87 @@ function generateOfferLetterHTML(data = {}) {
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    margin-top: 15px;
-    margin-bottom: 12px;
+    margin-top: 10px;
+    margin-bottom: 8px;
   }
   .sig-col {
     width: 48%;
   }
   .sig-img {
-    height: 48px;
+    height: 44px;
     object-fit: contain;
     display: block;
-    margin: 4px 0;
+    margin: 3px 0;
   }
 
   .acceptance-card {
     border: 1px solid #000;
-    padding: 10px 14px;
-    margin-top: 8px;
+    padding: 8px 12px;
+    margin-top: 6px;
     background: #fafafa;
   }
   .acceptance-title {
     text-align: center;
     font-weight: bold;
-    font-size: 10pt;
-    margin-bottom: 6px;
+    font-size: 9.5pt;
+    margin-bottom: 4px;
     letter-spacing: 0.5px;
+  }
+
+  /* Footer */
+  .lh-footer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 210mm;
+    height: 18.5mm;
+    overflow: hidden;
+    z-index: 2;
+  }
+  .lh-footer-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .lh-footer-content {
+    position: relative;
+    z-index: 3;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    color: #ffffff;
+    padding: 0 10mm;
+  }
+  .lh-footer-title {
+    font-size: 8.5pt;
+    font-weight: bold;
+    letter-spacing: 0.2px;
+    line-height: 1.25;
+    color: #ffffff;
+  }
+  .lh-footer-line {
+    font-size: 7.2pt;
+    font-weight: bold;
+    line-height: 1.25;
+    color: #ffffff;
+  }
+  .lh-footer-line sup {
+    font-size: 5.5pt;
+    line-height: 0;
+    position: relative;
+    vertical-align: baseline;
+    top: -0.4em;
+  }
+  .lh-footer-link {
+    color: #ffffff;
+    text-decoration: none;
+    font-weight: bold;
   }
 </style>
 </head>
@@ -385,6 +461,7 @@ function generateOfferLetterHTML(data = {}) {
         `}
       </div>
     </div>
+    ${footerHtml}
   </div>
 
   <!-- ================= PAGE 2 ================= -->
@@ -393,7 +470,7 @@ function generateOfferLetterHTML(data = {}) {
     <div class="page-inner">
       ${headerHtml}
 
-      <p style="margin-top: 6px;">
+      <p style="margin-top: 4px;">
         Regular and result-oriented work is mandatory. "Zero business" may result in deduction or disciplinary action. The employee must justify the offered salary through performance, especially during the first month. In case of failure to achieve assigned targets, management reserves the right to take appropriate action as per company policy.
       </p>
 
@@ -450,19 +527,10 @@ function generateOfferLetterHTML(data = {}) {
         <div class="bullet-item">Not copy, transfer, publish, sell, misuse, or distribute confidential information without authorization.</div>
         <div class="bullet-item">Protect Company documents, systems, credentials, databases, and other information from unauthorized access.</div>
       </div>
-      <p style="font-size: 8.5pt; color: #333; margin-top: 4px;">
+      <p style="font-size: 8.5pt; color: #333; margin-top: 3px;">
         This includes but is not limited to: Mobile devices • ID/access cards • Documents and files • Storage devices • Company credentials • Customer information • Software and other Company materials
       </p>
-    </div>
-  </div>
-
-  <!-- ================= PAGE 3 ================= -->
-  <div class="page">
-    <img src="${watermarkBase64}" class="watermark" alt="watermark" />
-    <div class="page-inner">
-      ${headerHtml}
-
-      <p style="margin-top: 6px;">
+      <p style="margin-top: 4px;">
         You must not retain confidential information on personal devices, email accounts, cloud storage, or other unauthorized systems.
       </p>
       <p>
@@ -471,6 +539,15 @@ function generateOfferLetterHTML(data = {}) {
       <p>
         These confidentiality obligations will continue after your employment ends to the extent permitted by applicable law.
       </p>
+    </div>
+    ${footerHtml}
+  </div>
+
+  <!-- ================= PAGE 3 ================= -->
+  <div class="page">
+    <img src="${watermarkBase64}" class="watermark" alt="watermark" />
+    <div class="page-inner">
+      ${headerHtml}
 
       <div class="sec-heading">7. Intellectual Property</div>
       <p>
@@ -513,11 +590,24 @@ function generateOfferLetterHTML(data = {}) {
         <div class="bullet-item">Workplace Conduct Policy</div>
       </div>
 
-      <div class="subsec-heading" style="margin-top: 8px;">Company Assets, Confidentiality and Data Protection</div>
+      <div class="subsec-heading" style="margin-top: 6px;">Company Assets, Confidentiality and Data Protection</div>
       <p style="font-size: 8.8pt;">
         The Employee acknowledges that all company assets, equipment, documents, records, software, devices, access credentials, confidential information, business data, customer data, intellectual property, and other materials provided to or accessed by the Employee during employment shall remain the sole property of the Company. If the Employee voluntarily resigns or leaves employment for any reason, the Employee shall, on or before the last working day or immediately upon the Company's request, hand over all Company assets and property in his/her possession or control. The Employee shall not retain any physical or electronic copy of Company data, documents, files, credentials, or confidential information after separation.
       </p>
+      <p style="margin-top: 3px; font-size: 8.8pt;">
+        Failure to return Company assets or to comply with the above obligations may result in the Company seeking recovery of the applicable costs/losses, imposing contractual remedies to the extent permitted by applicable law, and initiating appropriate civil or criminal legal proceedings where warranted.
+      </p>
+      <p style="font-size: 8.8pt;">
+        These obligations relating to confidentiality, Company property, data protection, and unauthorized use or disclosure shall survive the termination or cessation of employment to the extent permitted by applicable law.
+      </p>
+      <div class="sec-heading" style="color: #2C7946; border-bottom: 1px solid #2C7946; padding-bottom: 2px; margin-top: 6px;">
+        RESIGNATION &amp; NOTICE PERIOD
+      </div>
+      <p style="font-size: 9pt;">
+        A mandatory <strong>${noticePeriod || '45 Days'} notice period</strong> is required before resignation. Failure to serve it may result in the withholding of your pending salary, incentives, or benefits.
+      </p>
     </div>
+    ${footerHtml}
   </div>
 
   <!-- ================= PAGE 4 ================= -->
@@ -526,137 +616,84 @@ function generateOfferLetterHTML(data = {}) {
     <div class="page-inner">
       ${headerHtml}
 
-      <p style="margin-top: 4px; font-size: 9pt;">
-        Failure to return Company assets or to comply with the above obligations may result in the Company seeking recovery of the applicable costs/losses, imposing contractual remedies to the extent permitted by applicable law, and initiating appropriate civil or criminal legal proceedings where warranted.
-      </p>
-      <p style="font-size: 9pt;">
-        These obligations relating to confidentiality, Company property, data protection, and unauthorized use or disclosure shall survive the termination or cessation of employment to the extent permitted by applicable law.
-      </p>
-
       <div class="sec-heading" style="color: #2C7946; border-bottom: 1px solid #2C7946; padding-bottom: 2px;">
-        RESIGNATION &amp; NOTICE PERIOD
-      </div>
-      <p>
-        A mandatory <strong>${noticePeriod || '45 Days'} notice period</strong> is required before resignation. Failure to serve it may result in the withholding of your pending salary, incentives, or benefits.
-      </p>
-
-      <div class="sec-heading" style="color: #2C7946; border-bottom: 1px solid #2C7946; padding-bottom: 2px; margin-top: 8px;">
         Leave Policy for All Employees
       </div>
-      <p style="font-size: 8.8pt;">
+      <p style="font-size: 8.5pt;">
         Please be informed that the following leave policy will be applicable to all employees, including both junior and senior staff members:
       </p>
       <div class="bullet-list">
-        <div class="bullet-item"><strong>Saturday or Monday Leave:</strong> If an employee takes uninformed or sudden leave on Saturday or Monday (the beginning or end of the week), Sunday will also be considered unpaid. In such cases, a total of 2 days will be unpaid.</div>
-        <div class="bullet-item"><strong>Leave on Both Saturday and Monday:</strong> If an employee remains absent on both Saturday and Monday without prior information or approval, Sunday will also be included, resulting in 3 days of unpaid leave.</div>
-        <div class="bullet-item"><strong>Emergency or Genuine Reasons:</strong> In case of a medical emergency, health issue, or any other urgent and unavoidable situation, the HR team will review the matter based on valid supporting documents and verification. If the reason is found to be genuine and approved by HR, the additional unpaid deduction for Saturday or Monday will not apply; however, Sunday will remain unpaid as per the applicable policy.</div>
+        <div class="bullet-item" style="font-size: 8.2pt;"><strong>Saturday or Monday Leave:</strong> If an employee takes uninformed or sudden leave on Saturday or Monday (the beginning or end of the week), Sunday will also be considered unpaid. In such cases, a total of 2 days will be unpaid.</div>
+        <div class="bullet-item" style="font-size: 8.2pt;"><strong>Leave on Both Saturday and Monday:</strong> If an employee remains absent on both Saturday and Monday without prior information or approval, Sunday will also be included, resulting in 3 days of unpaid leave.</div>
+        <div class="bullet-item" style="font-size: 8.2pt;"><strong>Emergency or Genuine Reasons:</strong> In case of a medical emergency, health issue, or any other urgent and unavoidable situation, the HR team will review the matter based on valid supporting documents and verification. If the reason is found to be genuine and approved by HR, the additional unpaid deduction for Saturday or Monday will not apply; however, Sunday will remain unpaid as per the applicable policy.</div>
       </div>
-      <p style="font-size: 8.8pt;">
+      <p style="font-size: 8.2pt;">
         This policy is applicable equally to all junior and senior employees. Everyone is requested to inform HR in advance and obtain leave approval wherever possible. Any exception will be considered only after proper verification and approval by the HR team.
       </p>
 
-      <div class="subsec-heading">1. During the Probation Period</div>
-      <p style="font-size: 8.8pt;">
-        During the probation period, employees will not be entitled to any paid leave. Any leave taken during this period will be treated as unpaid leave, subject to the company's applicable attendance and leave policies.
+      <div class="subsec-heading" style="margin-top: 4px; font-size: 8.5pt;">Leave Rules:</div>
+      <p style="font-size: 8.2pt; margin: 1.5px 0;">
+        <strong>1. During Probation:</strong> No paid leave. Leaves will be treated as unpaid leave.
+      </p>
+      <p style="font-size: 8.2pt; margin: 1.5px 0;">
+        <strong>2. After Probation:</strong> <strong>01 paid leave per month</strong> for medical, emergencies, or personal requirements.
+      </p>
+      <p style="font-size: 8.2pt; margin: 1.5px 0;">
+        <strong>3. Validity:</strong> Must be utilized within the calendar month. Cannot be carried forward.
+      </p>
+      <p style="font-size: 8.2pt; margin: 1.5px 0;">
+        <strong>4. Approval:</strong> Prior HR approval required. For emergencies, notify HR as soon as possible.
       </p>
 
-      <div class="subsec-heading">2. Leave Policy After Completion of Probation</div>
-      <p style="font-size: 8.8pt;">
-        After successfully completing the probation period, employees will be eligible for <strong>01 paid leave per month</strong>, as offered by the company. These leaves may be used for medical reasons, emergencies, or personal/casual requirements, subject to company policy and the applicable approval process.
-      </p>
-
-      <div class="subsec-heading">3. Monthly Leave Validity</div>
-      <p style="font-size: 8.8pt;">
-        The paid leaves offered by the company must be utilized within the same calendar month. Any unused leaves will not be carried forward to the following month and will expire at the end of the respective months.
-      </p>
-
-      <div class="subsec-heading">4. Leave Approval</div>
-      <p style="font-size: 8.8pt;">
-        Employees must inform the HR team in advance and obtain approval wherever possible. In case of medical emergencies or unavoidable circumstances, employees must notify HR as soon as possible and provide supporting documents when required.
-      </p>
-    </div>
-  </div>
-
-  <!-- ================= PAGE 5 ================= -->
-  <div class="page">
-    <img src="${watermarkBase64}" class="watermark" alt="watermark" />
-    <div class="page-inner">
-      ${headerHtml}
-
-      <div class="sec-heading" style="color: #2C7946; border-bottom: 1px solid #2C7946; padding-bottom: 2px;">
+      <div class="sec-heading" style="color: #2C7946; border-bottom: 1px solid #2C7946; padding-bottom: 2px; margin-top: 5px;">
         SALARY &amp; PAYMENT TERMS
       </div>
-      <p style="font-size: 9pt;">
-        <strong>a)</strong> Salary should be disbursed on or before the 10th - 15th day of every month.<br/>
-        <strong>b)</strong> Salary structure and incentives shall be governed as per company policy.<br/>
-        <strong>c)</strong> If you do leave the job due to any reasons in starting 15 days or after 15 days in that case company will not provide any FNF, there will not be any generate salary. Total 15 days will be unpaid completely.
+      <p style="font-size: 8.2pt; margin: 1.5px 0;">
+        <strong>a)</strong> Salary disbursed on or before 10th - 15th of every month. <strong>b)</strong> Governed by company policy. <strong>c)</strong> Leaving job within 15 days results in no FNF; 15 days completely unpaid.
+      </p>
+      <p style="font-size: 8.2pt; margin: 1.5px 0;">
+        <strong>Full &amp; Final Settlement:</strong> Within 45 days from last working day upon completion of clearances.
       </p>
 
-      <div class="subsec-heading" style="margin-top: 8px;">FULL &amp; FINAL SETTLEMENT</div>
-      <p style="font-size: 9pt;">
-        <strong>Timeline:</strong> Within 45 days from the last working day.<br/>
-        <strong>Conditions:</strong> All handover formalities and clearances must be completed.
+      <div class="sec-heading" style="margin-top: 4px;">11. General Terms &amp; Acceptance</div>
+      <p style="font-size: 8.2pt; margin: 1.5px 0;">
+        Offer subject to background verification. Either party may terminate with <strong>${noticePeriod || '45 Days'} written notice</strong>. Employment governed by applicable laws. Please sign and return a copy as acceptance.
       </p>
 
-      <div class="sec-heading">11. Background Verification</div>
-      <p style="font-size: 9pt;">
-        This offer is subject to satisfactory verification of the information and documents provided by you, including identity, educational qualifications, employment history, and other relevant information.
-      </p>
-
-      <div class="sec-heading">12. Notice Period and Termination</div>
-      <p style="font-size: 9pt;">
-        Either party may terminate the employment by providing <strong>${noticePeriod || '45 Days'} written notice</strong> or salary in lieu of notice, subject to applicable law and Company policy.
-      </p>
-      <p style="font-size: 9pt;">
-        The Company may take appropriate disciplinary action, including termination where legally permissible, in cases involving serious misconduct, fraud, unauthorized disclosure of confidential information, or significant violation of Company policies.
-      </p>
-
-      <div class="sec-heading">13. Governing Law</div>
-      <p style="font-size: 9pt;">
-        This offer and your employment will be governed by applicable laws and regulations.
-      </p>
-
-      <div class="sec-heading">14. Acceptance of Offer</div>
-      <p style="font-size: 9pt;">
-        Please sign and return a copy of this letter as confirmation of your acceptance of the employment terms.
-      </p>
-      <p style="font-size: 9pt;">
-        We are pleased to welcome you to <strong>Bhoomi Techzone Pvt. Ltd.</strong> and look forward to your contribution to the organization.
-      </p>
-
-      <div class="signature-row">
+      <div class="signature-row" style="margin-top: 6px; margin-bottom: 4px;">
         <div class="sig-col">
-          <div style="font-weight: bold; font-size: 9.5pt;">Sincerely,</div>
-          <div style="font-weight: bold; font-size: 9.5pt; color: #2C7946; margin-top: 2px;">For Bhoomi Techzone Private Limited</div>
-          <img src="${signBase64}" class="sig-img" alt="HR Signature" />
-          <div style="font-weight: bold; font-size: 9.5pt;">Name: Nipur Vishnoi</div>
-          <div style="font-size: 9pt; color: #333;">Designation: Sr. HR Admin</div>
+          <div style="font-weight: bold; font-size: 9pt;">Sincerely,</div>
+          <div style="font-weight: bold; font-size: 9pt; color: #2C7946;">For Bhoomi Techzone Private Limited</div>
+          <img src="${signBase64}" class="sig-img" alt="HR Signature" style="height: 38px;" />
+          <div style="font-weight: bold; font-size: 9pt;">Name: Nipur Vishnoi</div>
+          <div style="font-size: 8.5pt; color: #333;">Designation: Sr. HR Admin</div>
         </div>
         <div class="sig-col" style="display: flex; flex-direction: column; align-items: flex-end;">
-          <div style="width: 235px;">
-            <div style="font-weight: bold; font-size: 9.5pt; margin-bottom: 25px; text-align: left;">Candidate Acceptance Signature</div>
-            <div style="font-size: 9pt; text-align: left; margin-bottom: 8px;">
-              <span style="display: inline-block; width: 72px;">Signature:</span><span>_______________________</span>
+          <div style="width: 220px;">
+            <div style="font-weight: bold; font-size: 9pt; margin-bottom: 20px; text-align: left;">Candidate Acceptance</div>
+            <div style="font-size: 8.5pt; text-align: left; margin-bottom: 6px;">
+              <span>Signature: ___________________</span>
             </div>
-            <div style="font-size: 9pt; text-align: left;">
-              <span style="display: inline-block; width: 72px;">Date:</span><span>_______________________</span>
+            <div style="font-size: 8.5pt; text-align: left;">
+              <span>Date: _________________________</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="acceptance-card">
-        <div class="acceptance-title">EMPLOYEE ACCEPTANCE</div>
-        <p style="font-size: 8.8pt; line-height: 1.45; text-align: justify; margin-bottom: 10px;">
-          I, <strong>${name || '___________________________'}</strong>, confirm that I have read, understood, and accepted the terms and conditions contained in this offer letter, including the confidentiality, NDA, intellectual-property, and Company policy requirements.
+      <div class="acceptance-card" style="padding: 6px 10px; margin-top: 4px;">
+        <div class="acceptance-title" style="font-size: 9pt; margin-bottom: 2px;">EMPLOYEE ACCEPTANCE</div>
+        <p style="font-size: 8pt; line-height: 1.35; text-align: justify; margin-bottom: 6px;">
+          I, <strong>${name || '___________________________'}</strong>, confirm that I have read, understood, and accepted the terms and conditions contained in this offer letter, including confidentiality, NDA, intellectual-property, and Company policy requirements.
         </p>
-        <div style="display: flex; justify-content: space-between; font-size: 9pt; font-weight: bold; margin-top: 8px;">
-          <div>Employee Name: <span style="font-weight: normal;">${name || '___________________'}</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 8.5pt; font-weight: bold;">
+          <div>Name: <span style="font-weight: normal;">${name || '___________________'}</span></div>
           <div>Signature: <span style="font-weight: normal;">___________________</span></div>
           <div>Date: <span style="font-weight: normal;">___________________</span></div>
         </div>
       </div>
     </div>
+    ${footerHtml}
   </div>
 
 </body>
