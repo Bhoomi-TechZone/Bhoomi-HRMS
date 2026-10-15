@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import AssetAcknowledgmentForm from './AssetAcknowledgmentForm';
-import NEHA_MAM_SIGNATURE from '../constants_nehaSign';
 import { Printer, Download, Eye, FileText } from 'lucide-react';
 
 const ASSET_TYPES = ['Laptop', 'Desktop', 'Mobile', 'Tablet', 'SIM', 'Monitor', 'Keyboard', 'Mouse', 'Laptop charger', 'Other'];
@@ -257,6 +256,7 @@ function Assets() {
   // Document Acknowledgment Form Modal (Official / PDF)
   const [showDocModal, setShowDocModal] = useState(false);
   const [docModalAsset, setDocModalAsset] = useState(null);
+  const [loadingDocModal, setLoadingDocModal] = useState(false);
   const [downloadingDoc, setDownloadingDoc] = useState(false);
 
   // Accept & Sign modal (Receiver)
@@ -304,7 +304,6 @@ function Assets() {
   const [newTypeNameEdit, setNewTypeNameEdit] = useState('');
 
   // Filters
-  const [roles, setRoles] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [filterType, setFilterType] = useState("");
   const [filterEmployee, setFilterEmployee] = useState("");
@@ -323,14 +322,36 @@ function Assets() {
   const canCreate = hasPermission('assets', 'create');
   const canUpdate = hasPermission('assets', 'update');
   const canDelete = hasPermission('assets', 'delete');
-  const userRoleName = (user?.role?.name || user?.role || '').toString().trim().toLowerCase();
-  const isPrivilegedUser = ['admin', 'hr', 'hr manager', 'manager', 'director', 'super admin'].includes(userRoleName) || canCreate || canUpdate;
+  const userRoleName = (user?.role?.name || (typeof user?.role === 'string' ? user.role : '') || '').toString().trim().toLowerCase();
+  const isAdminOrHR = ['admin', 'director', 'hr', 'hr manager', 'super admin'].some(r => userRoleName === r || userRoleName.includes(r));
+  const isPrivilegedUser = isAdminOrHR || canCreate || canUpdate || canDelete;
+
+  // Regular users see only assets assigned to them; Admin & HR see all assets
+  const displayAssets = useMemo(() => {
+    if (isPrivilegedUser) return assets;
+    const currentUserId = (user?._id || user?.id || '').toString();
+    const currentUserEmpId = (user?.employeeId || '').toString().trim().toLowerCase();
+    const currentUsername = (user?.username || '').toString().trim().toLowerCase();
+
+    return assets.filter(asset => {
+      if (!asset) return false;
+      const assignedObj = typeof asset.assignedTo === 'object' ? asset.assignedTo : null;
+      const assignedId = (assignedObj?._id || asset.assignedTo || '').toString();
+      const assignedEmpId = (assignedObj?.employeeId || '').toString().trim().toLowerCase();
+      const assignedUsername = (assignedObj?.username || '').toString().trim().toLowerCase();
+
+      return (
+        (assignedId && currentUserId && assignedId === currentUserId) ||
+        (assignedEmpId && currentUserEmpId && assignedEmpId === currentUserEmpId) ||
+        (assignedUsername && currentUsername && assignedUsername === currentUsername)
+      );
+    });
+  }, [assets, isPrivilegedUser, user]);
 
   useEffect(() => {
     fetchAssets();
     if (canUpdate || canCreate) {
       fetchEmployees();
-      fetchRoles();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -364,7 +385,7 @@ function Assets() {
   const refetchAssets = async () => {
     setRefetching(true);
     try {
-      const res = await api.get('assets');
+      const res = await api.get('/assets');
       setAssets(res.data);
     } catch (err) {
       console.error('Error fetching assets:', err);
@@ -375,7 +396,8 @@ function Assets() {
 
   const fetchEmployees = async () => {
     try {
-      const res = await api.get('employees');
+      // Use lightweight list endpoint to avoid downloading megabytes of user data
+      const res = await api.get('employees/list').catch(() => api.get('employees'));
       setEmployees(res.data);
 
       // Extract unique departments from employees
@@ -388,68 +410,64 @@ function Assets() {
     }
   };
 
-  const fetchRoles = async () => {
-    try {
-      const res = await api.get('roles/list');
-      setRoles(res.data);
-    } catch (err) {
-      console.error('Error fetching roles:', err);
-    }
-  };
+  // ---------- Search & Pagination (Memoized for high performance) ----------
+  const filteredAssets = useMemo(() => {
+    const sTerm = searchTerm.toLowerCase();
+    return displayAssets.filter((asset) => {
+      const searchMatch = !sTerm || (
+        (asset.brandName && asset.brandName.toLowerCase().includes(sTerm)) ||
+        (asset.assetName && asset.assetName.toLowerCase().includes(sTerm)) ||
+        (asset.assetId && asset.assetId.toLowerCase().includes(sTerm)) ||
+        (asset.assetType && asset.assetType.toLowerCase().includes(sTerm)) ||
+        (asset.deviceId && asset.deviceId.toLowerCase().includes(sTerm)) ||
+        (asset.productId && asset.productId.toLowerCase().includes(sTerm)) ||
+        (asset.serialNumber && asset.serialNumber.toLowerCase().includes(sTerm)) ||
+        (asset.model && asset.model.toLowerCase().includes(sTerm)) ||
+        (asset.assignedTo && (
+          ((asset.assignedTo.firstName || '') + ' ' + (asset.assignedTo.lastName || '')).toLowerCase().includes(sTerm) ||
+          (asset.assignedTo.employeeId && asset.assignedTo.employeeId.toLowerCase().includes(sTerm)) ||
+          (asset.assignedTo.username && asset.assignedTo.username.toLowerCase().includes(sTerm))
+        )) ||
+        (asset.assignedBy && (
+          ((asset.assignedBy.firstName || '') + ' ' + (asset.assignedBy.lastName || '')).toLowerCase().includes(sTerm) ||
+          (asset.assignedBy.employeeId && asset.assignedBy.employeeId.toLowerCase().includes(sTerm)) ||
+          (asset.assignedBy.username && asset.assignedBy.username.toLowerCase().includes(sTerm))
+        ))
+      );
 
-  // ---------- Search & Pagination ----------
-  const filteredAssets = assets.filter((asset) => {
-    const searchMatch = (
-      (asset.brandName && asset.brandName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.assetName && asset.assetName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.assetId && asset.assetId.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.assetType && asset.assetType.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.deviceId && asset.deviceId.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.productId && asset.productId.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.serialNumber && asset.serialNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.model && asset.model.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (asset.assignedTo && (
-        (asset.assignedTo.firstName + ' ' + asset.assignedTo.lastName).toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (asset.assignedTo.employeeId && asset.assignedTo.employeeId.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (asset.assignedTo.username && asset.assignedTo.username.toLowerCase().includes(searchTerm.toLowerCase()))
-      )) ||
-      (asset.assignedBy && (
-        (asset.assignedBy.firstName + ' ' + asset.assignedBy.lastName).toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (asset.assignedBy.employeeId && asset.assignedBy.employeeId.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (asset.assignedBy.username && asset.assignedBy.username.toLowerCase().includes(searchTerm.toLowerCase()))
-      ))
-    );
+      const typeMatch = filterType === "" || asset.assetType === filterType;
+      const empMatch = filterEmployee === "" || (asset.assignedTo && (asset.assignedTo._id || asset.assignedTo) === filterEmployee);
+      const statusMatch = filterStatus === "" || asset.status === filterStatus;
 
-    const typeMatch = filterType === "" || asset.assetType === filterType;
-    const empMatch = filterEmployee === "" || (asset.assignedTo && asset.assignedTo._id === filterEmployee);
-    const statusMatch = filterStatus === "" || asset.status === filterStatus;
-
-    let dateMatch = true;
-    if (filterDate) {
-      if (!asset.assignedDate) {
-        dateMatch = false;
-      } else {
-        const assigned = new Date(asset.assignedDate).setHours(0, 0, 0, 0);
-        const filter = new Date(filterDate).setHours(0, 0, 0, 0);
-        if (assigned !== filter) dateMatch = false;
+      let dateMatch = true;
+      if (filterDate) {
+        if (!asset.assignedDate) {
+          dateMatch = false;
+        } else {
+          const assigned = new Date(asset.assignedDate).setHours(0, 0, 0, 0);
+          const filter = new Date(filterDate).setHours(0, 0, 0, 0);
+          if (assigned !== filter) dateMatch = false;
+        }
       }
-    }
 
-    return searchMatch && typeMatch && empMatch && statusMatch && dateMatch;
-  });
+      return searchMatch && typeMatch && empMatch && statusMatch && dateMatch;
+    });
+  }, [displayAssets, searchTerm, filterType, filterEmployee, filterStatus, filterDate]);
 
   const totalPages = Math.max(1, Math.ceil(filteredAssets.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const pageStart = (safePage - 1) * PAGE_SIZE;
-  const paginated = filteredAssets.slice(pageStart, pageStart + PAGE_SIZE);
+  const paginated = useMemo(() => {
+    return filteredAssets.slice(pageStart, pageStart + PAGE_SIZE);
+  }, [filteredAssets, pageStart]);
 
-  // ---------- Stats ----------
-  const stats = {
-    total: assets.length,
-    available: assets.filter((a) => a.status === 'available').length,
-    assigned: assets.filter((a) => a.status === 'assigned').length,
-    maintenance: assets.filter((a) => a.status === 'maintenance').length,
-  };
+  // ---------- Stats (Memoized) ----------
+  const stats = useMemo(() => ({
+    total: displayAssets.length,
+    available: displayAssets.filter((a) => a.status === 'available').length,
+    assigned: displayAssets.filter((a) => a.status === 'assigned').length,
+    maintenance: displayAssets.filter((a) => a.status === 'maintenance').length,
+  }), [displayAssets]);
 
   // ---------- Action menu ----------
   const toggleMenu = (e, id) => {
@@ -633,12 +651,15 @@ function Assets() {
   const openDocModal = async (asset) => {
     setActionMenu(null);
     setShowDocModal(true);
+    setLoadingDocModal(true);
     setDocModalAsset(asset);
     try {
       const res = await api.get(`assets/${asset._id}`);
       setDocModalAsset(res.data);
     } catch (err) {
       console.error('Error fetching asset details for form preview:', err);
+    } finally {
+      setLoadingDocModal(false);
     }
   };
 
@@ -849,8 +870,8 @@ function Assets() {
   // ---------- Accept & Sign (Receiver) ----------
   const openAccept = (asset) => {
     setAcceptTarget(asset);
-    setAcceptSignature(asset.signature || '');
-    setAcceptSignatureFileName(asset.signature ? 'Existing Signature' : '');
+    setAcceptSignature((asset.signature && typeof asset.signature === 'string' && asset.signature.startsWith('data:')) ? asset.signature : '');
+    setAcceptSignatureFileName(asset.hasSignature || asset.signature ? 'Existing Signature' : '');
     setShowAcceptModal(true);
     setActionMenu(null);
   };
@@ -1167,13 +1188,13 @@ function Assets() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', gap: 12, flexWrap: 'wrap', flexShrink: 0 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 600, color: '#0f172a', margin: 0, letterSpacing: '-0.025em' }}>
-            Asset Management
+            {isPrivilegedUser ? 'Asset Management' : 'My Assigned Assets'}
           </h1>
           <p style={{ fontSize: 13, color: '#94a3b8', margin: '4px 0 0', fontWeight: 500 }}>
-            {canUpdate || canCreate ? 'Manage and assign company assets to employees.' : 'Assets assigned to you are listed here.'}
+            {isPrivilegedUser ? 'Manage and assign company assets to employees.' : 'Assets assigned to you are listed here.'}
           </p>
         </div>
-        {(canCreate || canUpdate) && (
+        {isPrivilegedUser && (
           <button
             onClick={() => setShowModal(true)}
             style={{
@@ -1193,7 +1214,7 @@ function Assets() {
       </div>
 
       {/* ── Stats ── */}
-      {(canUpdate || canCreate) && (
+      {isPrivilegedUser && (
         <div
           className="assets-metrics-grid"
           style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 18, flexShrink: 0 }}
@@ -1242,7 +1263,7 @@ function Assets() {
             />
           </div>
 
-          {(canUpdate || canCreate) && (
+          {isPrivilegedUser && (
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               {/* Type Filter */}
               <div style={{ position: 'relative' }} data-type-filter>
@@ -1503,7 +1524,7 @@ function Assets() {
               </div>
               <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>No assets found</div>
               <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                {canCreate || canUpdate ? 'Add your first asset using the button above.' : 'No assets have been assigned to you yet.'}
+                {isPrivilegedUser ? 'Add your first asset using the button above.' : 'No assets have been assigned to you yet.'}
               </div>
             </div>
           ) : (
@@ -1525,7 +1546,7 @@ function Assets() {
               <tbody>
                 {paginated.map((asset, idx) => {
                   const sc = STATUS_CONFIG[asset.status] || STATUS_CONFIG.available;
-                  const needsAcceptance = asset.status === 'assigned' && !asset.signature;
+                  const needsAcceptance = asset.status === 'assigned' && !asset.hasSignature && !asset.signature && !asset.acknowledgement;
                   const canAccept = needsAcceptance && isReceiver(asset);
 
                   return (
@@ -1648,7 +1669,7 @@ function Assets() {
                       {/* ACKNOWLEDGEMENT */}
                       <td style={{ padding: '9px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                         {asset.status === 'assigned' ? (
-                          asset.signature || asset.acknowledgement ? (
+                          asset.hasSignature || asset.signature || asset.acknowledgement ? (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2.5px 8px', borderRadius: 999, fontSize: '10.5px', fontWeight: 600, color: '#15803d', background: '#dcfce7', border: '1px solid #bbf7d0' }}>
                               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                                 <polyline points="20 6 9 17 4 12" />
@@ -1969,7 +1990,7 @@ function Assets() {
             data-asset-menu
             style={{ position: 'fixed', top: actionMenu.top, left: actionMenu.left, width: 165, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, boxShadow: '0 18px 40px rgba(15,23,42,0.14)', padding: 6, zIndex: 1200, fontFamily: "'Inter', 'Poppins', 'Segoe UI', sans-serif", fontWeight: 400 }}
           >
-            {activeAsset.status === 'assigned' && !activeAsset.signature && isReceiver(activeAsset) && (
+            {activeAsset.status === 'assigned' && !activeAsset.hasSignature && !activeAsset.signature && !activeAsset.acknowledgement && isReceiver(activeAsset) && (
               <button
                 onClick={() => openAccept(activeAsset)}
                 style={{ width: '100%', border: 'none', background: 'transparent', borderRadius: 8, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 700, color: '#16a34a', cursor: 'pointer', textAlign: 'left', transition: 'background 0.15s' }}
@@ -3902,11 +3923,11 @@ function Assets() {
                       borderRadius: 999,
                       fontSize: 11,
                       fontWeight: 700,
-                      background: (detailsAsset.signature || detailsAsset.acknowledgement) ? '#dcfce7' : '#fef3c7',
-                      color: (detailsAsset.signature || detailsAsset.acknowledgement) ? '#15803d' : '#b45309',
-                      border: `1px solid ${(detailsAsset.signature || detailsAsset.acknowledgement) ? '#bbf7d0' : '#fde68a'}`
+                      background: (detailsAsset.hasSignature || detailsAsset.signature || detailsAsset.acknowledgement) ? '#dcfce7' : '#fef3c7',
+                      color: (detailsAsset.hasSignature || detailsAsset.signature || detailsAsset.acknowledgement) ? '#15803d' : '#b45309',
+                      border: `1px solid ${(detailsAsset.hasSignature || detailsAsset.signature || detailsAsset.acknowledgement) ? '#bbf7d0' : '#fde68a'}`
                     }}>
-                      {(detailsAsset.signature || detailsAsset.acknowledgement) ? '✓ Signed' : '• Pending'}
+                      {(detailsAsset.hasSignature || detailsAsset.signature || detailsAsset.acknowledgement) ? '✓ Signed' : '• Pending'}
                     </span>
                   )}
                 </div>
@@ -4124,7 +4145,7 @@ function Assets() {
                           <div>
                             <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Acknowledgement Status</div>
                             <div style={{ marginTop: 3 }}>
-                              {(detailsAsset.signature || detailsAsset.acknowledgement) ? (
+                              {(detailsAsset.hasSignature || detailsAsset.signature || detailsAsset.acknowledgement) ? (
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2.5px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, color: '#15803d', background: '#dcfce7', border: '1px solid #bbf7d0' }}>
                                   ✓ Signed & Verified {detailsAsset.signedAt ? `(${new Date(detailsAsset.signedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })})` : ''}
                                 </span>
@@ -4138,9 +4159,9 @@ function Assets() {
                         </div>
 
                         {/* Signature Previews */}
-                        {(detailsAsset.signature || detailsAsset.issuerSignature) && (
+                        {((detailsAsset.signature && typeof detailsAsset.signature === 'string' && (detailsAsset.signature.startsWith('data:') || detailsAsset.signature.startsWith('http') || detailsAsset.signature.startsWith('/'))) || detailsAsset.issuerSignature) && (
                           <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px solid #f1f5f9', display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-                            {detailsAsset.signature && (
+                            {detailsAsset.signature && typeof detailsAsset.signature === 'string' && (detailsAsset.signature.startsWith('data:') || detailsAsset.signature.startsWith('http') || detailsAsset.signature.startsWith('/')) && (
                               <div style={{ flex: '1 1 240px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                                   <span style={{ fontSize: 11, fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>Receiver Signature</span>
@@ -4385,12 +4406,19 @@ function Assets() {
               <button onClick={() => setShowDocModal(false)} style={{ background: '#f1f5f9', border: 'none', width: 32, height: 32, borderRadius: 10, fontSize: 20, color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>×</button>
             </div>
             <div style={{ padding: '24px', overflowY: 'auto', flex: 1, background: '#f1f5f9', display: 'flex', justifyContent: 'center' }}>
-              {(() => {
+              {loadingDocModal ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 380, padding: 40 }}>
+                  <div style={{ width: 36, height: 36, border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'assets-spin 0.8s linear infinite' }} />
+                  <div style={{ marginTop: 14, fontSize: 13, fontWeight: 600, color: '#64748b' }}>
+                    Loading Asset Handover Form & Signatures...
+                  </div>
+                </div>
+              ) : (() => {
                 const targetEmpId = docModalAsset.assignedTo
                   ? (docModalAsset.assignedTo._id || docModalAsset.assignedTo)
                   : null;
                 const employeeAssignedAssets = targetEmpId
-                  ? assets.filter(a => a.assignedTo && (a.assignedTo._id || a.assignedTo) === targetEmpId)
+                  ? displayAssets.filter(a => a.assignedTo && (a.assignedTo._id || a.assignedTo) === targetEmpId)
                   : [docModalAsset];
 
                 // Ensure docModalAsset itself is in the list
@@ -4398,23 +4426,25 @@ function Assets() {
                   ? employeeAssignedAssets
                   : [docModalAsset, ...employeeAssignedAssets];
 
+                const isRealSig = (sig) => sig && typeof sig === 'string' && (sig.startsWith('data:') || sig.startsWith('http') || sig.startsWith('/'));
+
                 return (
                   <AssetAcknowledgmentForm
                     asset={docModalAsset}
                     assignedAssets={allAssignedList}
-                    allAssets={assets}
+                    allAssets={displayAssets}
                     employee={docModalAsset.assignedTo}
                     issuer={
                       docModalAsset.assignedBy
                         ? (employees.find(e => e._id === (docModalAsset.assignedBy?._id || docModalAsset.assignedBy)) || docModalAsset.assignedBy)
                         : (employees.find(e => e._id === (user?._id || user?.id)) || user)
                     }
-                    issuerSignature={docModalAsset.issuerSignature || '/nehamam_sign.png'}
-                    receiverSignature={docModalAsset.signature}
+                    issuerSignature={isRealSig(docModalAsset.issuerSignature) ? docModalAsset.issuerSignature : '/nehamam_sign.png'}
+                    receiverSignature={isRealSig(docModalAsset.signature) ? docModalAsset.signature : ''}
                     signedAt={docModalAsset.signedAt}
                     assignedDate={docModalAsset.assignedDate}
                     isDraft={!docModalAsset.assignedTo}
-                    showActions={isPrivilegedUser}
+                    showActions={true}
                     currentUser={user}
                   />
                 );

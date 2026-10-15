@@ -103,6 +103,15 @@ const metaLeadSchema = new mongoose.Schema({
     type: Date,
     description: 'When the follow-up was completed'
   },
+  movedToPipeline: {
+    type: Boolean,
+    default: false
+  },
+  pipelineContactId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PipelineContact',
+    default: null
+  },
   history: [{
     action: { type: String },
     details: { type: String },

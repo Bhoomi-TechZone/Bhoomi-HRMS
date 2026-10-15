@@ -605,32 +605,34 @@ function ClientPayments() {
     const now = new Date();
     const fy = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
     const fyStr = `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
-    const prefix = category === 'proforma' ? 'PI' : 'INV';
+    const prefix = category === 'proforma' ? 'PI' : 'BT';
 
-    // If user entered only digits e.g. "14", "014"
+    // If user entered only digits e.g. "26", "026"
     if (/^\d+$/.test(raw)) {
       return `${prefix}/${fyStr}/${String(parseInt(raw, 10)).padStart(3, '0')}`;
     }
-    // If user entered "PI/14" or "INV/14"
-    if (/^(PI|INV)\/(\d+)$/i.test(raw)) {
-      const match = raw.match(/^(PI|INV)\/(\d+)$/i);
-      return `${match[1].toUpperCase()}/${fyStr}/${String(parseInt(match[2], 10)).padStart(3, '0')}`;
+    // If user entered "PI/14", "BT/26", "INV/26"
+    if (/^(PI|BT|INV)\/(\d+)$/i.test(raw)) {
+      const match = raw.match(/^(PI|BT|INV)\/(\d+)$/i);
+      const chosenPrefix = category === 'proforma' ? 'PI' : (match[1].toUpperCase() === 'PI' ? 'PI' : 'BT');
+      return `${chosenPrefix}/${fyStr}/${String(parseInt(match[2], 10)).padStart(3, '0')}`;
     }
     return raw;
   };
 
   const getNextInvoiceNum = (category = 'tax') => {
     const now = new Date();
-    // Indian Financial Year: April (month index 3) of current year to March of next year
+    // Indian Financial Year: April 1 (month index 3) of current year to March 31 of next year
     const fy = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
     const fyStr = `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
-    const prefix = category === 'proforma' ? 'PI' : 'INV';
+    const prefix = category === 'proforma' ? 'PI' : 'BT';
 
     // Scan existing invoices in state and localStorage to find the highest sequence number for this prefix & FY
     let maxSeq = 0;
     const checkItem = (item) => {
       const inv = String(item?.invoiceNo || item?.id || '').trim();
-      const match = inv.match(new RegExp(`^${prefix}/${fyStr}/(\\d+)`, 'i'));
+      const match = inv.match(new RegExp(`^${prefix}/${fyStr}/(\\d+)`, 'i')) ||
+                    (category === 'tax' ? inv.match(new RegExp(`^INV/${fyStr}/(\\d+)`, 'i')) : null);
       if (match) {
         const num = parseInt(match[1], 10);
         if (!isNaN(num) && num > maxSeq) maxSeq = num;
@@ -648,7 +650,20 @@ function ClientPayments() {
       console.warn('Error reading stored invoices for sequence:', e);
     }
 
-    const nextNum = maxSeq + 1;
+    let nextNum;
+    if (category === 'tax') {
+      // For FY 26-27: sequence starts from 026. If maxSeq is below 25, next is 26 (i.e. BT/26-27/026).
+      // For future FYs (e.g. 27-28 on 1 April onwards): sequence starts from 001.
+      if (fyStr === '26-27') {
+        nextNum = maxSeq < 25 ? 26 : maxSeq + 1;
+      } else {
+        nextNum = maxSeq + 1;
+      }
+    } else {
+      // Proforma invoice (PI) starts from 001 every financial year
+      nextNum = maxSeq + 1;
+    }
+
     const seq = String(nextNum).padStart(3, '0');
     return `${prefix}/${fyStr}/${seq}`;
   };
@@ -700,10 +715,14 @@ function ClientPayments() {
   const handleSwitchInvoiceCategory = (category) => {
     const currentNum = genInvoiceForm.invoiceNo;
     let newNum = currentNum;
-    if (category === 'proforma' && (currentNum.startsWith('INV/') || currentNum.startsWith('BC/'))) {
-      newNum = currentNum.replace(/^(INV|BC)\//i, 'PI/');
+    if (category === 'proforma' && (currentNum.startsWith('INV/') || currentNum.startsWith('BT/') || currentNum.startsWith('BC/'))) {
+      newNum = currentNum.replace(/^(INV|BT|BC)\//i, 'PI/');
     } else if (category === 'tax' && currentNum.startsWith('PI/')) {
-      newNum = currentNum.replace(/^PI\//i, 'INV/');
+      newNum = currentNum.replace(/^PI\//i, 'BT/');
+      const match = newNum.match(/^BT\/26-27\/(\d+)/i);
+      if (match && parseInt(match[1], 10) < 26) {
+        newNum = getNextInvoiceNum('tax');
+      }
     } else if (!newNum) {
       newNum = getNextInvoiceNum(category);
     }
@@ -3932,7 +3951,7 @@ ${isDownload ? '' : `
                           value={genInvoiceForm.invoiceNo}
                           onChange={e => setGenInvoiceForm(f => ({ ...f, invoiceNo: e.target.value }))}
                           onBlur={e => setGenInvoiceForm(f => ({ ...f, invoiceNo: formatInvoiceNumberInput(e.target.value, f.invoiceCategory) }))}
-                          placeholder={genInvoiceForm.invoiceCategory === 'proforma' ? 'e.g. PI/26-27/010' : 'e.g. INV/26-27/010'}
+                          placeholder={genInvoiceForm.invoiceCategory === 'proforma' ? 'e.g. PI/26-27/001' : 'e.g. BT/26-27/026'}
                           style={{
                             background: '#ffffff',
                             fontWeight: 600,

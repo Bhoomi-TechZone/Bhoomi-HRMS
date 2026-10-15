@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const PipelineContact = require('../models/PipelineContact');
+const Lead = require('../models/Lead');
+const MetaLead = require('../models/MetaLead');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
@@ -14,10 +16,10 @@ function checkAccess(user) {
   const hasFullAccess = isAdmin || isSalesHead;
 
   const permissions = Array.isArray(user?.role?.permissions) ? user.role.permissions : [];
-  const hasRead = hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals') && p.actions.includes('read'));
-  const hasCreate = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals') && p.actions.includes('create'));
-  const hasUpdate = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals') && p.actions.includes('update'));
-  const hasDelete = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals') && p.actions.includes('delete'));
+  const hasRead = hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals' || p.module === 'leads') && p.actions.includes('read'));
+  const hasCreate = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals' || p.module === 'leads') && p.actions.includes('create'));
+  const hasUpdate = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals' || p.module === 'leads') && p.actions.includes('update'));
+  const hasDelete = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals' || p.module === 'leads') && p.actions.includes('delete'));
 
   return { roleName, isSalesHead, isAdmin, hasFullAccess, hasRead, hasCreate, hasUpdate, hasDelete };
 }
@@ -60,6 +62,9 @@ router.get('/', auth, async (req, res) => {
     }
 
     let query = {};
+    if (req.query.includeUnmoved !== 'true') {
+      query.isUnmoved = { $ne: true };
+    }
 
     // Data isolation: Sales Head and Admin see all contacts; other roles only see their data
     if (!hasFullAccess) {
@@ -133,6 +138,295 @@ router.get('/:id', auth, async (req, res) => {
   } catch (error) {
     console.error('Get contact error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Move a lead (regular or meta) into pipeline contacts under "Meta Lead" stage
+router.post('/move-lead', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const { hasRead, hasFullAccess } = checkAccess(user);
+    if (!hasRead && !hasFullAccess) {
+      return res.status(403).json({ message: 'Access denied. You do not have permission to move leads.' });
+    }
+
+    const {
+      leadId,
+      leadType = 'regular',
+      firstName,
+      lastName,
+      email,
+      countryCode,
+      phone,
+      origin,
+      contactSource,
+      leadStage = 'Meta Lead',
+      leadStatus = 'New',
+      company,
+      address,
+      notes,
+      owner,
+      addedBy,
+      assignedTo
+    } = req.body;
+
+    const trimmedFirstName = (firstName || '').trim();
+    if (!trimmedFirstName) {
+      return res.status(400).json({ message: 'Contact name is required' });
+    }
+
+    const cleanEmail = (email || '').toLowerCase().trim();
+    const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Artiflow';
+
+    let contact = null;
+
+    // Check if a contact already exists with this email or relatedLead
+    if (cleanEmail) {
+      contact = await PipelineContact.findOne({ email: cleanEmail });
+    }
+    if (!contact && leadId && mongoose.Types.ObjectId.isValid(leadId)) {
+      contact = await PipelineContact.findOne({ relatedLead: leadId });
+    }
+
+    const targetStage = (leadStage || 'Meta Lead').trim();
+    const validAssignedTo = (assignedTo && mongoose.Types.ObjectId.isValid(assignedTo))
+      ? assignedTo
+      : null;
+
+    if (contact) {
+      // Update existing contact and ensure stage is targetStage
+      contact.leadStage = targetStage;
+      contact.firstName = trimmedFirstName;
+      if (lastName !== undefined) contact.lastName = (lastName || '').trim();
+      if (phone !== undefined) contact.phone = (phone || '').trim();
+      if (countryCode !== undefined) contact.countryCode = countryCode || '+1';
+      if (origin !== undefined) contact.origin = origin || 'Domestic';
+      if (contactSource) contact.contactSource = contactSource;
+      if (leadStatus) contact.leadStatus = leadStatus;
+      if (company !== undefined) contact.company = company || '';
+      if (address !== undefined) contact.address = address || '';
+      if (notes) {
+        contact.notes = contact.notes ? `${contact.notes}\n${notes}` : notes;
+      }
+      if (owner) contact.owner = owner;
+      if (addedBy) contact.addedBy = addedBy;
+      if (validAssignedTo) contact.assignedTo = validAssignedTo;
+      if (leadId && mongoose.Types.ObjectId.isValid(leadId)) {
+        contact.relatedLead = leadId;
+      }
+      contact.leadRecordType = leadType;
+      contact.isUnmoved = false;
+      contact.unmovedAt = null;
+      contact.unmovedBy = null;
+
+      contact.activities.push({
+        type: 'note',
+        title: 'Lead moved to Pipeline',
+        content: `Lead updated and moved to stage "${targetStage}" by ${userFullName}.`,
+        author: userFullName,
+        time: new Date().toLocaleTimeString(),
+        date: new Date().toLocaleDateString(),
+        createdAt: new Date()
+      });
+
+      await contact.save();
+    } else {
+      contact = new PipelineContact({
+        firstName: trimmedFirstName,
+        lastName: (lastName || '').trim(),
+        email: cleanEmail || undefined,
+        countryCode: countryCode || '+1',
+        phone: (phone || '').trim(),
+        origin: origin || 'Domestic',
+        contactSource: contactSource || (leadType === 'meta' ? 'Meta' : 'Manual'),
+        leadStage: targetStage,
+        leadStatus: leadStatus || 'New',
+        owner: owner || userFullName,
+        addedBy: addedBy || userFullName,
+        assignedTo: validAssignedTo,
+        company: company || '',
+        address: address || '',
+        notes: notes || '',
+        createdBy: user._id,
+        relatedLead: (leadId && mongoose.Types.ObjectId.isValid(leadId)) ? leadId : null,
+        leadRecordType: leadType,
+        isUnmoved: false,
+        activities: [{
+          type: 'note',
+          title: 'Lead moved to Pipeline',
+          content: `Moved from ${leadType === 'meta' ? 'Meta Leads' : 'Leads'} into "${targetStage}" stage by ${userFullName}.`,
+          author: userFullName,
+          time: new Date().toLocaleTimeString(),
+          date: new Date().toLocaleDateString(),
+          createdAt: new Date()
+        }]
+      });
+
+      await contact.save();
+    }
+
+    // Mark lead record as movedToPipeline and push to history
+    const historyEntry = {
+      action: 'Moved to Pipeline',
+      details: `Lead moved to Pipeline Contacts under "${targetStage}" stage by ${userFullName}`,
+      by: user._id,
+      date: new Date()
+    };
+
+    if (leadId && mongoose.Types.ObjectId.isValid(leadId)) {
+      if (leadType === 'meta') {
+        await MetaLead.findByIdAndUpdate(leadId, {
+          movedToPipeline: true,
+          pipelineContactId: contact._id,
+          $push: { history: historyEntry }
+        });
+      } else {
+        await Lead.findByIdAndUpdate(leadId, {
+          movedToPipeline: true,
+          pipelineContactId: contact._id,
+          $push: { history: historyEntry }
+        });
+      }
+    }
+
+    // Trigger CRM socket notification
+    try {
+      const io = req.app.get('socketio');
+      const contactDisplayName = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email || 'Lead Contact';
+      sendCrmNotification(io, {
+        actorUser: user,
+        entityType: 'Contact',
+        action: 'create',
+        entityName: contactDisplayName,
+        link: '/pipeline?tab=contacts'
+      });
+    } catch (notifErr) {
+      console.error('Contact notification error:', notifErr);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Lead successfully moved to Pipeline under "${targetStage}" stage.`,
+      contact,
+      leadId,
+      leadType
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'A contact with this email already exists in pipeline.' });
+    }
+    console.error('Move lead to pipeline error:', error);
+    res.status(500).json({ message: 'Server error while moving lead to pipeline', error: error.message });
+  }
+});
+
+// Unmove a lead from pipeline contacts
+router.post('/unmove-lead', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const { hasRead, hasFullAccess } = checkAccess(user);
+    if (!hasRead && !hasFullAccess) {
+      return res.status(403).json({ message: 'Access denied. You do not have permission to unmove leads.' });
+    }
+
+    const { leadId, leadType = 'regular', contactId } = req.body;
+    if (!leadId) {
+      return res.status(400).json({ message: 'Lead ID is required' });
+    }
+
+    const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Artiflow';
+
+    // 1. Find the contact in PipelineContact
+    let contact = null;
+    if (contactId && mongoose.Types.ObjectId.isValid(contactId)) {
+      contact = await PipelineContact.findById(contactId);
+    }
+    if (!contact && leadId && mongoose.Types.ObjectId.isValid(leadId)) {
+      contact = await PipelineContact.findOne({ relatedLead: leadId });
+    }
+    if (!contact) {
+      const targetLead = leadType === 'meta' ? await MetaLead.findById(leadId) : await Lead.findById(leadId);
+      if (targetLead && targetLead.email) {
+        contact = await PipelineContact.findOne({ email: targetLead.email.toLowerCase().trim() });
+      }
+    }
+
+    let contactDisplayName = 'Pipeline Contact';
+
+    // 2. If contact found, mark as unmoved and track activity
+    if (contact) {
+      contactDisplayName = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.email || 'Pipeline Contact';
+      contact.isUnmoved = true;
+      contact.unmovedAt = new Date();
+      contact.unmovedBy = user._id;
+
+      contact.activities.push({
+        type: 'note',
+        title: 'Lead Unmoved from Pipeline',
+        content: `Lead was unmoved from Pipeline Contacts back to Leads by ${userFullName}.`,
+        author: userFullName,
+        time: new Date().toLocaleTimeString(),
+        date: new Date().toLocaleDateString(),
+        createdAt: new Date()
+      });
+
+      await contact.save();
+    }
+
+    // 3. Update the lead record in Lead or MetaLead and add history tracking
+    const historyEntry = {
+      action: 'Unmoved from Pipeline',
+      details: `Lead was unmoved from Pipeline Contacts (Meta Lead stage) by ${userFullName}`,
+      by: user._id,
+      date: new Date()
+    };
+
+    if (leadType === 'meta') {
+      await MetaLead.findByIdAndUpdate(leadId, {
+        movedToPipeline: false,
+        pipelineContactId: null,
+        $push: { history: historyEntry }
+      });
+    } else {
+      await Lead.findByIdAndUpdate(leadId, {
+        movedToPipeline: false,
+        pipelineContactId: null,
+        $push: { history: historyEntry }
+      });
+    }
+
+    // 4. Trigger CRM socket notification so pipeline board removes the contact in real-time
+    try {
+      const io = req.app.get('socketio');
+      sendCrmNotification(io, {
+        actorUser: user,
+        entityType: 'Contact',
+        action: 'delete',
+        entityName: contactDisplayName,
+        link: '/pipeline?tab=contacts'
+      });
+    } catch (notifErr) {
+      console.error('Contact notification error:', notifErr);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Lead successfully unmoved from Pipeline Contacts.',
+      leadId,
+      leadType,
+      contactId: contact ? contact._id : null
+    });
+  } catch (error) {
+    console.error('Unmove lead from pipeline error:', error);
+    res.status(500).json({ message: 'Server error while unmoving lead from pipeline', error: error.message });
   }
 });
 

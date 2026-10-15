@@ -84,6 +84,28 @@ const pipelineContactSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null
+  },
+  relatedLead: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null
+  },
+  leadRecordType: {
+    type: String,
+    default: ''
+  },
+  isUnmoved: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  unmovedAt: {
+    type: Date,
+    default: null
+  },
+  unmovedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
   }
 }, {
   timestamps: true

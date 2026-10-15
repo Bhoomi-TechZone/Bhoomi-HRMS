@@ -51,10 +51,73 @@ const signatureUpload = multer({
     }
 });
 
-// Get all proposals (requires read permission)
+// Helper to check if user has full access to ALL proposals (Admin, Sales Head, Team Leader, Manager)
+const hasFullProposalAccess = (user) => {
+    if (!user) return false;
+    const roleName = ((user.role && user.role.name) || user.roleName || (typeof user.role === 'string' ? user.role : '')).toLowerCase().trim();
+    if (!roleName) return false;
+
+    const fullAccessRoles = [
+        'admin',
+        'super admin',
+        'superadmin',
+        'director',
+        'sales head',
+        'saleshead',
+        'head of sales',
+        'team leader',
+        'teamleader',
+        'team lead',
+        'teamlead',
+        'tl',
+        'manager',
+        'project manager',
+        'sales manager',
+        'general manager',
+        'hr manager',
+        'operations manager'
+    ];
+
+    if (fullAccessRoles.includes(roleName)) return true;
+
+    // Check keyword containment
+    if (
+        roleName.includes('admin') ||
+        roleName.includes('director') ||
+        roleName.includes('sales head') ||
+        roleName.includes('saleshead') ||
+        roleName.includes('team leader') ||
+        roleName.includes('team lead') ||
+        roleName.includes('teamleader') ||
+        roleName.includes('manager')
+    ) {
+        return true;
+    }
+
+    return false;
+};
+
+// Helper to check if a specific proposal is accessible to the user
+const isProposalAccessible = (proposal, user) => {
+    if (hasFullProposalAccess(user)) return true;
+    if (!proposal || !user) return false;
+
+    const userId = (user._id || user.id || '').toString();
+    const createdBy = (proposal.createdBy?._id || proposal.createdBy || '').toString();
+
+    return Boolean(userId && createdBy && userId === createdBy);
+};
+
+// Get all proposals (filtered by ownership unless user is Admin, Sales Head, Team Leader, or Manager)
 router.get('/', auth, checkPermission('proposals', 'read'), async (req, res) => {
     try {
-        let proposals = await Proposal.find()
+        const fullAccess = hasFullProposalAccess(req.user);
+        let query = {};
+        if (!fullAccess) {
+            query.createdBy = req.user._id;
+        }
+
+        let proposals = await Proposal.find(query)
             .select('-pdfEditorState.base64Pdf')
             .populate('deal', 'dealName clientName')
             .populate('template', 'name')
@@ -85,7 +148,7 @@ router.get('/', auth, checkPermission('proposals', 'read'), async (req, res) => 
     }
 });
 
-// Get single proposal (requires read permission)
+// Get single proposal (requires read permission and ownership check)
 router.get('/:id', auth, checkPermission('proposals', 'read'), async (req, res) => {
     try {
         const proposal = await Proposal.findById(req.params.id)
@@ -95,6 +158,10 @@ router.get('/:id', auth, checkPermission('proposals', 'read'), async (req, res) 
 
         if (!proposal) {
             return res.status(404).json({ message: 'Proposal not found' });
+        }
+
+        if (!isProposalAccessible(proposal, req.user)) {
+            return res.status(403).json({ message: 'Access denied: You can only view your own proposals' });
         }
 
         res.json(proposal);
@@ -148,12 +215,24 @@ router.post('/', auth, checkPermission('proposals', 'create'), async (req, res) 
     }
 });
 
-// Update proposal (requires update permission)
+// Update proposal (requires update permission and ownership check)
 router.put('/:id', auth, checkPermission('proposals', 'update'), async (req, res) => {
     try {
+        const existing = await Proposal.findById(req.params.id);
+        if (!existing) {
+            return res.status(404).json({ message: 'Proposal not found' });
+        }
+
+        if (!isProposalAccessible(existing, req.user)) {
+            return res.status(403).json({ message: 'Access denied: You can only edit your own proposals' });
+        }
+
+        const updateData = { ...req.body };
+        delete updateData.createdBy; // Prevent transferring ownership
+
         const proposal = await Proposal.findByIdAndUpdate(
             req.params.id,
-            req.body,
+            updateData,
             { new: true }
         )
             .populate('deal', 'dealName clientName')
@@ -175,9 +254,18 @@ router.put('/:id', auth, checkPermission('proposals', 'update'), async (req, res
     }
 });
 
-// Update proposal status (requires update permission)
+// Update proposal status (requires update permission and ownership check)
 router.patch('/:id/status', auth, checkPermission('proposals', 'update'), async (req, res) => {
     try {
+        const existing = await Proposal.findById(req.params.id);
+        if (!existing) {
+            return res.status(404).json({ message: 'Proposal not found' });
+        }
+
+        if (!isProposalAccessible(existing, req.user)) {
+            return res.status(403).json({ message: 'Access denied: You can only edit your own proposals' });
+        }
+
         const { status } = req.body;
         const updateData = { status };
 
@@ -208,7 +296,7 @@ router.patch('/:id/status', auth, checkPermission('proposals', 'update'), async 
     }
 });
 
-// Generate PDF for proposal - Bhoomi Techzone Professional Template (requires read permission)
+// Generate PDF for proposal - Bhoomi Techzone Professional Template (requires read permission and ownership check)
 router.get('/:id/pdf', auth, checkPermission('proposals', 'read'), async (req, res) => {
     try {
         const proposal = await Proposal.findById(req.params.id)
@@ -217,6 +305,10 @@ router.get('/:id/pdf', auth, checkPermission('proposals', 'read'), async (req, r
 
         if (!proposal) {
             return res.status(404).json({ message: 'Proposal not found' });
+        }
+
+        if (!isProposalAccessible(proposal, req.user)) {
+            return res.status(403).json({ message: 'Access denied: You can only view your own proposals' });
         }
 
         // If high-fidelity base64 PDF is saved from the live preview, stream it directly!
@@ -846,7 +938,7 @@ router.get('/:id/pdf', auth, checkPermission('proposals', 'read'), async (req, r
     }
 });
 
-// Upload signature images for a proposal (requires update permission)
+// Upload signature images for a proposal (requires update permission and ownership check)
 router.post('/:id/signatures', auth, checkPermission('proposals', 'update'), signatureUpload.fields([
     { name: 'authorizedSignature', maxCount: 1 },
     { name: 'clientSignature', maxCount: 1 }
@@ -855,6 +947,10 @@ router.post('/:id/signatures', auth, checkPermission('proposals', 'update'), sig
         const proposal = await Proposal.findById(req.params.id);
         if (!proposal) {
             return res.status(404).json({ message: 'Proposal not found' });
+        }
+
+        if (!isProposalAccessible(proposal, req.user)) {
+            return res.status(403).json({ message: 'Access denied: You can only update your own proposals' });
         }
 
         const updateData = {};
@@ -883,12 +979,16 @@ router.post('/:id/signatures', auth, checkPermission('proposals', 'update'), sig
     }
 });
 
-// Delete proposal (requires delete permission)
+// Delete proposal (requires delete permission and ownership check)
 router.delete('/:id', auth, checkPermission('proposals', 'delete'), async (req, res) => {
     try {
         const proposal = await Proposal.findById(req.params.id);
         if (!proposal) {
             return res.status(404).json({ message: 'Proposal not found' });
+        }
+
+        if (!isProposalAccessible(proposal, req.user)) {
+            return res.status(403).json({ message: 'Access denied: You can only delete your own proposals' });
         }
 
         // Prevent deletion of accepted or rejected proposals

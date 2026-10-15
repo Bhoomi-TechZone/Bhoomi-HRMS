@@ -112,6 +112,15 @@ const leadSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  movedToPipeline: {
+    type: Boolean,
+    default: false
+  },
+  pipelineContactId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'PipelineContact',
+    default: null
+  },
   history: [{
     action: { type: String },
     details: { type: String },

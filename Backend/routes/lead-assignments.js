@@ -400,19 +400,25 @@ router.put('/:id', auth, async (req, res) => {
     const isAssigned = lead.employee && lead.employee.toString() === req.user._id.toString();
 
     if (!isAssigned) {
-      // Check for Admin role or permissions
-      const roleName = req.user.role?.name || '';
+      const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
       const permissions = req.user.role?.permissions || [];
 
-      const allowedRoles = ['admin', 'super admin', 'administrator', 'hr', 'hr manager'];
-      const isAdmin = allowedRoles.includes(roleName.toLowerCase());
+      const canManage =
+        roleNormalized.includes('admin') ||
+        roleNormalized.includes('director') ||
+        roleNormalized.includes('hr') ||
+        roleNormalized.includes('leader') ||
+        roleNormalized.includes('team lead') ||
+        roleNormalized.includes('head') ||
+        roleNormalized.includes('sales team') ||
+        roleNormalized.includes('manager');
 
       const hasPermission = permissions.some(p =>
         p.module === 'leads' &&
         (Array.isArray(p.actions) ? p.actions : []).some(a => a.toLowerCase() === 'update')
       );
 
-      if (!isAdmin && !hasPermission) {
+      if (!canManage && !hasPermission) {
         return res.status(403).json({ message: `Access denied. Role: ${roleName}, Assigned: ${isAssigned}` });
       }
     }
@@ -613,15 +619,23 @@ router.get('/followups/due', auth, async (req, res) => {
   try {
     const now = new Date();
 
-    const roleName = req.user.role?.name || '';
-    const isAdmin = ['Admin', 'Director', 'HR'].some(r => roleName.toLowerCase().includes(r.toLowerCase()));
+    const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
+    const canManage =
+      roleNormalized.includes('admin') ||
+      roleNormalized.includes('director') ||
+      roleNormalized.includes('hr') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team') ||
+      roleNormalized.includes('manager');
 
     const query = {
       nextFollowUp: { $ne: null, $lte: now },
       followUpCompleted: { $ne: true },
       status: { $nin: ['Converted', 'Closed', 'Not Interested'] }
     };
-    if (!isAdmin) query.employee = req.user._id;
+    if (!canManage) query.employee = req.user._id;
 
     const leads = await LeadAssignment.find(query)
       .populate('employee', 'firstName lastName')

@@ -14,28 +14,40 @@ router.get('/', auth, async (req, res) => {
     
     let query = {};
     
-    // Check if user has full access - Admin, HR, Manager, HR Manager can see all leads
-    // Marketing role with only create permission cannot access this endpoint
+    // Leadership & Managers see ALL leads across the organisation
+    const roleName = (user.role?.name || '').toLowerCase();
+    const roleNormalized = roleName.replace(/\s+/g, ' ');
     const hasFullAccess = 
-      user.role.name === 'Admin' ||
-      user.role.name === 'HR' ||
-      user.role.name === 'Manager' ||
-      user.role.name === 'HR Manager';
+      user.role?.name === 'Admin' ||
+      user.role?.name === 'Director' ||
+      user.role?.name === 'HR' ||
+      user.role?.name === 'Manager' ||
+      user.role?.name === 'HR Manager' ||
+      roleNormalized.includes('manager') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team');
     
-    // Check if user has read permission
-    const hasReadPermission = user.role.permissions.some(
-      p => p.module === 'leads' && p.actions.includes('read')
-    );
+    // Check if user has read permission (sales & executives can read their assigned/added leads)
+    const hasReadPermission = hasFullAccess ||
+      roleName.includes('sales') ||
+      roleName.includes('executive') ||
+      (user.role?.permissions && user.role.permissions.some(
+        p => p.module === 'leads' && p.actions.includes('read')
+      ));
     
     // If user doesn't have read permission, deny access
     if (!hasReadPermission) {
       return res.status(403).json({ message: 'Access denied. Read permission required.' });
     }
     
-    // Regular employees only see leads assigned to them
-    // Admin and managers see ALL leads (including marketing-added leads)
+    // Sales, executives, and regular employees only see leads assigned to them or created/added by them
     if (!hasFullAccess) {
-      query.assignedTo = req.user.id;
+      query.$or = [
+        { assignedTo: req.user.id },
+        { createdBy: req.user.id }
+      ];
     }
     
     // Filter by status if provided
@@ -74,16 +86,24 @@ router.get('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Lead not found' });
     }
     
-    // Check permissions - Only Admin, HR, Manager, HR Manager can see all leads
-    // Regular employees with read permission can only see their assigned leads
+    const roleName = (user.role?.name || '').toLowerCase();
+    const roleNormalized = roleName.replace(/\s+/g, ' ');
     const hasFullAccess = 
-      user.role.name === 'Admin' ||
-      user.role.name === 'HR' ||
-      user.role.name === 'Manager' ||
-      user.role.name === 'HR Manager';
+      user.role?.name === 'Admin' ||
+      user.role?.name === 'Director' ||
+      user.role?.name === 'HR' ||
+      user.role?.name === 'Manager' ||
+      user.role?.name === 'HR Manager' ||
+      roleNormalized.includes('manager') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team');
     
-    // Regular employees can only view their assigned leads
-    if (!hasFullAccess && (lead.assignedTo?._id?.toString() || '') !== req.user.id) {
+    // Sales and regular employees can only view their assigned leads or leads they created/added
+    const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
+                              (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
+    if (!hasFullAccess && !isOwnerOrAssignee) {
       return res.status(403).json({ message: 'Access denied' });
     }
     
@@ -119,11 +139,28 @@ router.post('/', auth, checkPermission('leads', 'create'), async (req, res) => {
       return res.status(400).json({ message: 'Missing required fields: name, email, phone, source' });
     }
     
-    // Validate assigned user exists
+    // Validate assigned user and assignment permissions
+    let finalAssignedTo = null;
     if (assignedTo) {
-      const assignedUser = await User.findById(assignedTo);
-      if (!assignedUser) {
-        return res.status(400).json({ message: 'Assigned user not found' });
+      const creator = await User.findById(req.user.id).populate('role');
+      const creatorRole = (creator?.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
+      const canAssign =
+        creator?.role?.name === 'Admin' ||
+        creator?.role?.name === 'Director' ||
+        creator?.role?.name === 'HR' ||
+        creator?.role?.name === 'HR Manager' ||
+        creatorRole.includes('manager') ||
+        creatorRole.includes('leader') ||
+        creatorRole.includes('team lead') ||
+        creatorRole.includes('head') ||
+        creatorRole.includes('sales team');
+
+      if (canAssign) {
+        const assignedUser = await User.findById(assignedTo);
+        if (!assignedUser) {
+          return res.status(400).json({ message: 'Assigned user not found' });
+        }
+        finalAssignedTo = assignedTo;
       }
     }
     
@@ -136,7 +173,7 @@ router.post('/', auth, checkPermission('leads', 'create'), async (req, res) => {
       country: country ? country.trim() : '',
       industry: industry ? industry.trim() : '',
       source,
-      assignedTo: assignedTo || null,
+      assignedTo: finalAssignedTo,
       budget: budget ? parseFloat(budget) : 0,
       requirements: requirements ? requirements.trim() : '',
       notes: notes ? notes.trim() : '',
@@ -261,30 +298,39 @@ router.put('/:id', auth, async (req, res) => {
     }
     
     // Check permissions
-    const hasUpdatePermission = user.role.permissions.some(
+    const hasUpdatePermission = user.role?.permissions ? user.role.permissions.some(
       p => p.module === 'leads' && p.actions.includes('update')
-    );
-    const hasReadPermission = user.role.permissions.some(
+    ) : false;
+    const hasReadPermission = user.role?.permissions ? user.role.permissions.some(
       p => p.module === 'leads' && p.actions.includes('read')
-    );
-    const hasFullAccess =
-      user.role.name === 'Admin' ||
-      user.role.name === 'HR' ||
-      user.role.name === 'Manager' ||
-      user.role.name === 'HR Manager';
+    ) : false;
+    const roleName = (user.role?.name || '').toLowerCase();
+    const roleNormalized = roleName.replace(/\s+/g, ' ');
+    const isLeadershipOrManager =
+      user.role?.name === 'Admin' ||
+      user.role?.name === 'Director' ||
+      user.role?.name === 'HR' ||
+      user.role?.name === 'Manager' ||
+      user.role?.name === 'HR Manager' ||
+      roleNormalized.includes('manager') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team');
 
-    const isAssignedToUser = (lead.assignedTo?.toString() || '') === req.user.id;
+    const canAssignOrManage = isLeadershipOrManager;
+    const hasFullAccess = isLeadershipOrManager;
 
-    // Rules:
-    //   - hasUpdatePermission OR hasFullAccess → can edit all fields
-    //   - hasReadPermission (only) → can update status on their assigned leads only
-    //   - anything else → access denied
-    if (!hasUpdatePermission && !hasFullAccess) {
+    const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
+                              (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
+
+    if (!hasFullAccess && !isOwnerOrAssignee) {
+      return res.status(403).json({ message: 'Access denied. You can only update your assigned or created leads.' });
+    }
+
+    // For read-only users without assignment/update permission, restrict updates to status/followup/type only
+    if (!hasUpdatePermission && !canAssignOrManage) {
       if (!hasReadPermission) {
-        return res.status(403).json({ message: 'Access denied' });
-      }
-      // Read-only users can only change status, and only on their assigned leads
-      if (!isAssignedToUser) {
         return res.status(403).json({ message: 'Access denied' });
       }
       // Restrict the update to status + nextFollowUp + leadType only
@@ -414,8 +460,8 @@ router.put('/:id', auth, async (req, res) => {
     
     const historyEntries = [];
 
-    // Admin, HR, Manager and users with update permission can reassign leads
-    if (assignedTo !== undefined && (hasUpdatePermission || hasFullAccess)) {
+    // Only Admin, Director, HR, Manager, Team Leader, Sales Head, Sales Team can reassign leads
+    if (assignedTo !== undefined && canAssignOrManage) {
       const currentAssignee = lead.assignedTo ? lead.assignedTo.toString() : null;
       const newAssignee = assignedTo ? assignedTo.toString() : null;
       if (currentAssignee !== newAssignee) {
@@ -544,17 +590,27 @@ router.get('/stats/overview', auth, async (req, res) => {
     
     let query = {};
     
-    // Check if user has full access - Only Admin, HR, Manager, HR Manager can see all leads stats
-    // Regular employees with read permission can only see their assigned leads stats
+    // Full access: Admin, Director, HR, HR Manager, Manager, Team Leader, Sales Head, Sales Team
+    const roleName = (user.role?.name || '').toLowerCase();
+    const roleNormalized = roleName.replace(/\s+/g, ' ');
     const hasFullAccess = 
-      user.role.name === 'Admin' ||
-      user.role.name === 'HR' ||
-      user.role.name === 'Manager' ||
-      user.role.name === 'HR Manager';
+      user.role?.name === 'Admin' ||
+      user.role?.name === 'Director' ||
+      user.role?.name === 'HR' ||
+      user.role?.name === 'Manager' ||
+      user.role?.name === 'HR Manager' ||
+      roleNormalized.includes('manager') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team');
     
-    // Regular employees only see their assigned leads stats
+    // Regular sales, executives, and employees only see their assigned leads or leads they added stats
     if (!hasFullAccess) {
-      query.assignedTo = req.user.id;
+      query.$or = [
+        { assignedTo: req.user.id },
+        { createdBy: req.user.id }
+      ];
     }
     
     const [total, newLeads, inProgress, converted, lost] = await Promise.all([
@@ -640,13 +696,20 @@ router.get('/followups/due', auth, async (req, res) => {
     const now = new Date();
 
     const user = await User.findById(req.user.id).populate('role');
-    // Check if user has full access - Only Admin, HR, Manager, HR Manager can see all leads
-    // Regular employees with read permission can only see their assigned leads
+    // Check if user has full access - Admin, HR, Manager, Team Leader, Sales Head, Sales Team can see all leads
+    const roleName = (user.role?.name || '').toLowerCase();
+    const roleNormalized = roleName.replace(/\s+/g, ' ');
     const hasFullAccess = 
-      user.role.name === 'Admin' ||
-      user.role.name === 'HR' ||
-      user.role.name === 'Manager' ||
-      user.role.name === 'HR Manager';
+      user.role?.name === 'Admin' ||
+      user.role?.name === 'Director' ||
+      user.role?.name === 'HR' ||
+      user.role?.name === 'Manager' ||
+      user.role?.name === 'HR Manager' ||
+      roleNormalized.includes('manager') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team');
 
     const query = {
       nextFollowUp: { $ne: null, $lte: now },
@@ -654,7 +717,12 @@ router.get('/followups/due', auth, async (req, res) => {
       status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost'] }
     };
     
-    if (!hasFullAccess) query.assignedTo = req.user.id;
+    if (!hasFullAccess) {
+      query.$or = [
+        { assignedTo: req.user.id },
+        { createdBy: req.user.id }
+      ];
+    }
 
     const leads = await Lead.find(query)
       .populate('assignedTo', 'firstName lastName')

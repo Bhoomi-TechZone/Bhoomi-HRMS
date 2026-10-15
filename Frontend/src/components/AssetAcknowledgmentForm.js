@@ -113,18 +113,38 @@ export const AssetAcknowledgmentForm = ({
 }) => {
   const formPrintRef = useRef(null);
 
-  // Check if current user is privileged (Admin, HR, Manager) to view download/print buttons
+  // Check if current user is the assigned receiver of this form
+  const isAssignedReceiver = React.useMemo(() => {
+    if (!currentUser) return false;
+    const currentUserId = (currentUser._id || currentUser.id || '').toString();
+    const currentUserEmpId = (currentUser.employeeId || '').toString().trim().toLowerCase();
+    const currentUsername = (currentUser.username || '').toString().trim().toLowerCase();
+
+    const targetEmp = employee || primaryAsset?.assignedTo;
+    const targetId = (targetEmp?._id || targetEmp || '').toString();
+    const targetEmpId = (targetEmp?.employeeId || '').toString().trim().toLowerCase();
+    const targetUsername = (targetEmp?.username || '').toString().trim().toLowerCase();
+
+    return (
+      (targetId && currentUserId && targetId === currentUserId) ||
+      (targetEmpId && currentUserEmpId && targetEmpId === currentUserEmpId) ||
+      (targetUsername && currentUsername && targetUsername === currentUsername)
+    );
+  }, [currentUser, employee, primaryAsset]);
+
+  // Check if current user is privileged (Admin, HR) or the assigned receiver to view download/print buttons
   const canDownloadAndPrint = React.useMemo(() => {
+    if (isAssignedReceiver) return true;
     if (showActions === false) return false;
     if (currentUser) {
-      const roleName = (currentUser.role?.name || currentUser.role || '').toString().trim().toLowerCase();
+      const roleName = (currentUser.role?.name || (typeof currentUser.role === 'string' ? currentUser.role : '') || '').toString().trim().toLowerCase();
       const hasPerm = Array.isArray(currentUser.role?.permissions) && currentUser.role.permissions.some(
         p => p.module === 'assets' && (p.actions?.includes('create') || p.actions?.includes('update') || p.actions?.includes('delete'))
       );
-      return ['admin', 'hr', 'hr manager', 'manager', 'director', 'super admin'].includes(roleName) || hasPerm;
+      return ['admin', 'hr', 'hr manager', 'director', 'super admin'].some(r => roleName === r || roleName.includes(r)) || hasPerm;
     }
     return showActions;
-  }, [showActions, currentUser]);
+  }, [showActions, currentUser, isAssignedReceiver]);
 
   // Normalise assigned assets list
   const assetsList = React.useMemo(() => {

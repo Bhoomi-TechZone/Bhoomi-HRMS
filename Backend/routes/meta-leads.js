@@ -309,17 +309,24 @@ router.get('/', auth, async (req, res) => {
 
     const query = {};
 
-    // Sales role users can only see leads assigned to them
-    const roleName = req.user.role?.name;
-    const isAdmin = roleName === 'Admin' || roleName === 'Director' || roleName === 'HR';
-    if (!isAdmin) {
+    // Leadership, Managers & Sales Team see all leads to assign them
+    const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
+    const canSeeAllLeads =
+      roleNormalized.includes('admin') ||
+      roleNormalized.includes('director') ||
+      roleNormalized.includes('hr') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team') ||
+      roleNormalized.includes('manager');
+    if (!canSeeAllLeads) {
       query.assignedTo = req.user._id;
     }
 
     if (status) query.status = status;
     if (pageId) query.pageId = pageId;
-    if (formId) query.formId = formId;
-    if (assignedTo && isAdmin) query.assignedTo = assignedTo;
+    if (assignedTo && canSeeAllLeads) query.assignedTo = assignedTo;
 
     // Filter by assigned date — match leads whose history has an Assignment Update on that date
     if (assignedDate) {
@@ -394,10 +401,18 @@ router.get('/stats', auth, async (req, res) => {
       $lte: endOfMonth
     };
 
-    // Non-admin users only see stats for their assigned leads
-    const roleName = req.user.role?.name;
-    const isAdmin = roleName === 'Admin' || roleName === 'Director' || roleName === 'HR';
-    if (!isAdmin) {
+    // Non-leadership users only see stats for their assigned leads
+    const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
+    const canSeeAllLeads =
+      roleNormalized.includes('admin') ||
+      roleNormalized.includes('director') ||
+      roleNormalized.includes('hr') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team') ||
+      roleNormalized.includes('manager');
+    if (!canSeeAllLeads) {
       baseQuery.assignedTo = req.user._id;
     }
 
@@ -523,8 +538,15 @@ router.get('/source-stats', auth, async (req, res) => {
  */
 router.get('/timeline', auth, async (req, res) => {
   try {
-    const roleName = req.user.role?.name;
-    const isAdmin = ['Admin', 'Director', 'HR'].includes(roleName);
+    const roleName = (req.user.role?.name || '').toLowerCase();
+    const canSeeAllLeads =
+      roleName.includes('admin') ||
+      roleName.includes('director') ||
+      roleName.includes('hr') ||
+      roleName.includes('leader') ||
+      roleName.includes('team lead') ||
+      roleName.includes('head') ||
+      roleName.includes('manager');
     
     // Parse month param or default to current month
     const { month } = req.query;
@@ -542,7 +564,7 @@ router.get('/timeline', auth, async (req, res) => {
     const matchQuery = {
       createdTime: { $gte: startDate, $lte: endDate }
     };
-    if (!isAdmin) matchQuery.assignedTo = req.user._id;
+    if (!canSeeAllLeads) matchQuery.assignedTo = req.user._id;
 
     // Aggregate leads by day and source
     const [timelineMeta, timelineManual] = await Promise.all([
@@ -597,7 +619,7 @@ router.get('/timeline', auth, async (req, res) => {
         { 
           $match: { 
             actualDate: { $gte: startDate, $lte: endDate },
-            ...(isAdmin ? {} : { assignedTo: req.user._id })
+            ...(canSeeAllLeads ? {} : { assignedTo: req.user._id })
           } 
         },
         {
@@ -673,9 +695,17 @@ router.put('/:id/follow-up', auth, async (req, res) => {
     }
 
     // Check permission
-    const roleName = req.user.role?.name || '';
-    const isAdmin = ['Admin', 'Director', 'HR'].some(r => roleName.toLowerCase().includes(r.toLowerCase()));
-    if (!isAdmin && String(lead.assignedTo) !== String(req.user._id)) {
+    const roleName = (req.user.role?.name || '').toLowerCase();
+    const canManageLeads =
+      roleName.includes('admin') ||
+      roleName.includes('director') ||
+      roleName.includes('hr') ||
+      roleName.includes('leader') ||
+      roleName.includes('lead') ||
+      roleName.includes('head') ||
+      roleName.includes('sales') ||
+      roleName.includes('manager');
+    if (!canManageLeads && String(lead.assignedTo) !== String(req.user._id)) {
       return res.status(403).json({ message: 'Access denied. This lead is not assigned to you.' });
     }
 
@@ -714,15 +744,23 @@ router.get('/followups/due', auth, async (req, res) => {
   try {
     const now = new Date();
 
-    const roleName = req.user.role?.name || '';
-    const isAdmin = ['Admin', 'Director', 'HR'].some(r => roleName.toLowerCase().includes(r.toLowerCase()));
+    const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
+    const canManageLeads =
+      roleNormalized.includes('admin') ||
+      roleNormalized.includes('director') ||
+      roleNormalized.includes('hr') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team') ||
+      roleNormalized.includes('manager');
 
     const query = {
       followUpDate: { $ne: null, $lte: now },
       followUpCompleted: { $ne: true },
       status: { $nin: ['Converted', 'Closed', 'Not Interested'] }
     };
-    if (!isAdmin) query.assignedTo = req.user._id;
+    if (!canManageLeads) query.assignedTo = req.user._id;
 
     const leads = await MetaLead.find(query)
       .populate('assignedTo', 'firstName lastName')
@@ -750,10 +788,17 @@ router.get('/:id', auth, async (req, res) => {
 
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-    // Non-admin users can only view their assigned leads
-    const roleName = req.user.role?.name;
-    const isAdmin = roleName === 'Admin' || roleName === 'Director' || roleName === 'HR';
-    if (!isAdmin && String(lead.assignedTo?._id || lead.assignedTo) !== String(req.user._id)) {
+    // Non-leadership users can only view their assigned leads
+    const roleName = (req.user.role?.name || '').toLowerCase();
+    const canSeeAllLeads =
+      roleName.includes('admin') ||
+      roleName.includes('director') ||
+      roleName.includes('hr') ||
+      roleName.includes('leader') ||
+      roleName.includes('team lead') ||
+      roleName.includes('head') ||
+      roleName.includes('manager');
+    if (!canSeeAllLeads && String(lead.assignedTo?._id || lead.assignedTo) !== String(req.user._id)) {
       return res.status(403).json({ message: 'Access denied. This lead is not assigned to you.' });
     }
 
@@ -773,10 +818,18 @@ router.patch('/:id', auth, async (req, res) => {
     const lead = await MetaLead.findById(req.params.id);
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-    // Non-admin can only update their own assigned leads, and cannot reassign
-    const roleName = req.user.role?.name;
-    const isAdmin = roleName === 'Admin' || roleName === 'Director' || roleName === 'HR';
-    if (!isAdmin) {
+    // Admin, Director, HR, Team Leader, Sales Head, Sales Team, Manager can assign and reassign leads
+    const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
+    const canAssign =
+      roleNormalized.includes('admin') ||
+      roleNormalized.includes('director') ||
+      roleNormalized.includes('hr') ||
+      roleNormalized.includes('leader') ||
+      roleNormalized.includes('team lead') ||
+      roleNormalized.includes('head') ||
+      roleNormalized.includes('sales team') ||
+      roleNormalized.includes('manager');
+    if (!canAssign) {
       if (String(lead.assignedTo) !== String(req.user._id)) {
         return res.status(403).json({ message: 'Access denied. This lead is not assigned to you.' });
       }

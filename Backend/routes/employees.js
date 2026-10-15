@@ -146,7 +146,7 @@ router.get('/stats', auth, checkPermission('employees', 'read'), async (req, res
 router.get('/list', auth, async (req, res) => {
   try {
     const employees = await User.find({ isActive: true })
-      .select('firstName lastName employeeId designation role isActive email phone department officialEmail')
+      .select('firstName lastName employeeId designation role isActive email phone department officialEmail joiningDate')
       .populate('role', 'name')
       .sort({ firstName: 1 });
     res.json(employees);
@@ -156,13 +156,29 @@ router.get('/list', auth, async (req, res) => {
 });
 
 // Get all employees
-router.get('/', auth, checkPermission('employees', 'read'), async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
-    const employees = await User.find()
-      .select('-password')
-      .populate('role')
-      .populate('assignedManager', 'firstName lastName employeeId designation role')
-      .sort({ createdAt: -1 });
+    const roleName = (req.user?.role?.name || '').toLowerCase();
+    const permissions = req.user?.role?.permissions || [];
+    const hasEmployeeRead = permissions.some(p => p.module === 'employees' && p.actions.includes('read'));
+    const isFullAccess = ['admin', 'director', 'hr', 'hr manager'].some(r => roleName.includes(r)) || hasEmployeeRead;
+
+    if (isFullAccess) {
+      const employees = await User.find()
+        .select('-password')
+        .populate('role')
+        .populate('assignedManager', 'firstName lastName employeeId designation role')
+        .sort({ createdAt: -1 });
+
+      return res.json(employees);
+    }
+
+    // For other roles (e.g. Sales Team, Team Leader, Sales Head, Manager) who need employee list for assignment dropdowns
+    // return sanitized active employee list without sensitive HR/salary/banking data
+    const employees = await User.find({ isActive: true })
+      .select('firstName lastName employeeId designation role isActive email phone department officialEmail joiningDate')
+      .populate('role', 'name')
+      .sort({ firstName: 1 });
 
     res.json(employees);
   } catch (error) {

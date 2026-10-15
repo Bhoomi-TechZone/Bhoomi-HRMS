@@ -40,15 +40,28 @@ function MyLeads() {
   const canUpdate = hasPermission('leads', 'update');
   const canDelete = hasPermission('leads', 'delete');
 
-  // Admin sees ALL leads in the system.
-  // Everyone else (even with canRead) sees only leads assigned to them.
+  const roleNameLower = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+
+  const roleNormalized = roleNameLower.replace(/\s+/g, ' ');
+
+  // Full Access: Admin, Director, HR, HR Manager, Manager, Team Leader, Sales Head, Sales Team can see ALL company leads
+  // Individual 'Sales' role, 'Executives', and regular employees only see their assigned leads or leads they added
   const hasFullAccess =
     user?.role?.name === 'Admin' ||
+    user?.role?.name === 'Director' ||
     user?.role?.name === 'HR' ||
-    user?.role?.name === 'Manager' ||
-    user?.role?.name === 'HR Manager';
+    user?.role?.name === 'HR Manager' ||
+    roleNormalized.includes('manager') ||
+    roleNormalized.includes('leader') ||
+    roleNormalized.includes('team lead') ||
+    roleNormalized.includes('head') ||
+    roleNormalized.includes('sales team');
 
-  const isSales = user?.role?.name?.toLowerCase().includes('sales');
+  // Multi-Assign and Lead Assignment are ONLY for Manager, Admin, Director, HR, Sales Head, Sales Team, and Team Leader
+  // Individual 'Sales' role, 'Executives', and regular employees cannot assign leads
+  const canMultiAssign = hasFullAccess;
+  const canAssignLeads = hasFullAccess;
+  const isSales = roleNameLower.includes('sales');
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const [leads, setLeads] = useState([]);          // regular leads
@@ -159,6 +172,20 @@ function MyLeads() {
   const [openLeadTypeDrop, setOpenLeadTypeDrop] = useState(null); // leadId
   const [leadTypeDropPos, setLeadTypeDropPos] = useState({ top: 0, left: 0 });
   const leadTypeDropRef = useRef(null);
+  // ── Inline row action (3-dots) dropdown ──────────────────────────────────
+  const [openActionMenuDrop, setOpenActionMenuDrop] = useState(null); // compositeId
+  const [actionMenuDropPos, setActionMenuDropPos] = useState({ top: 0, left: 0 });
+  const actionMenuDropRef = useRef(null);
+  // ── Move to Pipeline Modal state ─────────────────────────────────────────
+  const [showMovePipelineModal, setShowMovePipelineModal] = useState(false);
+  const [leadToMove, setLeadToMove] = useState(null);
+  const [movePipelinePayload, setMovePipelinePayload] = useState(null);
+  const [movingToPipeline, setMovingToPipeline] = useState(false);
+  const [movePipelineSuccessInfo, setMovePipelineSuccessInfo] = useState(null);
+  // ── Unmove from Pipeline Modal state ───────────────────────────────────────
+  const [showUnmovePipelineModal, setShowUnmovePipelineModal] = useState(false);
+  const [leadToUnmove, setLeadToUnmove] = useState(null);
+  const [unmovingFromPipeline, setUnmovingFromPipeline] = useState(false);
   // ── Multi Assign ──────────────────────────────────────────────────────────
   const [multiAssignMode, setMultiAssignMode] = useState(false);
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
@@ -173,7 +200,7 @@ function MyLeads() {
       const [leadsRes, metaRes, empRes] = await Promise.allSettled([
         api.get('/leads'),
         api.get('/meta-leads?limit=1000'),
-        api.get('/employees'),
+        api.get('/employees/list').catch(() => api.get('/employees')),
       ]);
       if (leadsRes.status === 'fulfilled') setLeads(leadsRes.value.data || []);
       if (metaRes.status === 'fulfilled') setMetaLeads(metaRes.value.data.leads || []);
@@ -227,6 +254,17 @@ function MyLeads() {
     const handler = (e) => {
       if (leadTypeDropRef.current && !leadTypeDropRef.current.contains(e.target)) {
         setOpenLeadTypeDrop(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Close inline action 3-dots dropdowns on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (actionMenuDropRef.current && !actionMenuDropRef.current.contains(e.target)) {
+        setOpenActionMenuDrop(null);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -475,10 +513,21 @@ function MyLeads() {
     return [...regular, ...meta];
   }, [leads, metaLeads]);
 
-  // ── Sales employees only (for lead assignment dropdowns) ─────────────────
-  const salesEmployees = useMemo(() =>
-    employees.filter(emp => emp.role?.name?.toLowerCase().includes('sales')),
-    [employees]);
+  // ── Active Sales, Sales Head, and Sales Team employees for assignment (excluding current user) ───────────
+  const salesEmployees = useMemo(() => {
+    const currentUserId = user?._id || user?.id;
+    return employees.filter(emp => {
+      // Must be active
+      if (emp.isActive === false || emp.status === 'Inactive') return false;
+
+      // Do not show current user in the assignment list
+      if (currentUserId && String(emp._id) === String(currentUserId)) return false;
+
+      // Only show employees whose role is Sales, Sales Head, or Sales Team
+      const r = (emp.role?.name || emp.role || '').toLowerCase();
+      return r.includes('sales');
+    });
+  }, [employees, user?._id, user?.id]);
 
   // ── Sales and Marketing employees (for filtering) ────────────────────────
   const filterEmployees = useMemo(() =>
@@ -488,13 +537,18 @@ function MyLeads() {
     ),
     [employees]);
 
-  // ── Base dataset for stats: for regular employees only their own leads ──────────
+  // ── Base dataset for stats: for sales and regular employees only their assigned or created leads ──────────
   const statsLeads = useMemo(() => {
-    if (!hasFullAccess && user?._id) {
-      return allLeads.filter(l => (l.assignedTo?._id || l.assignedTo) === user._id);
+    const uid = String(user?._id || user?.id || '');
+    if (!hasFullAccess && uid) {
+      return allLeads.filter(l => {
+        const assignedId = String(l.assignedTo?._id || l.assignedTo || '');
+        const createdById = String(l.createdBy?._id || l.createdBy || '');
+        return assignedId === uid || createdById === uid;
+      });
     }
     return allLeads;
-  }, [allLeads, hasFullAccess, user?._id]);
+  }, [allLeads, hasFullAccess, user?._id, user?.id]);
 
   // ── Stats from merged data ────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -602,12 +656,13 @@ function MyLeads() {
 
   // ── Filtered + sorted ─────────────────────────────────────────────────────
   const filteredLeads = useMemo(() => {
+    const uid = String(user?._id || user?.id || '');
     return allLeads.filter(lead => {
-      // Regular employees (non-Admin/HR/Manager): only show leads assigned to this user
-      // Backend already filters, but this is an additional safety check
-      if (!hasFullAccess && user?._id) {
-        const assignedId = lead.assignedTo?._id || lead.assignedTo;
-        if (assignedId !== user._id) return false;
+      // Sales, executives, and regular employees only see leads assigned to them or created/added by them
+      if (!hasFullAccess && uid) {
+        const assignedId = String(lead.assignedTo?._id || lead.assignedTo || '');
+        const createdById = String(lead.createdBy?._id || lead.createdBy || '');
+        if (assignedId !== uid && createdById !== uid) return false;
       }
 
       const term = searchTerm.toLowerCase();
@@ -661,9 +716,9 @@ function MyLeads() {
       if (sortBy === 'oldest') return new Date(a.createdAt) - new Date(b.createdAt);
       return 0;
     });
-  }, [allLeads, searchTerm, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy, hasFullAccess, user?._id]);
+  }, [allLeads, searchTerm, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy, hasFullAccess, user?._id, user?.id]);
 
-  const isAnyModalOpen = showDetailsModal || showStatusModal || showNoteModal || showHistoryModal || showMetaModal || showConversionModal || showUploadModal || showMultiAssignModal;
+  const isAnyModalOpen = showDetailsModal || showStatusModal || showNoteModal || showHistoryModal || showMetaModal || showConversionModal || showUploadModal || showMultiAssignModal || showMovePipelineModal || showUnmovePipelineModal;
 
   // ── Follow-up reminder polling for the currently visible page data ───────
   const checkFollowUps = useCallback(async () => {
@@ -1291,7 +1346,7 @@ function MyLeads() {
         requirements: addLeadForm.requirement ? addLeadForm.requirement.trim() : '',
         notes: addLeadForm.notes ? addLeadForm.notes.trim() : '',
         leadType: addLeadForm.leadType || undefined,
-        assignedTo: addLeadForm.assignedTo || undefined
+        assignedTo: canAssignLeads ? (addLeadForm.assignedTo || undefined) : undefined
       });
       setShowAddLeadModal(false);
       fetchAll();
@@ -1340,7 +1395,7 @@ function MyLeads() {
     try {
       await api.put(`/leads/${selectedLead._id}`, {
         status: resolvedStatus,
-        assignedTo: leadEditForm.assignedTo || null,
+        ...(canAssignLeads ? { assignedTo: leadEditForm.assignedTo || null } : {}),
         notes: leadEditForm.notes,
         nextFollowUp: toIsoStringOrNull(leadEditForm.followUpDate),
         // Full editable fields
@@ -1431,7 +1486,7 @@ function MyLeads() {
     try {
       await api.patch(`/meta-leads/${metaSelected._id}`, {
         status: resolvedStatus,
-        assignedTo: metaEditForm.assignedTo || null,
+        ...(canAssignLeads ? { assignedTo: metaEditForm.assignedTo || null } : {}),
         notes: metaEditForm.notes,
         followUpDate: toIsoStringOrNull(metaEditForm.followUpDate),
       });
@@ -1575,6 +1630,241 @@ function MyLeads() {
       }
     } catch (err) {
       alert(err.response?.data?.message || 'Delete failed');
+    }
+  };
+
+  // ── Move to Pipeline helpers & handlers ──────────────────────────────────
+  const parseLeadName = (lead) => {
+    let rawName = (lead.leadName || lead.name || '').trim();
+    if (!rawName) {
+      rawName = (lead.company || lead.businessCategory || 'Lead Contact').trim();
+    }
+    const parts = rawName.split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) {
+      return { firstName: parts[0] || 'Lead Contact', lastName: '' };
+    }
+    const firstName = parts.slice(0, -1).join(' ');
+    const lastName = parts[parts.length - 1];
+    return { firstName, lastName };
+  };
+
+  const parseLeadPhoneAndOrigin = (lead) => {
+    let rawPhone = (lead.contactNumber && lead.contactNumber !== 'N/A' && lead.contactNumber !== '—')
+      ? lead.contactNumber
+      : (lead.phone && lead.phone !== 'N/A' && lead.phone !== '—')
+        ? lead.phone
+        : '';
+    rawPhone = String(rawPhone || '').trim();
+
+    const rawCountry = String(lead.country || '').trim().toLowerCase();
+    const isIndia = rawCountry === 'india' || rawCountry === 'in' || rawCountry === 'bharat';
+
+    let origin = 'Domestic';
+    if (rawCountry) {
+      origin = isIndia ? 'Domestic' : 'International';
+    } else if (rawPhone.startsWith('+') && !rawPhone.startsWith('+91')) {
+      origin = 'International';
+    }
+
+    let phone = rawPhone;
+    if (phone.includes('&')) phone = phone.split('&')[0].trim();
+    else if (phone.includes(',')) phone = phone.split(',')[0].trim();
+    else if (phone.includes('/')) phone = phone.split('/')[0].trim();
+
+    const KNOWN_CODES = [
+      '+1', '+91', '+44', '+61', '+49', '+971', '+65', '+33', '+81', '+86', '+55',
+      '+353', '+233', '+383', '+31', '+34', '+39', '+41', '+46', '+47', '+48', '+351', '+60', '+62', '+63', '+64', '+66', '+82', '+84', '+90', '+92', '+93', '+94', '+95', '+98', '+972', '+974', '+966', '+965', '+968'
+    ];
+
+    let countryCode = '+91';
+
+    if (phone.startsWith('+')) {
+      const matched = KNOWN_CODES.find(code => phone.startsWith(code));
+      if (matched) {
+        countryCode = matched;
+        phone = phone.slice(matched.length).trim();
+      } else {
+        const match = phone.match(/^(\+\d{1,4})\s*(.*)$/);
+        if (match) {
+          countryCode = match[1];
+          phone = match[2].trim();
+        }
+      }
+    } else if (isIndia) {
+      countryCode = '+91';
+    } else if (rawCountry === 'usa' || rawCountry === 'us' || rawCountry === 'united states' || rawCountry === 'canada') {
+      countryCode = '+1';
+    } else if (rawCountry === 'uk' || rawCountry === 'united kingdom') {
+      countryCode = '+44';
+    } else if (rawCountry === 'uae' || rawCountry === 'united arab emirates') {
+      countryCode = '+971';
+    } else if (rawCountry === 'australia') {
+      countryCode = '+61';
+    } else if (rawCountry === 'germany') {
+      countryCode = '+49';
+    } else if (rawCountry === 'slovakia') {
+      countryCode = '+421';
+    } else if (rawCountry === 'ireland') {
+      countryCode = '+353';
+    }
+
+    const digitsOnly = phone.replace(/\D/g, '');
+    if (digitsOnly.length >= 7 && digitsOnly.length <= 15) {
+      phone = digitsOnly;
+    } else {
+      phone = phone.replace(/^[\s\-().]+/, '').replace(/[\s\-().]+$/, '').trim();
+    }
+
+    return { countryCode, phone, origin };
+  };
+
+  const handleOpenMoveToPipeline = (lead) => {
+    const { firstName, lastName } = parseLeadName(lead);
+    const { countryCode, phone, origin } = parseLeadPhoneAndOrigin(lead);
+
+    let addedByStr = 'Admin System';
+    if (lead.createdBy) {
+      if (typeof lead.createdBy === 'object') {
+        addedByStr = `${lead.createdBy.firstName || ''} ${lead.createdBy.lastName || ''}`.trim() || lead.createdBy.email || 'Admin System';
+      } else {
+        addedByStr = String(lead.createdBy);
+      }
+    } else if (user) {
+      addedByStr = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Admin System';
+    }
+
+    let ownerStr = 'Unassigned';
+    let assignedToId = null;
+    if (lead.assignedTo) {
+      if (typeof lead.assignedTo === 'object') {
+        ownerStr = `${lead.assignedTo.firstName || ''} ${lead.assignedTo.lastName || ''}`.trim() || lead.assignedTo.email || 'Unassigned';
+        assignedToId = lead.assignedTo._id;
+      } else {
+        const foundEmp = employees.find(e => String(e._id) === String(lead.assignedTo));
+        if (foundEmp) {
+          ownerStr = `${foundEmp.firstName} ${foundEmp.lastName}`;
+          assignedToId = foundEmp._id;
+        }
+      }
+    }
+
+    const payload = {
+      leadId: lead._id,
+      leadType: lead._type || 'regular',
+      firstName,
+      lastName,
+      email: (lead.email || '').trim(),
+      phone,
+      countryCode,
+      origin,
+      contactSource: lead._type === 'meta'
+        ? (lead.pageName ? `Meta · ${lead.pageName}` : 'Meta')
+        : (lead.source || 'Manual').replace(' - Buyer Lead', '').replace(' - Enquiry', ''),
+      leadStage: 'Meta Lead',
+      leadStatus: getEffectiveStatus(lead) || lead.status || 'New',
+      company: lead.company || lead.businessCategory || '',
+      address: lead.city || lead.country || '',
+      notes: lead.requirements || lead.requirement || lead.product || lead.notes || lead.description || '',
+      owner: ownerStr,
+      addedBy: addedByStr,
+      assignedTo: assignedToId
+    };
+
+    setMovePipelinePayload(payload);
+    setLeadToMove(lead);
+    setShowMovePipelineModal(true);
+  };
+
+  const confirmMoveToPipeline = async () => {
+    if (!movePipelinePayload) return;
+    setMovingToPipeline(true);
+    try {
+      const res = await api.post('/pipeline-contacts/move-lead', movePipelinePayload);
+      const contactId = res.data?.contact?._id;
+
+      const targetLeadId = movePipelinePayload.leadId;
+      const historyEntry = {
+        action: 'Moved to Pipeline',
+        details: `Lead moved to Pipeline Contacts under "Meta Lead" stage by ${user?.firstName || 'User'}`,
+        date: new Date()
+      };
+
+      if (movePipelinePayload.leadType === 'meta') {
+        setMetaLeads(prev => prev.map(m => m._id === targetLeadId ? {
+          ...m,
+          movedToPipeline: true,
+          pipelineContactId: contactId || m.pipelineContactId,
+          history: [...(m.history || []), historyEntry]
+        } : m));
+      } else {
+        setLeads(prev => prev.map(l => l._id === targetLeadId ? {
+          ...l,
+          movedToPipeline: true,
+          pipelineContactId: contactId || l.pipelineContactId,
+          history: [...(l.history || []), historyEntry]
+        } : l));
+      }
+
+      setShowMovePipelineModal(false);
+      setMovePipelineSuccessInfo({
+        contactName: `${movePipelinePayload.firstName} ${movePipelinePayload.lastName}`.trim(),
+        stage: 'Meta Lead',
+        isUnmoved: false
+      });
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to move lead to pipeline');
+    } finally {
+      setMovingToPipeline(false);
+    }
+  };
+
+  const handleOpenUnmovePipeline = (lead) => {
+    setLeadToUnmove(lead);
+    setShowUnmovePipelineModal(true);
+  };
+
+  const confirmUnmoveFromPipeline = async () => {
+    if (!leadToUnmove) return;
+    setUnmovingFromPipeline(true);
+    try {
+      await api.post('/pipeline-contacts/unmove-lead', {
+        leadId: leadToUnmove._id,
+        leadType: leadToUnmove._type || 'regular',
+        contactId: leadToUnmove.pipelineContactId
+      });
+
+      const targetLeadId = leadToUnmove._id;
+      const historyEntry = {
+        action: 'Unmoved from Pipeline',
+        details: `Lead was unmoved from Pipeline Contacts (Meta Lead stage) by ${user?.firstName || 'User'}`,
+        date: new Date()
+      };
+
+      if (leadToUnmove._type === 'meta') {
+        setMetaLeads(prev => prev.map(m => m._id === targetLeadId ? {
+          ...m,
+          movedToPipeline: false,
+          pipelineContactId: null,
+          history: [...(m.history || []), historyEntry]
+        } : m));
+      } else {
+        setLeads(prev => prev.map(l => l._id === targetLeadId ? {
+          ...l,
+          movedToPipeline: false,
+          pipelineContactId: null,
+          history: [...(l.history || []), historyEntry]
+        } : l));
+      }
+
+      setShowUnmovePipelineModal(false);
+      setMovePipelineSuccessInfo({
+        contactName: leadToUnmove.leadName || leadToUnmove.name || leadToUnmove.company || 'Lead',
+        isUnmoved: true
+      });
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to unmove lead from pipeline');
+    } finally {
+      setUnmovingFromPipeline(false);
     }
   };
 
@@ -2701,7 +2991,7 @@ function MyLeads() {
             <button className="ist-btn-ghost" onClick={clearFilters} style={{ padding: '7px 12px', fontSize: '11px' }}>Clear</button>
           )}
 
-          {hasFullAccess && (
+          {canMultiAssign && (
             <button
               className="ist-btn-ghost leads-multi-assign-btn"
               onClick={() => {
@@ -2759,6 +3049,95 @@ function MyLeads() {
             {filteredLeads.length} of {statsLeads.length}
           </span>
         </div>
+
+        {/* Success Alert Banner for Move / Unmove from Pipeline */}
+        {movePipelineSuccessInfo && (
+          <div style={{
+            margin: '0 16px 14px 16px',
+            padding: '12px 18px',
+            background: movePipelineSuccessInfo.isUnmoved ? '#f0fdf4' : '#f5f3ff',
+            border: `1px solid ${movePipelineSuccessInfo.isUnmoved ? '#bbf7d0' : '#ddd6fe'}`,
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            boxShadow: movePipelineSuccessInfo.isUnmoved ? '0 4px 12px rgba(16, 185, 129, 0.08)' : '0 4px 12px rgba(124, 58, 237, 0.08)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: '50%',
+                background: movePipelineSuccessInfo.isUnmoved ? '#10b981' : '#7c3aed',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                {movePipelineSuccessInfo.isUnmoved ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                )}
+              </div>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: movePipelineSuccessInfo.isUnmoved ? '#065f46' : '#4c1d95' }}>
+                  {movePipelineSuccessInfo.isUnmoved ? 'Lead successfully unmoved from Pipeline Contacts!' : 'Lead successfully moved to Pipeline Contacts!'}
+                </div>
+                <div style={{ fontSize: '11.5px', color: movePipelineSuccessInfo.isUnmoved ? '#047857' : '#6d28d9', marginTop: '1px' }}>
+                  {movePipelineSuccessInfo.isUnmoved ? (
+                    <>
+                      <strong>{movePipelineSuccessInfo.contactName}</strong> has been removed from Pipeline Contacts. All activity tracking in Leads and Contacts history has been preserved.
+                    </>
+                  ) : (
+                    <>
+                      <strong>{movePipelineSuccessInfo.contactName}</strong> is now live inside <strong>{movePipelineSuccessInfo.stage}</strong> stage with all contact details.
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {!movePipelineSuccessInfo.isUnmoved && (
+                <a
+                  href="/pipeline/crm/overview?tab=contacts"
+                  style={{
+                    padding: '6px 13px',
+                    background: '#7c3aed',
+                    color: '#fff',
+                    textDecoration: 'none',
+                    borderRadius: '8px',
+                    fontSize: '11.5px',
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <span>View in Contacts</span>
+                  <span>→</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => setMovePipelineSuccessInfo(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: movePipelineSuccessInfo.isUnmoved ? '#059669' : '#7c3aed',
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  lineHeight: 1
+                }}
+                title="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Table */}
         <div style={{ overflowX: 'auto', overflowY: 'auto', position: 'relative', flex: 1, minHeight: 0 }} className="emp-modal-scroll">
@@ -2968,8 +3347,8 @@ function MyLeads() {
                           const assignedEmp = employees.find(e => e._id === (lead.assignedTo?._id || lead.assignedTo))
                             || (lead.assignedTo?.firstName ? lead.assignedTo : null);
                           const avatarColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444', '#06b6d4'];
-                          // Regular employees: show read-only badge
-                          if (!hasFullAccess) {
+                          // Non-authorized employees: show read-only badge
+                          if (!canAssignLeads) {
                             const colorIdx = assignedEmp ? (assignedEmp.firstName?.charCodeAt(0) || 0) % avatarColors.length : 0;
                             const initials = assignedEmp ? `${assignedEmp.firstName?.[0] || ''}${assignedEmp.lastName?.[0] || ''}`.toUpperCase() : null;
                             return (
@@ -3164,40 +3543,270 @@ function MyLeads() {
                         })() : '—'}
                       </td>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', justifyContent: 'flex-end', position: 'relative' }}>
                           {/* Converted leads: non-admin users can't view details */}
                           {isConvertedHidden ? (
                             <span style={{ fontSize: '10px', color: '#94a3b8', fontStyle: 'italic', padding: '0 4px' }}>Converted</span>
                           ) : (
                             <>
-                              {/* View — always visible to anyone who can read */}
-                              <button className="ist-action-btn" title="View" onClick={() => { if (lead._type === 'meta') openMetaLead(lead, false); else openRegularLead(lead, false); }} onMouseEnter={e => e.currentTarget.style.background = '#f0fdf4'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                              {/* 1. View — always visible to anyone who can read */}
+                              <button
+                                className="ist-action-btn"
+                                title="View Lead"
+                                onClick={() => { if (lead._type === 'meta') openMetaLead(lead, false); else openRegularLead(lead, false); }}
+                                onMouseEnter={e => e.currentTarget.style.background = '#f0fdf4'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                              >
                                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
                               </button>
-                              {/* Edit — only with canUpdate */}
-                              {canUpdate && (
-                                <button className="ist-action-btn" title="Edit" onClick={() => { if (lead._type === 'meta') openMetaLead(lead, true); else openRegularLead(lead, true); }} onMouseEnter={e => e.currentTarget.style.background = '#eff6ff'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+
+                              {/* 2. Move / Unmove Pipeline button */}
+                              {lead.movedToPipeline ? (
+                                <button
+                                  className="ist-action-btn"
+                                  title="Moved to Pipeline — Click to Unmove"
+                                  onClick={() => handleOpenUnmovePipeline(lead)}
+                                  onMouseEnter={e => e.currentTarget.style.background = '#ecfdf5'}
+                                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                  style={{ position: 'relative' }}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="1 4 1 10 7 10" />
+                                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                                  </svg>
+                                  <span style={{ position: 'absolute', top: '1px', right: '1px', width: '5px', height: '5px', borderRadius: '50%', background: '#10b981' }} />
+                                </button>
+                              ) : (
+                                <button
+                                  className="ist-action-btn"
+                                  title="Move to Pipeline (Meta Lead stage)"
+                                  onClick={() => handleOpenMoveToPipeline(lead)}
+                                  onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
+                                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="3" width="5" height="18" rx="1" />
+                                    <rect x="10" y="3" width="5" height="11" rx="1" />
+                                    <rect x="17" y="3" width="5" height="15" rx="1" />
+                                  </svg>
                                 </button>
                               )}
-                              {/* Note — for regular CRM leads */}
-                              {lead._type !== 'meta' && (
-                                <button className="ist-action-btn" title="Note" onClick={() => { setSelectedLead(lead); setNewNote(''); setShowNoteModal(true); }} onMouseEnter={e => e.currentTarget.style.background = '#fef3c7'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
-                                </button>
-                              )}
-                              {/* History — for regular CRM leads */}
-                              {lead._type !== 'meta' && (
-                                <button className="ist-action-btn" title="History" onClick={() => { setSelectedLead(lead); setShowHistoryModal(true); }} onMouseEnter={e => e.currentTarget.style.background = '#f3e8ff'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                </button>
-                              )}
-                              {/* Delete — only with canDelete */}
+
+                              {/* 3. Delete — only with canDelete */}
                               {canDelete && (
-                                <button className="ist-action-btn" title="Delete" onClick={() => handleDeleteLead(lead)} onMouseEnter={e => e.currentTarget.style.background = '#fff1f2'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                <button
+                                  className="ist-action-btn"
+                                  title="Delete Lead"
+                                  onClick={() => handleDeleteLead(lead)}
+                                  onMouseEnter={e => e.currentTarget.style.background = '#fff1f2'}
+                                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                >
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
                                 </button>
                               )}
+
+                              {/* 4. Three dots (...) for rest of options (Edit, Move/Unmove, Note, History) */}
+                              <div ref={openActionMenuDrop === compositeId ? actionMenuDropRef : null} style={{ display: 'inline-block' }}>
+                                <button
+                                  className="ist-action-btn"
+                                  title="More options"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setActionMenuDropPos({
+                                      top: rect.bottom + 5,
+                                      left: Math.max(10, rect.right - 155)
+                                    });
+                                    setOpenActionMenuDrop(prev => prev === compositeId ? null : compositeId);
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="12" cy="12" r="1.5" />
+                                    <circle cx="19" cy="12" r="1.5" />
+                                    <circle cx="5" cy="12" r="1.5" />
+                                  </svg>
+                                </button>
+
+                                {openActionMenuDrop === compositeId && (
+                                  <div
+                                    style={{
+                                      position: 'fixed',
+                                      top: actionMenuDropPos.top,
+                                      left: actionMenuDropPos.left,
+                                      zIndex: 9999,
+                                      background: '#fff',
+                                      border: '1px solid #e2e8f0',
+                                      borderRadius: '10px',
+                                      boxShadow: '0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.1)',
+                                      padding: '5px',
+                                      minWidth: '155px'
+                                    }}
+                                  >
+                                    {/* Edit — only with canUpdate */}
+                                    {canUpdate && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenActionMenuDrop(null);
+                                          if (lead._type === 'meta') openMetaLead(lead, true);
+                                          else openRegularLead(lead, true);
+                                        }}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '8px',
+                                          width: '100%',
+                                          textAlign: 'left',
+                                          padding: '7px 10px',
+                                          borderRadius: '6px',
+                                          border: 'none',
+                                          background: 'transparent',
+                                          color: '#334155',
+                                          fontSize: '11.5px',
+                                          fontWeight: 500,
+                                          cursor: 'pointer'
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.background = '#eff6ff'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                                        <span>Edit Lead</span>
+                                      </button>
+                                    )}
+
+                                    {/* Move / Unmove Pipeline in Dropdown */}
+                                    {lead.movedToPipeline ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenActionMenuDrop(null);
+                                          handleOpenUnmovePipeline(lead);
+                                        }}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '8px',
+                                          width: '100%',
+                                          textAlign: 'left',
+                                          padding: '7px 10px',
+                                          borderRadius: '6px',
+                                          border: 'none',
+                                          background: 'transparent',
+                                          color: '#059669',
+                                          fontSize: '11.5px',
+                                          fontWeight: 600,
+                                          cursor: 'pointer'
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.background = '#ecfdf5'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                          <polyline points="1 4 1 10 7 10" />
+                                          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                                        </svg>
+                                        <span>Unmove from Pipeline</span>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenActionMenuDrop(null);
+                                          handleOpenMoveToPipeline(lead);
+                                        }}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '8px',
+                                          width: '100%',
+                                          textAlign: 'left',
+                                          padding: '7px 10px',
+                                          borderRadius: '6px',
+                                          border: 'none',
+                                          background: 'transparent',
+                                          color: '#6d28d9',
+                                          fontSize: '11.5px',
+                                          fontWeight: 500,
+                                          cursor: 'pointer'
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                          <rect x="3" y="3" width="5" height="18" rx="1" />
+                                          <rect x="10" y="3" width="5" height="11" rx="1" />
+                                          <rect x="17" y="3" width="5" height="15" rx="1" />
+                                        </svg>
+                                        <span>Move to Pipeline</span>
+                                      </button>
+                                    )}
+
+                                    {/* Note — for regular CRM leads */}
+                                    {lead._type !== 'meta' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenActionMenuDrop(null);
+                                          setSelectedLead(lead);
+                                          setNewNote('');
+                                          setShowNoteModal(true);
+                                        }}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '8px',
+                                          width: '100%',
+                                          textAlign: 'left',
+                                          padding: '7px 10px',
+                                          borderRadius: '6px',
+                                          border: 'none',
+                                          background: 'transparent',
+                                          color: '#334155',
+                                          fontSize: '11.5px',
+                                          fontWeight: 500,
+                                          cursor: 'pointer'
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.background = '#fef3c7'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+                                        <span>Add Note</span>
+                                      </button>
+                                    )}
+
+                                    {/* History — for all leads */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionMenuDrop(null);
+                                        setSelectedLead(lead);
+                                        setShowHistoryModal(true);
+                                      }}
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        width: '100%',
+                                        textAlign: 'left',
+                                        padding: '7px 10px',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        background: 'transparent',
+                                        color: '#334155',
+                                        fontSize: '11.5px',
+                                        fontWeight: 500,
+                                        cursor: 'pointer'
+                                      }}
+                                      onMouseEnter={e => e.currentTarget.style.background = '#f3e8ff'}
+                                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                    >
+                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                      <span>View History</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </>
                           )}
                         </div>
@@ -3457,7 +4066,7 @@ function MyLeads() {
                           )}
                         </div>
 
-                        {hasFullAccess && (
+                        {canAssignLeads && (
                           <div className="is-mlead-field">
                             <label className="is-mlead-field-lbl">Assign To {selectedLead.status === 'Converted' && <span style={{ fontSize: '10px', color: '#dc2626', fontWeight: 500 }}>(Locked)</span>}</label>
                             {isEditing ? (
@@ -3688,7 +4297,7 @@ function MyLeads() {
                             <div className="is-mlead-val-text">{metaEditForm.status || '—'}</div>
                           )}
                         </div>
-                        {hasFullAccess && (
+                        {canAssignLeads && (
                           <div className="is-mlead-field">
                             <label className="is-mlead-field-lbl">Assign To {metaSelected.status === 'Converted' && <span style={{ fontSize: '10px', color: '#dc2626', fontWeight: 500 }}>(Locked)</span>}</label>
                             {isEditing ? (
@@ -3837,6 +4446,451 @@ function MyLeads() {
               </button>
               <button className="is-btn is-btn-secondary" onClick={cancelConversion}>
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Move to Pipeline Modal ────────────────────────────────────────── */}
+      {showMovePipelineModal && movePipelinePayload && (
+        <div className="is-modal-overlay" onClick={() => { if (!movingToPipeline) setShowMovePipelineModal(false); }}>
+          <div
+            className="is-modal"
+            style={{ maxWidth: '490px', borderRadius: '16px', overflow: 'hidden', padding: 0 }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #f1f5f9',
+              background: 'linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  background: '#7c3aed',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 10px rgba(124, 58, 237, 0.25)'
+                }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="5" height="18" rx="1" />
+                    <rect x="10" y="3" width="5" height="11" rx="1" />
+                    <rect x="17" y="3" width="5" height="15" rx="1" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#1e1b4b' }}>
+                    Move Lead to Pipeline
+                  </h3>
+                  <div style={{ fontSize: '11.5px', color: '#6d28d9', marginTop: '1px' }}>
+                    Will appear under <strong>Contacts → Meta Lead</strong> stage
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="is-modal-close"
+                onClick={() => { if (!movingToPipeline) setShowMovePipelineModal(false); }}
+                style={{ fontSize: '20px', color: '#6d28d9' }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', background: '#fff' }}>
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '14px 16px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                {/* Contact Name & Origin / Stage */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                      {movePipelinePayload.firstName} {movePipelinePayload.lastName}
+                    </div>
+                    {movePipelinePayload.company && (
+                      <div style={{ fontSize: '11px', color: '#64748b' }}>
+                        {movePipelinePayload.company}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      background: movePipelinePayload.origin === 'International' ? '#ffedd5' : '#e0f2fe',
+                      color: movePipelinePayload.origin === 'International' ? '#c2410c' : '#0369a1'
+                    }}>
+                      {movePipelinePayload.origin}
+                    </span>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      background: '#ede9fe',
+                      color: '#7c3aed',
+                      border: '1px solid #ddd6fe'
+                    }}>
+                      Meta Lead
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ height: '1px', background: '#e2e8f0' }} />
+
+                {/* Details Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Email</span>
+                    <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155', wordBreak: 'break-all' }}>
+                      {movePipelinePayload.email || '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Phone</span>
+                    <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155' }}>
+                      {movePipelinePayload.phone ? `${movePipelinePayload.countryCode} ${movePipelinePayload.phone}` : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Status</span>
+                    <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#2563eb' }}>
+                      {movePipelinePayload.leadStatus || 'New'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Added By</span>
+                    <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155' }}>
+                      {movePipelinePayload.addedBy || '—'}
+                    </span>
+                  </div>
+                  {movePipelinePayload.owner && movePipelinePayload.owner !== 'Unassigned' && (
+                    <div style={{ gridColumn: 'span 2' }}>
+                      <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Assigned To</span>
+                      <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155' }}>
+                        {movePipelinePayload.owner}
+                      </span>
+                    </div>
+                  )}
+                  {movePipelinePayload.notes && (
+                    <div style={{ gridColumn: 'span 2' }}>
+                      <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Requirement / Notes</span>
+                      <span style={{ fontSize: '11px', color: '#475569', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {movePipelinePayload.notes}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ fontSize: '11.5px', color: '#64748b', lineHeight: 1.4 }}>
+                This action will create or update this contact in the Pipeline Contacts board under the <strong>Meta Lead</strong> column with full details respectively.
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '12px 20px',
+              borderTop: '1px solid #f1f5f9',
+              background: '#fafafa',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setShowMovePipelineModal(false)}
+                disabled={movingToPipeline}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  background: '#fff',
+                  color: '#475569',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmMoveToPipeline}
+                disabled={movingToPipeline}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #6366f1 100%)',
+                  color: '#fff',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: movingToPipeline ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 4px 12px rgba(124, 58, 237, 0.3)',
+                  opacity: movingToPipeline ? 0.75 : 1
+                }}
+              >
+                {movingToPipeline ? (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ animation: 'spin 1s linear infinite' }}>
+                      <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
+                    </svg>
+                    <span>Moving…</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    <span>Move to Pipeline</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Unmove Lead from Pipeline Modal ───────────────────────────────────── */}
+      {showUnmovePipelineModal && leadToUnmove && (
+        <div
+          onClick={() => { if (!unmovingFromPipeline) setShowUnmovePipelineModal(false); }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.45)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '16px'
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '480px',
+              background: '#fff',
+              borderRadius: '16px',
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              animation: 'modalSlideUp 0.2s ease-out'
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #f1f5f9',
+              background: '#fff7ed',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: '#f97316',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 10px rgba(249, 115, 22, 0.25)'
+                }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="1 4 1 10 7 10" />
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#7c2d12' }}>
+                    Unmove Lead from Pipeline
+                  </h3>
+                  <div style={{ fontSize: '11.5px', color: '#c2410c', marginTop: '1px' }}>
+                    Remove from <strong>Pipeline Contacts (Meta Lead stage)</strong>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="is-modal-close"
+                onClick={() => { if (!unmovingFromPipeline) setShowUnmovePipelineModal(false); }}
+                style={{ fontSize: '20px', color: '#9a3412' }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', background: '#fff' }}>
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '14px 16px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                      {leadToUnmove.leadName || leadToUnmove.name || leadToUnmove.company || 'Lead Contact'}
+                    </div>
+                    {leadToUnmove.company && (leadToUnmove.leadName || leadToUnmove.name) && (
+                      <div style={{ fontSize: '11px', color: '#64748b' }}>
+                        {leadToUnmove.company}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    padding: '3px 9px',
+                    borderRadius: '999px',
+                    background: '#ecfdf5',
+                    color: '#059669',
+                    border: '1px solid #a7f3d0'
+                  }}>
+                    Currently In Pipeline
+                  </span>
+                </div>
+
+                <div style={{ height: '1px', background: '#e2e8f0' }} />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Email</span>
+                    <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155', wordBreak: 'break-all' }}>
+                      {leadToUnmove.email || '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Phone</span>
+                    <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155' }}>
+                      {leadToUnmove.phone || leadToUnmove.contactNumber || '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Lead Status</span>
+                    <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#2563eb' }}>
+                      {leadToUnmove.status || 'New'}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Type</span>
+                    <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155' }}>
+                      {leadToUnmove._type === 'meta' ? 'Meta Lead' : 'CRM Lead'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{
+                background: '#eff6ff',
+                border: '1px solid #bfdbfe',
+                borderRadius: '10px',
+                padding: '10px 14px',
+                fontSize: '11.5px',
+                color: '#1e40af',
+                lineHeight: 1.45
+              }}>
+                ℹ️ <strong>Audit & History Preserved:</strong> This action removes the contact card from the active Pipeline Contacts board, updates this lead to unmoved, and adds an audit record in the history of both Leads and Pipeline Contacts.
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '12px 20px',
+              borderTop: '1px solid #f1f5f9',
+              background: '#fafafa',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setShowUnmovePipelineModal(false)}
+                disabled={unmovingFromPipeline}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  background: '#fff',
+                  color: '#475569',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmUnmoveFromPipeline}
+                disabled={unmovingFromPipeline}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                  color: '#fff',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: unmovingFromPipeline ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 4px 12px rgba(249, 115, 22, 0.3)',
+                  opacity: unmovingFromPipeline ? 0.75 : 1
+                }}
+              >
+                {unmovingFromPipeline ? (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ animation: 'spin 1s linear infinite' }}>
+                      <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
+                    </svg>
+                    <span>Unmoving…</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="1 4 1 10 7 10" />
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                    </svg>
+                    <span>Unmove from Pipeline</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -4178,22 +5232,24 @@ function MyLeads() {
                     </select>
                   </div>
 
-                  {/* Assigned To */}
-                  <div className="is-mlead-field" style={{ gridColumn: 'span 2' }}>
-                    <label className="is-mlead-field-lbl">Assign to Salesperson</label>
-                    <select
-                      className="is-form-input"
-                      value={addLeadForm.assignedTo}
-                      onChange={e => setAddLeadForm(p => ({ ...p, assignedTo: e.target.value }))}
-                    >
-                      <option value="">-- Select Salesperson (Optional) --</option>
-                      {salesEmployees.map(emp => (
-                        <option key={emp._id} value={emp._id}>
-                          {emp.firstName} {emp.lastName} ({emp.role?.name || 'Sales'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {/* Assigned To - only for roles that can assign leads */}
+                  {canAssignLeads && (
+                    <div className="is-mlead-field" style={{ gridColumn: 'span 2' }}>
+                      <label className="is-mlead-field-lbl">Assign to Salesperson</label>
+                      <select
+                        className="is-form-input"
+                        value={addLeadForm.assignedTo}
+                        onChange={e => setAddLeadForm(p => ({ ...p, assignedTo: e.target.value }))}
+                      >
+                        <option value="">-- Select Salesperson (Optional) --</option>
+                        {salesEmployees.map(emp => (
+                          <option key={emp._id} value={emp._id}>
+                            {emp.firstName} {emp.lastName} ({emp.role?.name || 'Sales'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* Requirement */}
                   <div className="is-mlead-field" style={{ gridColumn: 'span 2' }}>

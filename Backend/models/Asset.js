@@ -162,4 +162,10 @@ const assetSchema = new mongoose.Schema({
   timestamps: true
 });
 
+assetSchema.index({ createdAt: -1 });
+assetSchema.index({ createdAt: 1 });
+assetSchema.index({ assignedTo: 1, createdAt: -1 });
+assetSchema.index({ status: 1 });
+assetSchema.index({ assetType: 1 });
+
 module.exports = mongoose.model('Asset', assetSchema);

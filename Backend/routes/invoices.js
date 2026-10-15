@@ -70,24 +70,43 @@ router.get('/next-number', auth, async (req, res) => {
   try {
     const category = req.query.category === 'proforma' ? 'proforma' : 'tax';
     const now = new Date();
+    // Indian Financial Year: April 1 (month index 3) to March 31
     const fy = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
     const fyStr = `${String(fy).slice(-2)}-${String(fy + 1).slice(-2)}`;
-    const prefix = category === 'proforma' ? 'PI' : 'INV';
+    const prefix = category === 'proforma' ? 'PI' : 'BT';
 
-    // Find all invoices with this prefix and FY
-    const pattern = new RegExp(`^${prefix}/${fyStr}/(\\d+)`, 'i');
-    const existingInvoices = await Invoice.find({ invoiceNo: { $regex: `^${prefix}/${fyStr}/`, $options: 'i' } });
+    // Find all invoices with this prefix and FY (including legacy INV/ for tax invoices)
+    const existingInvoices = await Invoice.find({
+      $or: [
+        { invoiceNo: { $regex: `^${prefix}/${fyStr}/`, $options: 'i' } },
+        ...(category === 'tax' ? [{ invoiceNo: { $regex: `^INV/${fyStr}/`, $options: 'i' } }] : [])
+      ]
+    });
 
     let maxSeq = 0;
     existingInvoices.forEach(inv => {
-      const match = (inv.invoiceNo || '').match(pattern);
+      const match = (inv.invoiceNo || '').match(new RegExp(`^${prefix}/${fyStr}/(\\d+)`, 'i')) ||
+                    (category === 'tax' ? (inv.invoiceNo || '').match(new RegExp(`^INV/${fyStr}/(\\d+)`, 'i')) : null);
       if (match) {
         const num = parseInt(match[1], 10);
         if (!isNaN(num) && num > maxSeq) maxSeq = num;
       }
     });
 
-    const nextNum = maxSeq + 1;
+    let nextNum;
+    if (category === 'tax') {
+      // For FY 26-27: sequence starts from 026. If maxSeq < 25, start from 26 (BT/26-27/026).
+      // For future FYs (e.g. 27-28 on 1 April onwards): sequence starts from 001.
+      if (fyStr === '26-27') {
+        nextNum = maxSeq < 25 ? 26 : maxSeq + 1;
+      } else {
+        nextNum = maxSeq + 1;
+      }
+    } else {
+      // Proforma invoice (PI) starts from 001 every financial year
+      nextNum = maxSeq + 1;
+    }
+
     const nextInvoiceNo = `${prefix}/${fyStr}/${String(nextNum).padStart(3, '0')}`;
 
     res.json({

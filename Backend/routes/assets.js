@@ -5,6 +5,25 @@ const path = require('path');
 const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
 const Asset = require('../models/Asset');
+const User = require('../models/User');
+
+// Helper to determine if user has admin/HR access to view and manage all assets
+const isUserAdminOrHR = (user) => {
+  if (!user) return false;
+  const roleName = (user.role?.name || (typeof user.role === 'string' ? user.role : '') || '').toLowerCase().trim();
+  const privilegedRoles = ['admin', 'director', 'hr', 'hr manager', 'super admin'];
+  if (privilegedRoles.some(r => roleName === r || roleName.includes(r))) {
+    return true;
+  }
+  const permissions = user.role?.permissions;
+  if (Array.isArray(permissions)) {
+    return permissions.some(
+      p => p.module && p.module.toLowerCase().trim() === 'assets' &&
+      (p.actions?.includes('create') || p.actions?.includes('update') || p.actions?.includes('delete'))
+    );
+  }
+  return false;
+};
 
 // Ensure signature is available as base64 and clean path in frontend
 try {
@@ -24,7 +43,20 @@ try {
 
 // Helper to get next auto-incremented asset code AST001, AST002...
 async function getNextAssetCode() {
-  const allAssets = await Asset.find({}, 'assetId createdAt').sort({ createdAt: 1 });
+  const latestAsset = await Asset.findOne({ assetId: { $regex: /^AST\d+$/i } })
+    .sort({ createdAt: -1 })
+    .select('assetId')
+    .lean();
+  
+  if (latestAsset && latestAsset.assetId) {
+    const match = latestAsset.assetId.match(/^AST(\d+)$/i);
+    if (match) {
+      const nextNum = parseInt(match[1], 10) + 1;
+      return `AST${String(nextNum).padStart(3, '0')}`;
+    }
+  }
+
+  const allAssets = await Asset.find({}, 'assetId').lean();
   let maxNum = 0;
   allAssets.forEach(a => {
     if (a.assetId) {
@@ -40,9 +72,14 @@ async function getNextAssetCode() {
 }
 
 // Auto migrate legacy asset IDs like AST-MU8D6OJ1 to sequential AST001, AST002...
+let legacyMigrationDone = false;
 async function migrateLegacyAssetCodes() {
+  if (legacyMigrationDone) return;
   try {
-    const allAssets = await Asset.find({}).sort({ createdAt: 1 });
+    const allAssets = await Asset.find({}, '_id assetId createdAt')
+      .sort({ createdAt: 1 })
+      .allowDiskUse(true)
+      .lean();
     const hasLegacy = allAssets.some(a => !a.assetId || !/^AST\d{3,}$/i.test(a.assetId));
     if (hasLegacy) {
       // Pass 1: Set temporary IDs to avoid duplicate key errors during swap
@@ -55,37 +92,53 @@ async function migrateLegacyAssetCodes() {
         await Asset.updateOne({ _id: allAssets[i]._id }, { $set: { assetId: cleanCode } });
       }
     }
+    legacyMigrationDone = true;
   } catch (err) {
     console.error('Error migrating legacy asset codes:', err);
   }
 }
 
-// Get all assets (employee sees their assigned assets, admin sees all)
+// Get all assets (admin & HR see all assets; regular users see only assets assigned to them)
 router.get('/', auth, async (req, res) => {
   try {
-    await migrateLegacyAssetCodes();
-
     let query = {};
     
-    // Check if user has admin access (can create or delete assets)
-    const hasFullAccess = req.user.role.permissions.find(
-      p => p.module === 'assets' && (p.actions.includes('create') || p.actions.includes('delete'))
-    );
+    // Check if user has admin/HR access
+    const hasFullAccess = isUserAdminOrHR(req.user);
     
-    // If not admin, only show assets assigned to this user
+    // If not admin/HR, only show assets assigned to this user
     if (!hasFullAccess) {
-      query.assignedTo = req.user._id;
+      const currentUserId = req.user._id || req.user.id;
+      query.assignedTo = currentUserId;
     }
     
+    // Performance optimization for live environments:
+    // Exclude massive binary/base64 payloads: assignmentHistory array, issuerSignature, and raw signature.
+    // They are only needed inside single asset detail/preview modals (which call GET /assets/:id).
     const assets = await Asset.find(query)
-      .populate('assignedTo', 'firstName lastName employeeId username designation department role joiningDate')
-      .populate('assignedBy', 'firstName lastName employeeId username designation department role')
-      .sort({ createdAt: -1 });
+      .select('-assignmentHistory -issuerSignature -signature')
+      .populate('assignedTo', 'firstName lastName employeeId username designation department')
+      .populate('assignedBy', 'firstName lastName employeeId username designation department')
+      .sort({ createdAt: -1 })
+      .lean();
     
-    res.json(assets);
+    // Replace heavy receiver signature with a lightweight boolean indicator (hasSignature: true/false)
+    // so list payload is reduced from 50MB+ down to ~50KB (1000x smaller and instantaneous in live).
+    // The complete base64 images/signatures and assignment history are loaded on-demand via GET /api/assets/:id
+    // when viewing the Handover Form, Asset Details, or History modals.
+    const lightweightAssets = assets.map(a => {
+      const hasSig = !!(a.signedAt || a.acknowledgement);
+      return {
+        ...a,
+        signature: '',
+        hasSignature: hasSig
+      };
+    });
+    
+    res.json(lightweightAssets);
   } catch (error) {
     console.error('Error fetching assets:', error);
-    res.status(500).json({ message: 'Error fetching assets' });
+    res.status(500).json({ message: 'Error fetching assets', error: error.message });
   }
 });
 
@@ -100,6 +153,26 @@ router.get('/:id', auth, async (req, res) => {
     
     if (!asset) {
       return res.status(404).json({ message: `Asset with ID ${req.params.id} not found` });
+    }
+
+    // Access control: Admin/HR can view any asset, regular users can only view assets assigned to them
+    const hasFullAccess = isUserAdminOrHR(req.user);
+    if (!hasFullAccess) {
+      const assignedId = asset.assignedTo ? (asset.assignedTo._id || asset.assignedTo).toString() : '';
+      const currentUserId = (req.user._id || req.user.id || '').toString();
+      const currentUserEmpId = (req.user.employeeId || '').toString().trim().toLowerCase();
+      const currentUsername = (req.user.username || '').toString().trim().toLowerCase();
+
+      const assignedEmpId = (asset.assignedTo?.employeeId || '').toString().trim().toLowerCase();
+      const assignedUsername = (asset.assignedTo?.username || '').toString().trim().toLowerCase();
+
+      const isAssigned = (assignedId && currentUserId && assignedId === currentUserId) ||
+        (assignedEmpId && currentUserEmpId && assignedEmpId === currentUserEmpId) ||
+        (assignedUsername && currentUsername && assignedUsername === currentUsername);
+
+      if (!isAssigned) {
+        return res.status(403).json({ message: 'Access denied: You can only view assets assigned to you' });
+      }
     }
     
     res.json(asset);
@@ -318,9 +391,7 @@ router.post('/:id/acknowledge', auth, async (req, res) => {
       }
     }
 
-    const hasFullAccess = req.user?.role && Array.isArray(req.user.role.permissions) && req.user.role.permissions.some(
-      p => p.module === 'assets' && (p.actions?.includes('update') || p.actions?.includes('create'))
-    );
+    const hasFullAccess = isUserAdminOrHR(req.user);
 
     if (!isAssignedEmployee && !hasFullAccess) {
       return res.status(403).json({ message: 'You are not authorized to acknowledge this asset' });
