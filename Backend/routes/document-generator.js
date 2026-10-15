@@ -605,6 +605,9 @@ router.post('/generate-offer-letter', auth, checkPermission(['documents', 'lette
     console.log('=== GENERATING OFFER LETTER WITH PUPPETEER ===');
     console.log('Data:', { name, designation, department, dateOfJoining });
 
+    try {
+      delete require.cache[require.resolve('../utils/offerLetterTemplate')];
+    } catch (e) {}
     const { generateOfferLetterHTML } = require('../utils/offerLetterTemplate');
     const finalHtml = generateOfferLetterHTML({
       name,
