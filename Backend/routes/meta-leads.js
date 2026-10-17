@@ -9,6 +9,38 @@ const Deal = require('../models/Deal');
 const Client = require('../models/Client');
 const metaService = require('../services/metaService');
 
+// Cutoff timestamp: old Meta leads are strictly visible ONLY to Admin
+const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-16T19:00:00+05:30');
+
+// Helper to evaluate Meta leads role access
+function getMetaLeadRoleAccess(user) {
+  const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+  const roleNormalized = roleName.replace(/\s+/g, ' ');
+
+  const isSalesHead =
+    roleNormalized.includes('sales head') ||
+    roleNormalized === 'saleshead' ||
+    roleNormalized === 'head of sales';
+
+  const isSalesManager =
+    roleNormalized.includes('sales manager') ||
+    roleNormalized.includes('salesmanager') ||
+    roleNormalized === 'manager of sales';
+
+  const isAdmin =
+    roleNormalized === 'admin' ||
+    roleNormalized === 'super admin' ||
+    roleNormalized === 'director' ||
+    user?.role?.name === 'Admin' ||
+    user?.role?.name === 'Super Admin' ||
+    user?.role?.name === 'Director';
+
+  const canSeeAllLeads = isAdmin || isSalesHead || isSalesManager;
+  const canAssign = canSeeAllLeads;
+
+  return { canSeeAllLeads, canAssign, isSalesHead, isSalesManager, isAdmin, roleName, roleNormalized };
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // CONFIG ENDPOINTS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -309,17 +341,14 @@ router.get('/', auth, async (req, res) => {
 
     const query = {};
 
-    // Leadership, Managers & Sales Team see all leads to assign them
-    const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
-    const canSeeAllLeads =
-      roleNormalized.includes('admin') ||
-      roleNormalized.includes('director') ||
-      roleNormalized.includes('hr') ||
-      roleNormalized.includes('leader') ||
-      roleNormalized.includes('team lead') ||
-      roleNormalized.includes('head') ||
-      roleNormalized.includes('sales team') ||
-      roleNormalized.includes('manager');
+    // Only Sales Head, Sales Manager, and Admin see all new leads to assign them
+    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(req.user);
+
+    // Only Admin can see old Meta leads
+    if (!isAdmin) {
+      query.createdTime = { $gte: DATA_CUTOFF_DATE };
+    }
+
     if (!canSeeAllLeads) {
       query.assignedTo = req.user._id;
     }
@@ -401,17 +430,11 @@ router.get('/stats', auth, async (req, res) => {
       $lte: endOfMonth
     };
 
-    // Non-leadership users only see stats for their assigned leads
-    const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
-    const canSeeAllLeads =
-      roleNormalized.includes('admin') ||
-      roleNormalized.includes('director') ||
-      roleNormalized.includes('hr') ||
-      roleNormalized.includes('leader') ||
-      roleNormalized.includes('team lead') ||
-      roleNormalized.includes('head') ||
-      roleNormalized.includes('sales team') ||
-      roleNormalized.includes('manager');
+    // Only Admin sees stats for old leads; others only see new data
+    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(req.user);
+    if (!isAdmin) {
+      baseQuery.createdTime = { $gte: DATA_CUTOFF_DATE };
+    }
     if (!canSeeAllLeads) {
       baseQuery.assignedTo = req.user._id;
     }
@@ -423,7 +446,7 @@ router.get('/stats', auth, async (req, res) => {
       MetaLead.countDocuments(baseQuery),
       MetaLead.aggregate([
         { $match: baseQuery },
-        
+
         { $group: { _id: '$status', count: { $sum: 1 } } }
       ]),
       MetaLead.aggregate([
@@ -469,30 +492,32 @@ router.get('/source-stats', auth, async (req, res) => {
           sourceLabel: {
             $let: {
               vars: {
-                p:  { $toLower: { $ifNull: ['$platform', ''] } },
+                p: { $toLower: { $ifNull: ['$platform', ''] } },
                 fn: { $toLower: { $ifNull: ['$formName', ''] } }
               },
               in: {
                 $switch: {
                   branches: [
                     // ── Platform field (populated from Meta API) ──────────────
-                    { case: { $eq: ['$$p', 'ig'] },      then: 'Instagram' },
-                    { case: { $eq: ['$$p', 'fb'] },      then: 'Facebook'  },
-                    { case: { $eq: ['$$p', 'website'] }, then: 'Website'   },
+                    { case: { $eq: ['$$p', 'ig'] }, then: 'Instagram' },
+                    { case: { $eq: ['$$p', 'fb'] }, then: 'Facebook' },
+                    { case: { $eq: ['$$p', 'website'] }, then: 'Website' },
                     // ── Keyword fallback (existing leads before platform field) ─
                     { case: { $regexMatch: { input: '$$fn', regex: 'instagram' } }, then: 'Instagram' },
-                    { case: { $regexMatch: { input: '$$fn', regex: 'website'   } }, then: 'Website'   },
-                    { case: { $regexMatch: { input: '$$fn', regex: 'facebook'  } }, then: 'Facebook'  },
+                    { case: { $regexMatch: { input: '$$fn', regex: 'website' } }, then: 'Website' },
+                    { case: { $regexMatch: { input: '$$fn', regex: 'facebook' } }, then: 'Facebook' },
                   ],
                   default: {
                     $cond: [
                       { $gt: [{ $strLenCP: { $ifNull: ['$formName', ''] } }, 0] },
                       '$formName',
-                      { $cond: [
-                        { $gt: [{ $strLenCP: { $ifNull: ['$pageName', ''] } }, 0] },
-                        '$pageName',
-                        'Unknown'
-                      ]}
+                      {
+                        $cond: [
+                          { $gt: [{ $strLenCP: { $ifNull: ['$pageName', ''] } }, 0] },
+                          '$pageName',
+                          'Unknown'
+                        ]
+                      }
                     ]
                   }
                 }
@@ -547,7 +572,7 @@ router.get('/timeline', auth, async (req, res) => {
       roleName.includes('team lead') ||
       roleName.includes('head') ||
       roleName.includes('manager');
-    
+
     // Parse month param or default to current month
     const { month } = req.query;
     let startDate, endDate;
@@ -578,7 +603,7 @@ router.get('/timeline', auth, async (req, res) => {
             sourceLabel: {
               $let: {
                 vars: {
-                  p:  { $toLower: { $ifNull: ['$platform', ''] } },
+                  p: { $toLower: { $ifNull: ['$platform', ''] } },
                   fn: { $toLower: { $ifNull: ['$formName', ''] } }
                 },
                 in: {
@@ -616,11 +641,11 @@ router.get('/timeline', auth, async (req, res) => {
             actualDate: { $ifNull: ['$date', '$createdAt'] }
           }
         },
-        { 
-          $match: { 
+        {
+          $match: {
             actualDate: { $gte: startDate, $lte: endDate },
             ...(canSeeAllLeads ? {} : { assignedTo: req.user._id })
-          } 
+          }
         },
         {
           $addFields: {
@@ -661,7 +686,7 @@ router.get('/timeline', auth, async (req, res) => {
 
     // Sort dates chronologically
     const dates = Array.from(datesSet).sort();
-    
+
     // Format dates for display (e.g., "Jan 10", "Feb 07")
     const formattedDates = dates.map(dateStr => {
       const d = new Date(dateStr + 'T00:00:00');
@@ -744,22 +769,16 @@ router.get('/followups/due', auth, async (req, res) => {
   try {
     const now = new Date();
 
-    const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
-    const canManageLeads =
-      roleNormalized.includes('admin') ||
-      roleNormalized.includes('director') ||
-      roleNormalized.includes('hr') ||
-      roleNormalized.includes('leader') ||
-      roleNormalized.includes('team lead') ||
-      roleNormalized.includes('head') ||
-      roleNormalized.includes('sales team') ||
-      roleNormalized.includes('manager');
+    const { canSeeAllLeads: canManageLeads, isAdmin } = getMetaLeadRoleAccess(req.user);
 
     const query = {
       followUpDate: { $ne: null, $lte: now },
       followUpCompleted: { $ne: true },
       status: { $nin: ['Converted', 'Closed', 'Not Interested'] }
     };
+    if (!isAdmin) {
+      query.createdTime = { $gte: DATA_CUTOFF_DATE };
+    }
     if (!canManageLeads) query.assignedTo = req.user._id;
 
     const leads = await MetaLead.find(query)
@@ -788,16 +807,14 @@ router.get('/:id', auth, async (req, res) => {
 
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-    // Non-leadership users can only view their assigned leads
-    const roleName = (req.user.role?.name || '').toLowerCase();
-    const canSeeAllLeads =
-      roleName.includes('admin') ||
-      roleName.includes('director') ||
-      roleName.includes('hr') ||
-      roleName.includes('leader') ||
-      roleName.includes('team lead') ||
-      roleName.includes('head') ||
-      roleName.includes('manager');
+    // Non-admin roles cannot view old Meta leads
+    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(req.user);
+    if (!isAdmin) {
+      const leadTime = new Date(lead.createdTime || lead.createdAt || 0);
+      if (leadTime < DATA_CUTOFF_DATE) {
+        return res.status(403).json({ message: 'Access denied. Old leads are only visible to Admin.' });
+      }
+    }
     if (!canSeeAllLeads && String(lead.assignedTo?._id || lead.assignedTo) !== String(req.user._id)) {
       return res.status(403).json({ message: 'Access denied. This lead is not assigned to you.' });
     }
@@ -818,17 +835,8 @@ router.patch('/:id', auth, async (req, res) => {
     const lead = await MetaLead.findById(req.params.id);
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-    // Admin, Director, HR, Team Leader, Sales Head, Sales Team, Manager can assign and reassign leads
-    const roleNormalized = (req.user.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
-    const canAssign =
-      roleNormalized.includes('admin') ||
-      roleNormalized.includes('director') ||
-      roleNormalized.includes('hr') ||
-      roleNormalized.includes('leader') ||
-      roleNormalized.includes('team lead') ||
-      roleNormalized.includes('head') ||
-      roleNormalized.includes('sales team') ||
-      roleNormalized.includes('manager');
+    // Only Sales Head, Sales Manager, and Admin can assign and reassign leads
+    const { canAssign } = getMetaLeadRoleAccess(req.user);
     if (!canAssign) {
       if (String(lead.assignedTo) !== String(req.user._id)) {
         return res.status(403).json({ message: 'Access denied. This lead is not assigned to you.' });

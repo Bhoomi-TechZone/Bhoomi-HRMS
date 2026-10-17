@@ -113,6 +113,17 @@ export const AssetAcknowledgmentForm = ({
 }) => {
   const formPrintRef = useRef(null);
 
+  // Normalise assigned assets list
+  const assetsList = React.useMemo(() => {
+    if (Array.isArray(assignedAssets) && assignedAssets.length > 0) {
+      return assignedAssets;
+    }
+    if (asset) return [asset];
+    return [];
+  }, [assignedAssets, asset]);
+
+  const primaryAsset = asset || assetsList[0] || {};
+
   // Check if current user is the assigned receiver of this form
   const isAssignedReceiver = React.useMemo(() => {
     if (!currentUser) return false;
@@ -145,17 +156,6 @@ export const AssetAcknowledgmentForm = ({
     }
     return showActions;
   }, [showActions, currentUser, isAssignedReceiver]);
-
-  // Normalise assigned assets list
-  const assetsList = React.useMemo(() => {
-    if (Array.isArray(assignedAssets) && assignedAssets.length > 0) {
-      return assignedAssets;
-    }
-    if (asset) return [asset];
-    return [];
-  }, [assignedAssets, asset]);
-
-  const primaryAsset = asset || assetsList[0] || {};
 
   const formatAssetCode = (item) => {
     if (!item) return '—';

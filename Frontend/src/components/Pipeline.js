@@ -2269,6 +2269,9 @@ function TableStatusPill({ status, onSelectStatus }) {
   );
 }
 
+// Cutoff timestamp: old pipeline data (before this cutoff) is strictly visible ONLY to Admin
+const DATA_CUTOFF_DATE = new Date('2026-10-16T19:00:00+05:30');
+
 function Pipeline() {
   const { user, hasPermission } = useAuth();
 
@@ -2276,15 +2279,38 @@ function Pipeline() {
     return (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
   }, [user]);
 
-  const isSalesHead = useMemo(() => {
-    return roleName === 'sales head' || roleName === 'saleshead' || roleName === 'head of sales';
+  const roleNormalized = useMemo(() => {
+    return roleName.replace(/\s+/g, ' ');
   }, [roleName]);
+
+  const isSalesHead = useMemo(() => {
+    return (
+      roleNormalized.includes('sales head') ||
+      roleNormalized === 'saleshead' ||
+      roleNormalized === 'head of sales'
+    );
+  }, [roleNormalized]);
+
+  const isSalesManager = useMemo(() => {
+    return (
+      roleNormalized.includes('sales manager') ||
+      roleNormalized.includes('salesmanager') ||
+      roleNormalized === 'manager of sales'
+    );
+  }, [roleNormalized]);
 
   const isAdmin = useMemo(() => {
-    return roleName === 'admin' || roleName === 'super admin' || roleName === 'director';
-  }, [roleName]);
+    return (
+      roleNormalized === 'admin' ||
+      roleNormalized === 'super admin' ||
+      roleNormalized === 'director' ||
+      user?.role?.name === 'Admin' ||
+      user?.role?.name === 'Super Admin' ||
+      user?.role?.name === 'Director'
+    );
+  }, [roleNormalized, user]);
 
-  const hasFullAccess = isAdmin || isSalesHead;
+  const hasFullAccess = isAdmin || isSalesHead || isSalesManager;
 
   // Module actions permissions
   const canRead = useMemo(() => {
@@ -2305,8 +2331,14 @@ function Pipeline() {
 
   // Ownership verification for data isolation
   const isItemOwnedByUser = useCallback((item, type = 'deal') => {
-    if (hasFullAccess) return true;
+    if (isAdmin) return true;
     if (!item || !user) return false;
+
+    // Old pipeline items (created before cutoff date) are strictly visible ONLY to Admin
+    const itemDate = new Date(item.createdAt || item.date || 0);
+    if (itemDate < DATA_CUTOFF_DATE) return false;
+
+    if (hasFullAccess) return true;
 
     const userId = (user._id || user.id || '').toString();
     const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
@@ -2343,7 +2375,7 @@ function Pipeline() {
     }
 
     return false;
-  }, [user, hasFullAccess]);
+  }, [user, hasFullAccess, isAdmin]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [deals, setDeals] = useState([]);

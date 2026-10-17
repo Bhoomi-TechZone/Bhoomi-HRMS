@@ -33,6 +33,9 @@ const META_STATUS_BG_COLORS = {
   'Closed': '#f1f5f9'
 };
 
+// Cutoff timestamp: old leads data (before this cutoff) is strictly visible ONLY to Admin
+const DATA_CUTOFF_DATE = new Date('2026-10-16T19:00:00+05:30');
+
 function MyLeads() {
   const { user, hasPermission } = useAuth();
   const canRead = hasPermission('leads', 'read');
@@ -41,24 +44,31 @@ function MyLeads() {
   const canDelete = hasPermission('leads', 'delete');
 
   const roleNameLower = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
-
   const roleNormalized = roleNameLower.replace(/\s+/g, ' ');
 
-  // Full Access: Admin, Director, HR, HR Manager, Manager, Team Leader, Sales Head, Sales Team can see ALL company leads
-  // Individual 'Sales' role, 'Executives', and regular employees only see their assigned leads or leads they added
-  const hasFullAccess =
+  const isAdmin =
+    roleNormalized === 'admin' ||
+    roleNormalized === 'super admin' ||
+    roleNormalized === 'director' ||
     user?.role?.name === 'Admin' ||
-    user?.role?.name === 'Director' ||
-    user?.role?.name === 'HR' ||
-    user?.role?.name === 'HR Manager' ||
-    roleNormalized.includes('manager') ||
-    roleNormalized.includes('leader') ||
-    roleNormalized.includes('team lead') ||
-    roleNormalized.includes('head') ||
-    roleNormalized.includes('sales team');
+    user?.role?.name === 'Super Admin' ||
+    user?.role?.name === 'Director';
 
-  // Multi-Assign and Lead Assignment are ONLY for Manager, Admin, Director, HR, Sales Head, Sales Team, and Team Leader
-  // Individual 'Sales' role, 'Executives', and regular employees cannot assign leads
+  const isSalesHead =
+    roleNormalized.includes('sales head') ||
+    roleNormalized === 'saleshead' ||
+    roleNormalized === 'head of sales';
+
+  const isSalesManager =
+    roleNormalized.includes('sales manager') ||
+    roleNormalized.includes('salesmanager') ||
+    roleNormalized === 'manager of sales';
+
+  // Only Admin, Sales Head, and Sales Manager have full company visibility across sales executives
+  // Standard roles (Sales Executives, Employees, etc.) only see their own created or assigned leads
+  const hasFullAccess = isAdmin || isSalesHead || isSalesManager;
+
+  // Multi-Assign and Lead Assignment: Sales Head, Sales Manager, and Admin can assign leads to anyone
   const canMultiAssign = hasFullAccess;
   const canAssignLeads = hasFullAccess;
   const isSales = roleNameLower.includes('sales');
@@ -510,10 +520,20 @@ function MyLeads() {
       createdAt: m.createdTime,
       assignedTo: m.assignedTo,
     }));
-    return [...regular, ...meta];
-  }, [leads, metaLeads]);
+    let merged = [...regular, ...meta];
 
-  // ── Active Sales, Sales Head, and Sales Team employees for assignment (excluding current user) ───────────
+    // Only Admin can see old leads data. Sales Head and other roles can only see new leads from cutoff date onwards.
+    if (!isAdmin) {
+      merged = merged.filter(l => {
+        const d = new Date(l.createdAt || l.createdTime || l.addedOn || l.leadDate || 0);
+        return !isNaN(d.getTime()) && d >= DATA_CUTOFF_DATE;
+      });
+    }
+
+    return merged;
+  }, [leads, metaLeads, isAdmin]);
+
+  // ── Active employees for assignment (Sales Head/Admin can assign to anyone) ───────────
   const salesEmployees = useMemo(() => {
     const currentUserId = user?._id || user?.id;
     return employees.filter(emp => {
@@ -523,11 +543,14 @@ function MyLeads() {
       // Do not show current user in the assignment list
       if (currentUserId && String(emp._id) === String(currentUserId)) return false;
 
-      // Only show employees whose role is Sales, Sales Head, or Sales Team
+      // Sales Head and Admin can assign leads to anyone in the organisation
+      if (hasFullAccess) return true;
+
+      // Other roles can only assign to sales employees
       const r = (emp.role?.name || emp.role || '').toLowerCase();
       return r.includes('sales');
     });
-  }, [employees, user?._id, user?.id]);
+  }, [employees, user?._id, user?.id, hasFullAccess]);
 
   // ── Sales and Marketing employees (for filtering) ────────────────────────
   const filterEmployees = useMemo(() =>
@@ -2458,7 +2481,13 @@ function MyLeads() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h1 style={{ fontSize: "24px", fontWeight: 600, color: "#0f172a", margin: 0, letterSpacing: "-0.025em" }}>Leads Management</h1>
-          <p style={{ fontSize: "13px", color: "#94a3b8", margin: "4px 0 0", fontWeight: 500 }}>Manage and monitor all leads across the organisation</p>
+          <p style={{ fontSize: "13px", color: "#94a3b8", margin: "4px 0 0", fontWeight: 500 }}>
+            {isAdmin
+              ? 'Manage and monitor all leads across the organisation (Archive & Active)'
+              : isSalesHead
+              ? 'Monitor all sales executive leads and assign to anyone'
+              : 'Manage and monitor your assigned leads'}
+          </p>
         </div>
         <div ref={headerActionsRef} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {canRead && (
@@ -3076,7 +3105,7 @@ function MyLeads() {
                 flexShrink: 0
               }}>
                 {movePipelineSuccessInfo.isUnmoved ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>
                 ) : (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                 )}

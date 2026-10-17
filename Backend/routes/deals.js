@@ -39,24 +39,52 @@ function parseObjectId(val, fallback = null) {
   return null;
 }
 
+// Cutoff timestamp: old pipeline data (before this cutoff) is strictly visible ONLY to Admin
+const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-16T19:00:00+05:30');
+
 // Helper for checking role permissions and data access levels
 function checkAccess(user) {
   const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
-  const isSalesHead = roleName === 'sales head' || roleName === 'saleshead' || roleName === 'head of sales';
-  const isAdmin = roleName === 'admin' || roleName === 'super admin' || roleName === 'director';
-  const hasFullAccess = isAdmin || isSalesHead;
+  const roleNormalized = roleName.replace(/\s+/g, ' ');
+
+  const isSalesHead =
+    roleNormalized.includes('sales head') ||
+    roleNormalized === 'saleshead' ||
+    roleNormalized === 'head of sales';
+
+  const isSalesManager =
+    roleNormalized.includes('sales manager') ||
+    roleNormalized.includes('salesmanager') ||
+    roleNormalized === 'manager of sales';
+
+  const isAdmin =
+    roleNormalized === 'admin' ||
+    roleNormalized === 'super admin' ||
+    roleNormalized === 'director' ||
+    user?.role?.name === 'Admin' ||
+    user?.role?.name === 'Super Admin' ||
+    user?.role?.name === 'Director';
+
+  const hasFullAccess = isAdmin || isSalesHead || isSalesManager;
 
   const permissions = Array.isArray(user?.role?.permissions) ? user.role.permissions : [];
   const hasRead = hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals' || p.module === 'proposals') && p.actions.includes('read'));
-  const hasCreate = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('create'));
-  const hasUpdate = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('update'));
+  const hasCreate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('create'));
+  const hasUpdate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('update'));
   const hasDelete = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('delete'));
 
-  return { roleName, isSalesHead, isAdmin, hasFullAccess, hasRead, hasCreate, hasUpdate, hasDelete };
+  return { roleName, isSalesHead, isSalesManager, isAdmin, hasFullAccess, hasRead, hasCreate, hasUpdate, hasDelete };
 }
 
 // Helper to check if a specific deal is accessible to a user
-function isDealOwnedByUser(deal, user, hasFullAccess) {
+function isDealOwnedByUser(deal, user, hasFullAccess, isAdmin) {
+  if (isAdmin) return true;
+  if (!deal || !user) return false;
+
+  // Old deals are strictly visible only to Admin
+  const dealDate = new Date(deal.createdAt || 0);
+  if (dealDate < DATA_CUTOFF_DATE) return false;
+
   if (hasFullAccess) return true;
   if (!deal || !user) return false;
 
@@ -87,14 +115,19 @@ router.get('/', auth, async (req, res) => {
       return res.status(401).json({ message: 'User not found' });
     }
 
-    const { hasRead, hasFullAccess } = checkAccess(user);
+    const { hasRead, hasFullAccess, isAdmin } = checkAccess(user);
     if (!hasRead) {
       return res.status(403).json({ message: 'Access denied. Read permission required.' });
     }
 
     let query = {};
 
-    // Data isolation: Sales Head and Admin see all deals; other roles only see their data
+    // Only Admin can see old pipeline deals. Sales Head and others only see new deals.
+    if (!isAdmin) {
+      query.createdAt = { $gte: DATA_CUTOFF_DATE };
+    }
+
+    // Data isolation: Sales Head, Sales Manager, and Admin see all new deals; other roles only see their own
     if (!hasFullAccess) {
       const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
       const userEmail = (user.email || '').toLowerCase().trim();
@@ -157,7 +190,7 @@ router.get('/:id', auth, async (req, res) => {
       return res.status(401).json({ message: 'User not found' });
     }
 
-    const { hasRead, hasFullAccess } = checkAccess(user);
+    const { hasRead, hasFullAccess, isAdmin } = checkAccess(user);
     if (!hasRead) {
       return res.status(403).json({ message: 'Access denied. Read permission required.' });
     }
@@ -176,7 +209,7 @@ router.get('/:id', auth, async (req, res) => {
     }
 
     // Role data isolation check
-    if (!isDealOwnedByUser(deal, user, hasFullAccess)) {
+    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin)) {
       return res.status(403).json({ message: 'Access denied. You can only view your own deals.' });
     }
     
@@ -307,7 +340,7 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(401).json({ message: 'User not found' });
     }
 
-    const { hasUpdate, hasFullAccess } = checkAccess(user);
+    const { hasUpdate, hasFullAccess, isAdmin } = checkAccess(user);
     if (!hasUpdate) {
       return res.status(403).json({ message: 'Access denied. Update permission required.' });
     }
@@ -317,7 +350,7 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Deal not found' });
     }
 
-    if (!isDealOwnedByUser(deal, user, hasFullAccess)) {
+    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin)) {
       return res.status(403).json({ message: 'Access denied. You can only update your own deals.' });
     }
     
@@ -484,7 +517,7 @@ router.delete('/:id', auth, async (req, res) => {
       return res.status(401).json({ message: 'User not found' });
     }
 
-    const { hasDelete, hasFullAccess } = checkAccess(user);
+    const { hasDelete, hasFullAccess, isAdmin } = checkAccess(user);
     if (!hasDelete) {
       return res.status(403).json({ message: 'Access denied. Delete permission required.' });
     }
@@ -494,7 +527,7 @@ router.delete('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Deal not found' });
     }
 
-    if (!isDealOwnedByUser(deal, user, hasFullAccess)) {
+    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin)) {
       return res.status(403).json({ message: 'Access denied. You can only delete your own deals.' });
     }
     
@@ -530,7 +563,7 @@ router.post('/:id/activities', auth, async (req, res) => {
       return res.status(401).json({ message: 'User not found' });
     }
 
-    const { hasUpdate, hasFullAccess } = checkAccess(user);
+    const { hasUpdate, hasFullAccess, isAdmin } = checkAccess(user);
     if (!hasUpdate) {
       return res.status(403).json({ message: 'Access denied. Update permission required.' });
     }
@@ -540,7 +573,7 @@ router.post('/:id/activities', auth, async (req, res) => {
       return res.status(404).json({ message: 'Deal not found' });
     }
 
-    if (!isDealOwnedByUser(deal, user, hasFullAccess)) {
+    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin)) {
       return res.status(403).json({ message: 'Access denied. You can only add activities to your own deals.' });
     }
 

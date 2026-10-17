@@ -46,17 +46,27 @@ function generateOfferLetterHTML(data = {}) {
     ? coreResponsibilities.split('\n').map(s => s.trim().replace(/^[•\-\*]\s*/, '')).filter(Boolean)
     : defaultCoreList;
 
-  const perfList = performanceExpectations && performanceExpectations.trim()
+  const rawPerfList = performanceExpectations && performanceExpectations.trim()
     ? performanceExpectations.split('\n').map(s => s.trim().replace(/^[•\-\*]\s*/, '')).filter(Boolean)
     : defaultPerfList;
 
-  // Dynamic budget calculation to guarantee LOW MARGINS and ZERO LARGE DEAD WHITE SPACE
-  // Page 1 content height available: 297mm - 4mm (top) - 16mm (footer) = 277mm.
-  // Dynamic budget calculation for line-wise bullet layout:
-  // Page 1 available space for Section 2 content below Section 2 intro: ~135mm.
-  const estCoreHeight = coreList.reduce((acc, item) => acc + (item.length > 70 ? 7 : 3.8), 0) + 5;
-  const estPerfHeight = perfList.reduce((acc, item) => acc + (item.length > 70 ? 7 : 3.8), 0) + 5;
-  const secCHeight = 36;
+  // Deduplicate: If an item in performance expectations already exists in core responsibilities, don't repeat it
+  const dedupedPerfList = rawPerfList.filter(p => 
+    !coreList.some(c => c.toLowerCase().trim() === p.toLowerCase().trim())
+  );
+  // If all items were duplicates or empty, fall back to default performance expectations
+  const perfList = dedupedPerfList.length > 0 ? dedupedPerfList : defaultPerfList;
+
+  // Dynamic budget calculation to guarantee LOW MARGINS and ZERO FOOTER OVERLAP
+  // Page 1 content height breakdown:
+  // Header (~30mm) + Title (~8mm) + To block (~18mm) + Details Table (~66mm) + Sec 1 (~16mm) + Sec 2 intro (~10mm) = ~148-155mm.
+  // Footer is 16mm at bottom (281-297mm).
+  // Target safe zone for content bottom: 255mm - 263mm.
+  // Space available for Section 2 content on Page 1: ~90-95mm.
+  const calcBulletH = (item) => (item.length > 70 ? 5.8 : 3.4);
+  const estCoreHeight = coreList.reduce((acc, item) => acc + calcBulletH(item), 0) + 3;
+  const estPerfHeight = perfList.reduce((acc, item) => acc + calcBulletH(item), 0) + 3;
+  const secCHeight = 30;
 
   let page1CoreItems = [];
   let page2CoreItems = [];
@@ -64,33 +74,42 @@ function generateOfferLetterHTML(data = {}) {
   let p1HasSecC = true;
   let layoutMode = '3page-compact';
 
-  if (estCoreHeight + estPerfHeight + secCHeight <= 135) {
-    // Normal / up to 13 responsibilities line-wise:
-    // Sections 2A, 2B, and 2C all fit on Page 1 line-wise, filling ~82% of Page 1 with ~35-50mm clearance above footer.
-    // Section 3 (Compensation), Section 4 (Probation), and Section 5 start cleanly on Page 2 (zero footer clashing!).
+  if (estCoreHeight + estPerfHeight + secCHeight <= 100) {
+    // Short core list (up to ~7 items): Sections 2A, 2B, and 2C all fit on Page 1 line-wise.
     page1CoreItems = coreList;
     page2CoreItems = [];
     p1HasSecB = true;
     p1HasSecC = true;
     layoutMode = '3page-compact';
-  } else if (estCoreHeight + estPerfHeight <= 130) {
-    // Longer core list (14-16 items line-wise): Section 2A and 2B fit on Page 1 line-wise.
-    // Section 2C starts at the top of Page 2!
+  } else if (estCoreHeight + estPerfHeight <= 95) {
+    // Medium-short list (8-10 items): Sections 2A & 2B fit on Page 1; Section 2C starts on Page 2.
     page1CoreItems = coreList;
     page2CoreItems = [];
     p1HasSecB = true;
     p1HasSecC = false;
     layoutMode = '3page-compact';
-  } else if (estCoreHeight <= 125) {
-    // 17-20 items line-wise: Section 2A fits on Page 1 line-wise; Section 2B and 2C start on Page 2.
+  } else if (estCoreHeight <= 88 && coreList.length <= 15) {
+    // Medium list (11-15 items): Section 2A fits completely on Page 1; Section 2B & 2C start on Page 2.
     page1CoreItems = coreList;
     page2CoreItems = [];
     p1HasSecB = false;
     p1HasSecC = false;
     layoutMode = 'multi-page-split';
   } else {
-    // Extreme list (> 20 items): split core responsibilities across pages
-    const maxP1 = 15;
+    // Long list (16+ items): Pack Page 1 with bullets up to 15 items so Page 1 is filled completely.
+    // Zero footer overlap and zero huge bottom margin.
+    let accH = 0;
+    let splitIdx = 0;
+    for (let i = 0; i < coreList.length; i++) {
+      const h = calcBulletH(coreList[i]);
+      if (accH + h <= 92 && splitIdx < 15) {
+        accH += h;
+        splitIdx++;
+      } else {
+        break;
+      }
+    }
+    const maxP1 = Math.max(splitIdx, 14);
     page1CoreItems = coreList.slice(0, maxP1);
     page2CoreItems = coreList.slice(maxP1);
     p1HasSecB = false;
@@ -435,7 +454,8 @@ function generateOfferLetterHTML(data = {}) {
   .page-inner {
     position: relative;
     z-index: 1;
-    height: 100%;
+    max-height: 275mm;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
@@ -512,22 +532,23 @@ function generateOfferLetterHTML(data = {}) {
   .details-table {
     width: 100%;
     border-collapse: collapse;
-    margin: 1.5px 0 2.5px 0;
-    font-size: 7.5pt;
+    margin: 1px 0 2px 0;
+    font-size: 7.3pt;
   }
   .details-table th {
     border: 1px solid #000;
-    padding: 1.5px 5px;
+    padding: 1.2px 5px;
     background: #fff;
-    font-size: 8pt;
+    font-size: 7.7pt;
     font-weight: bold;
     text-align: center;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.3px;
   }
   .details-table td {
     border: 1px solid #000;
-    padding: 1.1px 5px;
+    padding: 0.7px 5px;
     vertical-align: middle;
+    line-height: 1.15;
   }
   .details-table td:first-child {
     font-weight: bold;
@@ -541,27 +562,27 @@ function generateOfferLetterHTML(data = {}) {
 
   /* Section styles */
   .sec-heading {
-    font-size: 8.3pt;
+    font-size: 8.1pt;
     font-weight: bold;
-    margin: 1.8px 0 0.8px 0;
+    margin: 1.2px 0 0.5px 0;
     color: #000;
   }
   .subsec-heading {
-    font-size: 8pt;
+    font-size: 7.8pt;
     font-weight: bold;
-    margin: 1.2px 0 0.6px 0;
+    margin: 0.8px 0 0.4px 0;
     color: #000;
   }
   p {
-    margin: 1px 0;
+    margin: 0.8px 0;
     text-align: justify;
-    line-height: 1.23;
-    font-size: 8.2pt;
+    line-height: 1.20;
+    font-size: 8.0pt;
   }
   .bullet-list {
     margin-left: 6px;
-    margin-top: 1px;
-    margin-bottom: 1.8px;
+    margin-top: 0.5px;
+    margin-bottom: 1.2px;
   }
   .bullet-list.two-col {
     display: grid;
@@ -569,15 +590,15 @@ function generateOfferLetterHTML(data = {}) {
     column-gap: 12px;
     row-gap: 1px;
     margin-left: 0;
-    margin-top: 1px;
-    margin-bottom: 1.8px;
+    margin-top: 0.5px;
+    margin-bottom: 1.2px;
   }
   .bullet-item {
     position: relative;
     padding-left: 9px;
-    margin: 0.8px 0;
-    font-size: 7.9pt;
-    line-height: 1.21;
+    margin: 0.45px 0;
+    font-size: 7.6pt;
+    line-height: 1.18;
     text-align: justify;
     word-break: break-word;
   }
@@ -585,7 +606,7 @@ function generateOfferLetterHTML(data = {}) {
     content: "•";
     position: absolute;
     left: 1px;
-    font-size: 7.9pt;
+    font-size: 7.6pt;
   }
 
   /* Signature & Acceptance block */

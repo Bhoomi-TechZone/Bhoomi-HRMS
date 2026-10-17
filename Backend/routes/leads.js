@@ -7,65 +7,98 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
 
+// Cutoff timestamp: old leads (before this cutoff) are strictly visible ONLY to Admin.
+// Sales Head and other roles only see new leads added from this cutoff onwards.
+const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-16T19:00:00+05:30');
+
+// Helper to evaluate lead permissions
+// Only Sales Head, Sales Manager, and Admin have organization-wide full access in their timeframe.
+// Only Admin can see old data as well as new data.
+function getLeadRoleAccess(user) {
+  const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+  const roleNormalized = roleName.replace(/\s+/g, ' ');
+
+  const isSalesHead =
+    roleNormalized.includes('sales head') ||
+    roleNormalized === 'saleshead' ||
+    roleNormalized === 'head of sales';
+
+  const isSalesManager =
+    roleNormalized.includes('sales manager') ||
+    roleNormalized.includes('salesmanager') ||
+    roleNormalized === 'manager of sales';
+
+  const isAdmin =
+    roleNormalized === 'admin' ||
+    roleNormalized === 'super admin' ||
+    roleNormalized === 'director' ||
+    user?.role?.name === 'Admin' ||
+    user?.role?.name === 'Super Admin' ||
+    user?.role?.name === 'Director';
+
+  const hasFullAccess = isAdmin || isSalesHead || isSalesManager;
+  const canAssignOrManage = hasFullAccess;
+
+  return { hasFullAccess, canAssignOrManage, isSalesHead, isSalesManager, isAdmin, roleName, roleNormalized };
+}
+
 // Get all leads
 router.get('/', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).populate('role');
-    
+
     let query = {};
-    
-    // Leadership & Managers see ALL leads across the organisation
-    const roleName = (user.role?.name || '').toLowerCase();
-    const roleNormalized = roleName.replace(/\s+/g, ' ');
-    const hasFullAccess = 
-      user.role?.name === 'Admin' ||
-      user.role?.name === 'Director' ||
-      user.role?.name === 'HR' ||
-      user.role?.name === 'Manager' ||
-      user.role?.name === 'HR Manager' ||
-      roleNormalized.includes('manager') ||
-      roleNormalized.includes('leader') ||
-      roleNormalized.includes('team lead') ||
-      roleNormalized.includes('head') ||
-      roleNormalized.includes('sales team');
-    
-    // Check if user has read permission (sales & executives can read their assigned/added leads)
+
+    const { hasFullAccess, canAssignOrManage, isAdmin, roleName } = getLeadRoleAccess(user);
+
+    // Check if user has read permission
     const hasReadPermission = hasFullAccess ||
       roleName.includes('sales') ||
       roleName.includes('executive') ||
       (user.role?.permissions && user.role.permissions.some(
         p => p.module === 'leads' && p.actions.includes('read')
       ));
-    
+
     // If user doesn't have read permission, deny access
     if (!hasReadPermission) {
       return res.status(403).json({ message: 'Access denied. Read permission required.' });
     }
-    
-    // Sales, executives, and regular employees only see leads assigned to them or created/added by them
+
+    // Only Admin can see old leads. Sales Head, Sales Manager, and other roles only see new data.
+    if (!isAdmin) {
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { createdAt: { $gte: DATA_CUTOFF_DATE } },
+          { addedOn: { $gte: DATA_CUTOFF_DATE } }
+        ]
+      });
+    }
+
+    // Non-full-access roles only see their own assigned or created leads
     if (!hasFullAccess) {
       query.$or = [
         { assignedTo: req.user.id },
         { createdBy: req.user.id }
       ];
     }
-    
+
     // Filter by status if provided
     if (req.query.status) {
       query.status = req.query.status;
     }
-    
+
     // Filter by source if provided
     if (req.query.source) {
       query.source = req.query.source;
     }
-    
+
     const leads = await Lead.find(query)
       .populate('assignedTo', 'firstName lastName email employeeId')
       .populate('createdBy', 'firstName lastName email')
       .populate('history.by', 'firstName lastName')
       .sort({ createdAt: -1 });
-    
+
     res.json(leads);
   } catch (error) {
     console.error('Get leads error:', error);
@@ -81,32 +114,28 @@ router.get('/:id', auth, async (req, res) => {
       .populate('assignedTo', 'firstName lastName email employeeId')
       .populate('createdBy', 'firstName lastName email')
       .populate('history.by', 'firstName lastName');
-    
+
     if (!lead) {
       return res.status(404).json({ message: 'Lead not found' });
     }
-    
-    const roleName = (user.role?.name || '').toLowerCase();
-    const roleNormalized = roleName.replace(/\s+/g, ' ');
-    const hasFullAccess = 
-      user.role?.name === 'Admin' ||
-      user.role?.name === 'Director' ||
-      user.role?.name === 'HR' ||
-      user.role?.name === 'Manager' ||
-      user.role?.name === 'HR Manager' ||
-      roleNormalized.includes('manager') ||
-      roleNormalized.includes('leader') ||
-      roleNormalized.includes('team lead') ||
-      roleNormalized.includes('head') ||
-      roleNormalized.includes('sales team');
-    
+
+    const { hasFullAccess, isAdmin } = getLeadRoleAccess(user);
+
+    // Old leads are strictly visible only to Admin
+    if (!isAdmin) {
+      const leadDate = new Date(lead.createdAt || lead.addedOn || 0);
+      if (leadDate < DATA_CUTOFF_DATE) {
+        return res.status(403).json({ message: 'Access denied. Old leads are only accessible by Admin.' });
+      }
+    }
+
     // Sales and regular employees can only view their assigned leads or leads they created/added
     const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
-                              (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
+      (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
     if (!hasFullAccess && !isOwnerOrAssignee) {
       return res.status(403).json({ message: 'Access denied' });
     }
-    
+
     res.json(lead);
   } catch (error) {
     console.error('Get lead error:', error);
@@ -133,27 +162,17 @@ router.post('/', auth, checkPermission('leads', 'create'), async (req, res) => {
       followUpNotes,
       leadType
     } = req.body;
-    
+
     // Validate required fields
     if (!name || !email || !phone || !source) {
       return res.status(400).json({ message: 'Missing required fields: name, email, phone, source' });
     }
-    
+
     // Validate assigned user and assignment permissions
     let finalAssignedTo = null;
     if (assignedTo) {
       const creator = await User.findById(req.user.id).populate('role');
-      const creatorRole = (creator?.role?.name || '').toLowerCase().replace(/\s+/g, ' ');
-      const canAssign =
-        creator?.role?.name === 'Admin' ||
-        creator?.role?.name === 'Director' ||
-        creator?.role?.name === 'HR' ||
-        creator?.role?.name === 'HR Manager' ||
-        creatorRole.includes('manager') ||
-        creatorRole.includes('leader') ||
-        creatorRole.includes('team lead') ||
-        creatorRole.includes('head') ||
-        creatorRole.includes('sales team');
+      const { canAssignOrManage: canAssign } = getLeadRoleAccess(creator);
 
       if (canAssign) {
         const assignedUser = await User.findById(assignedTo);
@@ -163,7 +182,7 @@ router.post('/', auth, checkPermission('leads', 'create'), async (req, res) => {
         finalAssignedTo = assignedTo;
       }
     }
-    
+
     // Prepare lead data
     const leadData = {
       name: name.trim(),
@@ -188,22 +207,22 @@ router.post('/', auth, checkPermission('leads', 'create'), async (req, res) => {
         date: new Date()
       }]
     };
-    
+
     // Handle nextFollowUp date - convert from string if provided
     if (nextFollowUp && nextFollowUp.trim()) {
       leadData.nextFollowUp = new Date(nextFollowUp);
     } else {
       leadData.nextFollowUp = null;
     }
-    
+
     const lead = new Lead(leadData);
     await lead.save();
-    
+
     const populatedLead = await Lead.findById(lead._id)
       .populate('assignedTo', 'firstName lastName email employeeId')
       .populate('createdBy', 'firstName lastName email')
       .populate('history.by', 'firstName lastName');
-    
+
     res.status(201).json(populatedLead);
   } catch (error) {
     console.error('Create lead error:', error);
@@ -232,7 +251,7 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
             continue;
           }
         }
-        
+
         let normalizedLeadType = null;
         if (row.leadType) {
           const cleanType = String(row.leadType).trim();
@@ -292,11 +311,11 @@ router.put('/:id', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).populate('role');
     const lead = await Lead.findById(req.params.id);
-    
+
     if (!lead) {
       return res.status(404).json({ message: 'Lead not found' });
     }
-    
+
     // Check permissions
     const hasUpdatePermission = user.role?.permissions ? user.role.permissions.some(
       p => p.module === 'leads' && p.actions.includes('update')
@@ -304,25 +323,18 @@ router.put('/:id', auth, async (req, res) => {
     const hasReadPermission = user.role?.permissions ? user.role.permissions.some(
       p => p.module === 'leads' && p.actions.includes('read')
     ) : false;
-    const roleName = (user.role?.name || '').toLowerCase();
-    const roleNormalized = roleName.replace(/\s+/g, ' ');
-    const isLeadershipOrManager =
-      user.role?.name === 'Admin' ||
-      user.role?.name === 'Director' ||
-      user.role?.name === 'HR' ||
-      user.role?.name === 'Manager' ||
-      user.role?.name === 'HR Manager' ||
-      roleNormalized.includes('manager') ||
-      roleNormalized.includes('leader') ||
-      roleNormalized.includes('team lead') ||
-      roleNormalized.includes('head') ||
-      roleNormalized.includes('sales team');
+    const { hasFullAccess, canAssignOrManage, isAdmin } = getLeadRoleAccess(user);
 
-    const canAssignOrManage = isLeadershipOrManager;
-    const hasFullAccess = isLeadershipOrManager;
+    // Old leads can only be updated by Admin
+    if (!isAdmin) {
+      const leadDate = new Date(lead.createdAt || lead.addedOn || 0);
+      if (leadDate < DATA_CUTOFF_DATE) {
+        return res.status(403).json({ message: 'Access denied. Old leads are only managed by Admin.' });
+      }
+    }
 
     const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
-                              (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
+      (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
 
     if (!hasFullAccess && !isOwnerOrAssignee) {
       return res.status(403).json({ message: 'Access denied. You can only update your assigned or created leads.' });
@@ -341,7 +353,7 @@ router.put('/:id', auth, async (req, res) => {
 
       if (status) {
         const resolvedStatus = (nextFollowUp && nextFollowUp.trim() &&
-          !['Converted','Closed','Not Interested','Lost','Client'].includes(status || lead.status))
+          !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client'].includes(status || lead.status))
           ? 'Follow-up' : status;
 
         if (resolvedStatus && resolvedStatus !== lead.status) {
@@ -363,22 +375,22 @@ router.put('/:id', auth, async (req, res) => {
             const closeDate = new Date();
             closeDate.setDate(closeDate.getDate() + 30);
             await new Deal({
-              dealName:          lead.company || lead.name,
-              clientName:        lead.name,
-              email:             lead.email || '',
-              phone:             lead.phone,
-              company:           lead.company || '',
-              dealValue:         lead.budget || 0,
-              stage:             'Qualification',
-              probability:       10,
+              dealName: lead.company || lead.name,
+              clientName: lead.name,
+              email: lead.email || '',
+              phone: lead.phone,
+              company: lead.company || '',
+              dealValue: lead.budget || 0,
+              stage: 'Qualification',
+              probability: 10,
               expectedCloseDate: closeDate,
-              source:            'Lead Conversion',
-              description:       lead.requirements || lead.notes || '',
-              requirements:      lead.requirements || '',
-              notes:             lead.notes || '',
-              assignedTo:        lead.assignedTo || req.user.id,
-              createdBy:         req.user.id,
-              relatedLead:       lead._id
+              source: 'Lead Conversion',
+              description: lead.requirements || lead.notes || '',
+              requirements: lead.requirements || '',
+              notes: lead.notes || '',
+              assignedTo: lead.assignedTo || req.user.id,
+              createdBy: req.user.id,
+              relatedLead: lead._id
             }).save();
           }
         }
@@ -410,7 +422,7 @@ router.put('/:id', auth, async (req, res) => {
         .populate('history.by', 'firstName lastName');
       return res.json(updatedLead);
     }
-    
+
     const {
       name,
       email,
@@ -431,7 +443,7 @@ router.put('/:id', auth, async (req, res) => {
       dealStage,
       leadType
     } = req.body;
-    
+
     // Update fields
     if (name) lead.name = name.trim();
     if (email) lead.email = email.toLowerCase().trim();
@@ -445,7 +457,7 @@ router.put('/:id', auth, async (req, res) => {
     if (requirement !== undefined) { lead.requirement = requirement ? requirement.trim() : ''; lead.requirements = requirement ? requirement.trim() : lead.requirements; }
     if (notes !== undefined) lead.notes = notes ? notes.trim() : '';
     if (followUpNotes !== undefined) lead.followUpNotes = followUpNotes ? followUpNotes.trim() : '';
-    
+
     // Handle nextFollowUp date - convert from string if provided
     if (nextFollowUp !== undefined) {
       if (nextFollowUp && nextFollowUp.trim()) {
@@ -457,7 +469,7 @@ router.put('/:id', auth, async (req, res) => {
         lead.nextFollowUp = null;
       }
     }
-    
+
     const historyEntries = [];
 
     // Only Admin, Director, HR, Manager, Team Leader, Sales Head, Sales Team can reassign leads
@@ -474,7 +486,7 @@ router.put('/:id', auth, async (req, res) => {
       }
       lead.assignedTo = assignedTo || null;
     }
-    
+
     // Update status
     const resolvedStatus = (nextFollowUp && nextFollowUp.trim() && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client'].includes(status || lead.status))
       ? 'Follow-up'
@@ -543,21 +555,21 @@ router.put('/:id', auth, async (req, res) => {
         lead.lostReason = lostReason;
       }
     }
-    
+
     if (dealStage !== undefined) lead.dealStage = dealStage;
     if (leadType !== undefined) lead.leadType = leadType || null;
 
     if (historyEntries.length > 0) {
       lead.history.push(...historyEntries);
     }
-    
+
     await lead.save();
-    
+
     const updatedLead = await Lead.findById(lead._id)
       .populate('assignedTo', 'firstName lastName email employeeId')
       .populate('createdBy', 'firstName lastName email')
       .populate('history.by', 'firstName lastName');
-    
+
     res.json(updatedLead);
   } catch (error) {
     console.error('Update lead error:', error);
@@ -569,13 +581,13 @@ router.put('/:id', auth, async (req, res) => {
 router.delete('/:id', auth, checkPermission('leads', 'delete'), async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id);
-    
+
     if (!lead) {
       return res.status(404).json({ message: 'Lead not found' });
     }
-    
+
     await Lead.findByIdAndDelete(req.params.id);
-    
+
     res.json({ message: 'Lead deleted successfully' });
   } catch (error) {
     console.error('Delete lead error:', error);
@@ -587,32 +599,31 @@ router.delete('/:id', auth, checkPermission('leads', 'delete'), async (req, res)
 router.get('/stats/overview', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).populate('role');
-    
+
     let query = {};
-    
-    // Full access: Admin, Director, HR, HR Manager, Manager, Team Leader, Sales Head, Sales Team
-    const roleName = (user.role?.name || '').toLowerCase();
-    const roleNormalized = roleName.replace(/\s+/g, ' ');
-    const hasFullAccess = 
-      user.role?.name === 'Admin' ||
-      user.role?.name === 'Director' ||
-      user.role?.name === 'HR' ||
-      user.role?.name === 'Manager' ||
-      user.role?.name === 'HR Manager' ||
-      roleNormalized.includes('manager') ||
-      roleNormalized.includes('leader') ||
-      roleNormalized.includes('team lead') ||
-      roleNormalized.includes('head') ||
-      roleNormalized.includes('sales team');
-    
-    // Regular sales, executives, and employees only see their assigned leads or leads they added stats
+
+    // Full access: Admin, Sales Head, Sales Manager
+    const { hasFullAccess, isAdmin } = getLeadRoleAccess(user);
+
+    // Only Admin sees stats for old data; others only see stats for new data
+    if (!isAdmin) {
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { createdAt: { $gte: DATA_CUTOFF_DATE } },
+          { addedOn: { $gte: DATA_CUTOFF_DATE } }
+        ]
+      });
+    }
+
+    // Regular sales, executives, and other roles only see their assigned leads or leads they added stats
     if (!hasFullAccess) {
       query.$or = [
         { assignedTo: req.user.id },
         { createdBy: req.user.id }
       ];
     }
-    
+
     const [total, newLeads, inProgress, converted, lost] = await Promise.all([
       Lead.countDocuments(query),
       Lead.countDocuments({ ...query, status: 'New' }),
@@ -620,7 +631,7 @@ router.get('/stats/overview', auth, async (req, res) => {
       Lead.countDocuments({ ...query, status: 'Converted' }),
       Lead.countDocuments({ ...query, status: 'Lost' })
     ]);
-    
+
     res.json({
       total,
       new: newLeads,
@@ -696,27 +707,25 @@ router.get('/followups/due', auth, async (req, res) => {
     const now = new Date();
 
     const user = await User.findById(req.user.id).populate('role');
-    // Check if user has full access - Admin, HR, Manager, Team Leader, Sales Head, Sales Team can see all leads
-    const roleName = (user.role?.name || '').toLowerCase();
-    const roleNormalized = roleName.replace(/\s+/g, ' ');
-    const hasFullAccess = 
-      user.role?.name === 'Admin' ||
-      user.role?.name === 'Director' ||
-      user.role?.name === 'HR' ||
-      user.role?.name === 'Manager' ||
-      user.role?.name === 'HR Manager' ||
-      roleNormalized.includes('manager') ||
-      roleNormalized.includes('leader') ||
-      roleNormalized.includes('team lead') ||
-      roleNormalized.includes('head') ||
-      roleNormalized.includes('sales team');
+    // Check if user has full access
+    const { hasFullAccess, isAdmin } = getLeadRoleAccess(user);
 
     const query = {
       nextFollowUp: { $ne: null, $lte: now },
       followUpCompleted: { $ne: true },
       status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost'] }
     };
-    
+
+    if (!isAdmin) {
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          { createdAt: { $gte: DATA_CUTOFF_DATE } },
+          { addedOn: { $gte: DATA_CUTOFF_DATE } }
+        ]
+      });
+    }
+
     if (!hasFullAccess) {
       query.$or = [
         { assignedTo: req.user.id },
