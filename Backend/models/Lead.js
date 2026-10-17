@@ -121,6 +121,11 @@ const leadSchema = new mongoose.Schema({
     ref: 'PipelineContact',
     default: null
   },
+  pipelineDealId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Deal',
+    default: null
+  },
   history: [{
     action: { type: String },
     details: { type: String },

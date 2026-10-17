@@ -7,7 +7,7 @@ const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
 
 // Cutoff timestamp: old pipeline data (before this cutoff) is strictly visible ONLY to Admin
-const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-16T19:00:00+05:30');
+const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-17T00:00:00+05:30');
 
 // Helper for checking role permissions and data access levels
 function checkAccess(user) {
@@ -24,10 +24,19 @@ function checkAccess(user) {
     roleNormalized.includes('salesmanager') ||
     roleNormalized === 'manager of sales';
 
+  const designation = (user?.designation || '').toString().toLowerCase().trim();
+  const department = (user?.department || '').toString().toLowerCase().trim();
+  const email = (user?.email || '').toString().toLowerCase().trim();
+
   const isAdmin =
     roleNormalized === 'admin' ||
-    roleNormalized === 'super admin' ||
-    roleNormalized === 'director' ||
+    roleNormalized.includes('admin') ||
+    roleNormalized.includes('superadmin') ||
+    roleNormalized.includes('director') ||
+    designation.includes('admin') ||
+    designation.includes('director') ||
+    department === 'administration' ||
+    email.startsWith('admin@') ||
     user?.role?.name === 'Admin' ||
     user?.role?.name === 'Super Admin' ||
     user?.role?.name === 'Director';
@@ -84,9 +93,19 @@ router.get('/', auth, async (req, res) => {
 
     let query = {};
 
-    // Only Admin can see old pipeline tasks. Sales Head and others only see new tasks.
+    const dataViewMode = (req.query.dataViewMode || '').toLowerCase().trim();
+
+    // Data filtering by cutoff:
+    // If not admin, strictly only see data from 17 OCT 2026 onwards
+    // If admin and dataViewMode === 'new', only see data >= DATA_CUTOFF_DATE
+    // If admin and dataViewMode === 'old', only see data < DATA_CUTOFF_DATE
+    // If admin and dataViewMode === 'all' (or not specified), see all data
     if (!isAdmin) {
       query.createdAt = { $gte: DATA_CUTOFF_DATE };
+    } else if (dataViewMode === 'new') {
+      query.createdAt = { $gte: DATA_CUTOFF_DATE };
+    } else if (dataViewMode === 'old') {
+      query.createdAt = { $lt: DATA_CUTOFF_DATE };
     }
 
     // Data isolation: Sales Head, Sales Manager, and Admin see all new tasks; other roles only see their data

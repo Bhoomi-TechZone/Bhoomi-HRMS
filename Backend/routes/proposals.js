@@ -342,6 +342,9 @@ router.get('/:id/pdf', auth, checkPermission('proposals', 'read'), async (req, r
         // Try backend assets first, then fallback to frontend path
         let logoPath = path.join(__dirname, '..', 'assets', 'logo.png');
         if (!fs.existsSync(logoPath)) {
+            logoPath = path.join(__dirname, '..', '..', 'Frontend', 'public', 'logo.png');
+        }
+        if (!fs.existsSync(logoPath)) {
             logoPath = path.join(__dirname, '../../..', 'HRMSfront', 'public', 'logo.png');
         }
         console.log('Logo path:', logoPath, '| Exists:', fs.existsSync(logoPath));
@@ -743,7 +746,7 @@ router.get('/:id/pdf', auth, checkPermission('proposals', 'read'), async (req, r
 
         // Table header
         const costColWidths = [contentW * 0.45, contentW * 0.25, contentW * 0.30];
-        drawTableRow(margin, y, ['Individuals', "Term's", 'Price Rs.(₹)'], costColWidths, 24, { fill: GREEN_LIGHT, bold: true, textColor: GREEN_DARK, fontSize: 9 });
+        drawTableRow(margin, y, ['Individuals', "Term's", 'Price Rs.(₹)'], costColWidths, 24, { fill: GREEN_DARK, bold: true, textColor: '#fff', fontSize: 9 });
         y += 24;
 
         // Item rows with page break support
@@ -803,9 +806,9 @@ router.get('/:id/pdf', auth, checkPermission('proposals', 'read'), async (req, r
 
         const bankDetails = [
             ['Account Name', companyName],
-            ['Account Number', '15111100000386'],
-            ['IFSC Code', 'PSIB0021511'],
-            ['Bank Name', 'Punjab & Sind Bank'],
+            ['Account Number', '2602210510517073'],
+            ['IFSC Code', 'AUBL0002105'],
+            ['Bank Name', 'AU SMALL FINANCE BANK'],
             ['UPI ID', 'bhoomitechzone@okaxis'],
         ];
         const bankLabelW = 130;

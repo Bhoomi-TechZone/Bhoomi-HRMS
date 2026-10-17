@@ -7,15 +7,20 @@ const MetaLead = require('../models/MetaLead');
 const Lead = require('../models/Lead');
 const Deal = require('../models/Deal');
 const Client = require('../models/Client');
+const User = require('../models/User');
 const metaService = require('../services/metaService');
 
 // Cutoff timestamp: old Meta leads are strictly visible ONLY to Admin
-const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-16T19:00:00+05:30');
+const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-17T00:00:00+05:30');
 
 // Helper to evaluate Meta leads role access
 function getMetaLeadRoleAccess(user) {
-  const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+  const roleObj = user?.role;
+  const roleName = (typeof roleObj === 'object' && roleObj !== null ? roleObj.name : roleObj || user?.roleName || '').toString().toLowerCase().trim();
   const roleNormalized = roleName.replace(/\s+/g, ' ');
+  const designation = (user?.designation || '').toString().toLowerCase().trim();
+  const department = (user?.department || '').toString().toLowerCase().trim();
+  const email = (user?.email || '').toString().toLowerCase().trim();
 
   const isSalesHead =
     roleNormalized.includes('sales head') ||
@@ -29,8 +34,13 @@ function getMetaLeadRoleAccess(user) {
 
   const isAdmin =
     roleNormalized === 'admin' ||
-    roleNormalized === 'super admin' ||
-    roleNormalized === 'director' ||
+    roleNormalized.includes('admin') ||
+    roleNormalized.includes('superadmin') ||
+    roleNormalized.includes('director') ||
+    designation.includes('admin') ||
+    designation.includes('director') ||
+    department === 'administration' ||
+    email.startsWith('admin@') ||
     user?.role?.name === 'Admin' ||
     user?.role?.name === 'Super Admin' ||
     user?.role?.name === 'Director';
@@ -342,7 +352,8 @@ router.get('/', auth, async (req, res) => {
     const query = {};
 
     // Only Sales Head, Sales Manager, and Admin see all new leads to assign them
-    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(req.user);
+    const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
+    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(user);
 
     // Only Admin can see old Meta leads
     if (!isAdmin) {
@@ -431,7 +442,8 @@ router.get('/stats', auth, async (req, res) => {
     };
 
     // Only Admin sees stats for old leads; others only see new data
-    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(req.user);
+    const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
+    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(user);
     if (!isAdmin) {
       baseQuery.createdTime = { $gte: DATA_CUTOFF_DATE };
     }
@@ -769,7 +781,8 @@ router.get('/followups/due', auth, async (req, res) => {
   try {
     const now = new Date();
 
-    const { canSeeAllLeads: canManageLeads, isAdmin } = getMetaLeadRoleAccess(req.user);
+    const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
+    const { canSeeAllLeads: canManageLeads, isAdmin } = getMetaLeadRoleAccess(user);
 
     const query = {
       followUpDate: { $ne: null, $lte: now },
@@ -808,7 +821,8 @@ router.get('/:id', auth, async (req, res) => {
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
     // Non-admin roles cannot view old Meta leads
-    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(req.user);
+    const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
+    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(user);
     if (!isAdmin) {
       const leadTime = new Date(lead.createdTime || lead.createdAt || 0);
       if (leadTime < DATA_CUTOFF_DATE) {

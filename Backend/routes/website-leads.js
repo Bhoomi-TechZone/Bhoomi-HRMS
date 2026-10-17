@@ -116,8 +116,8 @@ router.get('/', auth, async (req, res) => {
     const query = {};
 
     // Role-based access
-    const roleName = req.user.role?.name;
-    const isAdmin = roleName === 'Admin' || roleName === 'Director' || roleName === 'HR';
+    const roleName = (req.user?.role?.name || req.user?.role || '').toString().toLowerCase();
+    const isAdmin = roleName.includes('admin') || roleName.includes('director') || roleName.includes('hr');
     if (!isAdmin) {
       query.assignedTo = req.user._id;
     }

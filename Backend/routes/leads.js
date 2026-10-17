@@ -9,14 +9,18 @@ const checkPermission = require('../middleware/checkPermission');
 
 // Cutoff timestamp: old leads (before this cutoff) are strictly visible ONLY to Admin.
 // Sales Head and other roles only see new leads added from this cutoff onwards.
-const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-16T19:00:00+05:30');
+const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-17T00:00:00+05:30');
 
 // Helper to evaluate lead permissions
 // Only Sales Head, Sales Manager, and Admin have organization-wide full access in their timeframe.
 // Only Admin can see old data as well as new data.
 function getLeadRoleAccess(user) {
-  const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+  const roleObj = user?.role;
+  const roleName = (typeof roleObj === 'object' && roleObj !== null ? roleObj.name : roleObj || user?.roleName || '').toString().toLowerCase().trim();
   const roleNormalized = roleName.replace(/\s+/g, ' ');
+  const designation = (user?.designation || '').toString().toLowerCase().trim();
+  const department = (user?.department || '').toString().toLowerCase().trim();
+  const email = (user?.email || '').toString().toLowerCase().trim();
 
   const isSalesHead =
     roleNormalized.includes('sales head') ||
@@ -30,8 +34,13 @@ function getLeadRoleAccess(user) {
 
   const isAdmin =
     roleNormalized === 'admin' ||
-    roleNormalized === 'super admin' ||
-    roleNormalized === 'director' ||
+    roleNormalized.includes('admin') ||
+    roleNormalized.includes('superadmin') ||
+    roleNormalized.includes('director') ||
+    designation.includes('admin') ||
+    designation.includes('director') ||
+    department === 'administration' ||
+    email.startsWith('admin@') ||
     user?.role?.name === 'Admin' ||
     user?.role?.name === 'Super Admin' ||
     user?.role?.name === 'Director';
@@ -45,7 +54,7 @@ function getLeadRoleAccess(user) {
 // Get all leads
 router.get('/', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate('role');
+    const user = (req.user?.role?.name) ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
 
     let query = {};
 
@@ -55,7 +64,7 @@ router.get('/', auth, async (req, res) => {
     const hasReadPermission = hasFullAccess ||
       roleName.includes('sales') ||
       roleName.includes('executive') ||
-      (user.role?.permissions && user.role.permissions.some(
+      (user?.role?.permissions && user.role.permissions.some(
         p => p.module === 'leads' && p.actions.includes('read')
       ));
 
@@ -77,9 +86,10 @@ router.get('/', auth, async (req, res) => {
 
     // Non-full-access roles only see their own assigned or created leads
     if (!hasFullAccess) {
+      const currentUserId = req.user?._id || req.user?.id;
       query.$or = [
-        { assignedTo: req.user.id },
-        { createdBy: req.user.id }
+        { assignedTo: currentUserId },
+        { createdBy: currentUserId }
       ];
     }
 
@@ -97,7 +107,8 @@ router.get('/', auth, async (req, res) => {
       .populate('assignedTo', 'firstName lastName email employeeId')
       .populate('createdBy', 'firstName lastName email')
       .populate('history.by', 'firstName lastName')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     res.json(leads);
   } catch (error) {
@@ -109,7 +120,7 @@ router.get('/', auth, async (req, res) => {
 // Get single lead by ID
 router.get('/:id', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate('role');
+    const user = (req.user?.role?.name) ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
     const lead = await Lead.findById(req.params.id)
       .populate('assignedTo', 'firstName lastName email employeeId')
       .populate('createdBy', 'firstName lastName email')
@@ -171,7 +182,7 @@ router.post('/', auth, checkPermission('leads', 'create'), async (req, res) => {
     // Validate assigned user and assignment permissions
     let finalAssignedTo = null;
     if (assignedTo) {
-      const creator = await User.findById(req.user.id).populate('role');
+      const creator = (req.user?.role?.name) ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
       const { canAssignOrManage: canAssign } = getLeadRoleAccess(creator);
 
       if (canAssign) {
@@ -309,7 +320,7 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
 // Update lead
 router.put('/:id', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate('role');
+    const user = (req.user?.role?.name) ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
     const lead = await Lead.findById(req.params.id);
 
     if (!lead) {
@@ -598,7 +609,7 @@ router.delete('/:id', auth, checkPermission('leads', 'delete'), async (req, res)
 // Get leads statistics
 router.get('/stats/overview', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate('role');
+    const user = (req.user?.role?.name) ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
 
     let query = {};
 
@@ -706,7 +717,7 @@ router.get('/followups/due', auth, async (req, res) => {
   try {
     const now = new Date();
 
-    const user = await User.findById(req.user.id).populate('role');
+    const user = (req.user?.role?.name) ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
     // Check if user has full access
     const { hasFullAccess, isAdmin } = getLeadRoleAccess(user);
 

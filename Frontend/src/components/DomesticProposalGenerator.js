@@ -653,12 +653,543 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
 
     const waitForPaint = () => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 80)));
 
+    const PDF_INJECTED_STYLES = `
+        :root {
+            --pg-green: #2e7d32 !important;
+            --pg-green-light: #e8f5e9 !important;
+            --pg-green-dark: #1b5e20 !important;
+            --pg-green-mid: #4caf50 !important;
+            --pg-border: #e2e8f0 !important;
+            --pg-text: #1e293b !important;
+            --pg-text-muted: #64748b !important;
+        }
+
+        body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+
+        [data-pdf-page-key], .pg-page {
+            width: 650px !important;
+            height: 920px !important;
+            min-width: 650px !important;
+            min-height: 920px !important;
+            max-width: 650px !important;
+            max-height: 920px !important;
+            position: relative !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-page-border {
+            position: absolute !important;
+            top: 8px !important;
+            left: 8px !important;
+            right: 8px !important;
+            bottom: 8px !important;
+            width: calc(100% - 16px) !important;
+            height: calc(100% - 16px) !important;
+            border: 2.5px solid #1b5e20 !important;
+            border-radius: 2px !important;
+            padding: 8px 16px 2px !important;
+            box-sizing: border-box !important;
+            background: #ffffff !important;
+            box-shadow: none !important;
+            display: flex !important;
+            flex-direction: column !important;
+            overflow: hidden !important;
+        }
+
+        .pg-header {
+            display: flex !important;
+            align-items: flex-start !important;
+            gap: 10px !important;
+            margin-bottom: 2px !important;
+            width: 100% !important;
+        }
+
+        .pg-header-logo {
+            flex-shrink: 0 !important;
+            width: 150px !important;
+        }
+
+        .pg-logo-img {
+            width: 140px !important;
+            height: 48px !important;
+            object-fit: contain !important;
+            display: block !important;
+        }
+
+        .pg-header-info {
+            flex: 1 !important;
+            text-align: right !important;
+        }
+
+        .pg-header-company {
+            font-size: 12.8px !important;
+            font-weight: 800 !important;
+            color: #1b5e20 !important;
+            margin-bottom: 1px !important;
+        }
+
+        .pg-header-company--first-page {
+            font-size: 11.4px !important;
+            line-height: 1.15 !important;
+        }
+
+        .pg-header-detail {
+            font-size: 8.4px !important;
+            color: #555555 !important;
+            line-height: 1.5 !important;
+        }
+
+        .pg-header-detail--first-page {
+            font-size: 7.6px !important;
+            line-height: 1.35 !important;
+        }
+
+        .pg-header-line {
+            height: 1.5px !important;
+            background: #1b5e20 !important;
+            margin-bottom: 2px !important;
+            width: 100% !important;
+            display: block !important;
+            border: none !important;
+        }
+
+        .pg-title {
+            text-align: center !important;
+            font-size: 14px !important;
+            font-weight: 800 !important;
+            color: #1e293b !important;
+            margin-bottom: 3px !important;
+            letter-spacing: 0.02em !important;
+        }
+
+        .pg-subtitle {
+            text-align: center !important;
+            font-size: 10.2px !important;
+            font-weight: 700 !important;
+            color: #1b5e20 !important;
+            font-style: italic !important;
+            margin-bottom: 10px !important;
+        }
+
+        .pg-info-table {
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            table-layout: fixed !important;
+            border-collapse: collapse !important;
+            margin-bottom: 8px !important;
+            font-size: 7.8px !important;
+            border: 1px solid #2e7d32 !important;
+            display: table !important;
+        }
+
+        .pg-info-table td {
+            border: 1px solid #2e7d32 !important;
+            padding: 3px 6px !important;
+            vertical-align: middle !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-info-table td.pg-it-label {
+            background: #f5f5f5 !important;
+            font-weight: 700 !important;
+            width: 30% !important;
+            color: #333333 !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-info-table td.pg-it-value {
+            color: #444444 !important;
+            width: 70% !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-section-title {
+            font-size: 9.8px !important;
+            font-weight: 800 !important;
+            color: #ffffff !important;
+            background: #1b5e20 !important;
+            padding: 3px 6px !important;
+            margin: 6px 0 4px !important;
+            border-radius: 2px !important;
+            display: block !important;
+        }
+
+        .pg-services-grid {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            border: 1px solid #2e7d32 !important;
+            margin-bottom: 8px !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-service-cell {
+            width: 33.333% !important;
+            box-sizing: border-box !important;
+            border: 1px solid #2e7d32 !important;
+            padding: 3px 5px !important;
+            font-size: 6.8px !important;
+            color: #333333 !important;
+            background: #fafafa !important;
+        }
+
+        .pg-body-text {
+            font-size: 7.8px !important;
+            line-height: 1.45 !important;
+            color: #333333 !important;
+            margin-bottom: 5px !important;
+            text-align: justify !important;
+        }
+
+        .pg-meta-row {
+            display: flex !important;
+            justify-content: space-between !important;
+            font-size: 7.4px !important;
+            color: #555555 !important;
+            margin: 8px 0 !important;
+            padding: 4px 6px !important;
+            background: #fafafa !important;
+            border-radius: 2px !important;
+        }
+
+        .pg-footer {
+            position: absolute !important;
+            bottom: 4px !important;
+            left: 16px !important;
+            right: 16px !important;
+            width: calc(100% - 32px) !important;
+        }
+
+        .pg-footer-line {
+            height: 1px !important;
+            background: #2e7d32 !important;
+            margin-bottom: 4px !important;
+            width: 100% !important;
+            display: block !important;
+            border: none !important;
+        }
+
+        .pg-footer-row {
+            display: flex !important;
+            justify-content: space-between !important;
+            font-size: 6.8px !important;
+            color: #555555 !important;
+        }
+
+        .pg-footer-link {
+            color: #2e7d32 !important;
+        }
+
+        .pg-paginated-sections-box {
+            flex: 1 !important;
+            overflow: hidden !important;
+            margin-bottom: 0px !important;
+        }
+
+        .pg-prev-sections-box {
+            flex: 1 !important;
+            display: flex !important;
+            flex-direction: column !important;
+            overflow: hidden !important;
+        }
+
+        .pg-preview-line {
+            line-height: 1.55 !important;
+            font-size: 9.5px !important;
+        }
+
+        .pg-costing-header {
+            font-size: 9.8px !important;
+            font-weight: 800 !important;
+            color: #ffffff !important;
+            background: #1b5e20 !important;
+            padding: 3px 6px !important;
+            margin: 6px 0 4px !important;
+            border-radius: 2px !important;
+            text-align: center !important;
+        }
+
+        .pg-table-wrap {
+            width: 100% !important;
+            display: block !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-cost-table {
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            table-layout: fixed !important;
+            border-collapse: collapse !important;
+            margin-bottom: 6px !important;
+            font-size: 7.8px !important;
+            border: 1px solid #2e7d32 !important;
+            display: table !important;
+        }
+
+        .pg-cost-table th,
+        .pg-cost-table td {
+            box-sizing: border-box !important;
+        }
+
+        .pg-cost-table th:nth-child(1) {
+            width: 48% !important;
+        }
+
+        .pg-cost-table th:nth-child(2) {
+            width: 24% !important;
+        }
+
+        .pg-cost-table th:nth-child(3) {
+            width: 28% !important;
+        }
+
+        .pg-cost-table tr:not(.pg-ct-summary):not(.pg-ct-total) td:nth-child(1) {
+            width: 48% !important;
+        }
+
+        .pg-cost-table tr:not(.pg-ct-summary):not(.pg-ct-total) td:nth-child(2) {
+            width: 24% !important;
+        }
+
+        .pg-cost-table tr:not(.pg-ct-summary):not(.pg-ct-total) td:nth-child(3) {
+            width: 28% !important;
+        }
+
+        .pg-cost-table tr.pg-ct-summary td:nth-child(1),
+        .pg-cost-table tr.pg-ct-total td:nth-child(1) {
+            width: 72% !important;
+        }
+
+        .pg-cost-table tr.pg-ct-summary td:nth-child(2),
+        .pg-cost-table tr.pg-ct-total td:nth-child(2) {
+            width: 28% !important;
+        }
+
+        .pg-cost-table th {
+            background: #1b5e20 !important;
+            color: #ffffff !important;
+            font-weight: 700 !important;
+            border: 1px solid #2e7d32 !important;
+            padding: 4px 6px !important;
+            font-size: 7.6px !important;
+            text-align: left !important;
+            letter-spacing: 0.02em !important;
+        }
+
+        .pg-cost-table td {
+            border: 1px solid #2e7d32 !important;
+            padding: 3px 6px !important;
+            font-size: 7.8px !important;
+            color: #333333 !important;
+        }
+
+        .pg-ct-summary td {
+            background: #fafafa !important;
+            font-weight: 600 !important;
+        }
+
+        .pg-ct-total td {
+            background: #e8f5e9 !important;
+            color: #1b5e20 !important;
+            font-weight: 800 !important;
+            font-size: 7.8px !important;
+        }
+
+        .pg-ct-amount {
+            text-align: right !important;
+            font-weight: 600 !important;
+        }
+
+        .pg-bank-table {
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            table-layout: fixed !important;
+            border-collapse: collapse !important;
+            margin-bottom: 6px !important;
+            font-size: 7.8px !important;
+            border: 1px solid #2e7d32 !important;
+            display: table !important;
+        }
+
+        .pg-bank-table td {
+            border: 1px solid #2e7d32 !important;
+            padding: 3px 6px !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-bank-table td.pg-it-label {
+            width: 30% !important;
+            background: #f5f5f5 !important;
+            font-weight: 700 !important;
+            color: #333333 !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-bank-table td.pg-it-value {
+            width: 70% !important;
+            color: #444444 !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-payment-note {
+            font-size: 6px !important;
+            color: #c62828 !important;
+            font-weight: 700 !important;
+            text-align: center !important;
+            margin: 5px 0 !important;
+            padding: 3px 6px !important;
+            background: #ffebee !important;
+            border: 1px solid #ffcdd2 !important;
+            border-radius: 2px !important;
+            font-style: normal !important;
+        }
+
+        .pg-tc-title {
+            font-size: 9.8px !important;
+            font-weight: 800 !important;
+            color: #ffffff !important;
+            background: #1b5e20 !important;
+            padding: 4px 6px !important;
+            margin: 6px 0 4px !important;
+            border-radius: 2px !important;
+            letter-spacing: 0.04em !important;
+        }
+
+        .pg-tc-content {
+            font-size: 7.2px !important;
+            color: #444444 !important;
+            line-height: 1.45 !important;
+            margin-bottom: 5px !important;
+            padding: 5px 8px !important;
+            background: #fafafa !important;
+            border-radius: 2px !important;
+            border: 1px solid #e2e8f0 !important;
+        }
+
+        .pg-tc-line {
+            font-size: 7.2px !important;
+            color: #444444 !important;
+            line-height: 1.45 !important;
+            margin: 0 0 2px !important;
+        }
+
+        .pg-tc-bold {
+            font-size: 7.2px !important;
+            font-weight: 700 !important;
+            color: #d32f2f !important;
+            margin: 4px 0 4px !important;
+            padding: 4px 7px !important;
+            background: #ffebee !important;
+            border-left: 3px solid #ef4444 !important;
+            border-radius: 2px !important;
+        }
+
+        .pg-tc-refund {
+            font-size: 7.2px !important;
+            color: #444444 !important;
+            margin: 0 0 5px !important;
+            padding: 4px 7px !important;
+            background: #e8f5e9 !important;
+            border-left: 3px solid #2e7d32 !important;
+            border-radius: 2px !important;
+        }
+
+        .pg-regards {
+            margin: 8px 0 10px !important;
+            font-size: 7.6px !important;
+            color: #444444 !important;
+            line-height: 1.6 !important;
+            padding: 5px 7px !important;
+            background: #fafafa !important;
+            border-radius: 2px !important;
+        }
+
+        .pg-regards p {
+            margin: 2px 0 !important;
+        }
+
+        .pg-signatures {
+            display: flex !important;
+            justify-content: space-between !important;
+            margin-top: 16px !important;
+            gap: 20px !important;
+            background: #fafafa !important;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 2px !important;
+            padding: 8px 12px 6px !important;
+            box-sizing: border-box !important;
+        }
+
+        .pg-sig-block {
+            flex: 1 !important;
+            border-top: none !important;
+            padding-top: 0 !important;
+        }
+
+        .pg-sig-for {
+            font-size: 8px !important;
+            font-weight: 700 !important;
+            color: #1b5e20 !important;
+            margin-bottom: 6px !important;
+        }
+
+        .pg-sig-space {
+            height: 36px !important;
+            width: 100% !important;
+            background: transparent !important;
+            display: block !important;
+        }
+
+        .pg-sig-line {
+            height: 1px !important;
+            max-height: 1px !important;
+            min-height: 1px !important;
+            background: #94a3b8 !important;
+            width: 100% !important;
+            margin: 0 0 6px 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            display: block !important;
+            box-shadow: none !important;
+        }
+
+        .pg-sig-label {
+            font-size: 7.6px !important;
+            color: #333333 !important;
+            margin-top: 4px !important;
+        }
+
+        .pg-sig-name {
+            font-size: 7.2px !important;
+            color: #666666 !important;
+        }
+    `;
+
     const buildPdfInstance = async () => {
         const prevTab = activeTab;
         const prevZoom = previewZoom;
         let zoomArea = null;
         let originalZoomAreaTransform = '';
         let originalZoomAreaTransformOrigin = '';
+        let previewPanel = null;
+        let prevScrollTop = 0;
+        const convertedImages = [];
 
         const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
 
@@ -698,11 +1229,7 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
             }));
         };
 
-        const renderSafePage = async (pageEl, pageKey, stripAllBackgrounds = false) => {
-            const rect = pageEl.getBoundingClientRect();
-            const exportWidth = Math.max(1, Math.round(rect.width));
-            const exportHeight = Math.max(1, Math.round(rect.height));
-
+        const renderSafePage = async (pageEl, pageKey) => {
             const canvas = await html2canvas(pageEl, {
                 scale: 2,
                 useCORS: true,
@@ -710,51 +1237,109 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
                 backgroundColor: '#ffffff',
                 logging: false,
                 imageTimeout: 0,
-                width: exportWidth,
-                height: exportHeight,
+                width: 650,
+                height: 920,
+                windowWidth: 650,
+                windowHeight: 920,
                 scrollX: 0,
                 scrollY: 0,
+                x: 0,
+                y: 0,
                 onclone: (clonedDoc) => {
                     const targetPage = clonedDoc.querySelector(`[data-pdf-page-key="${pageKey}"]`);
                     if (targetPage) {
-                        const whiteBaseStyle = clonedDoc.createElement('style');
-                        whiteBaseStyle.textContent = `
-                            [data-pdf-page-key="${pageKey}"] {
-                                background: #ffffff !important;
+                        clonedDoc.body.innerHTML = '';
+                        clonedDoc.body.style.margin = '0';
+                        clonedDoc.body.style.padding = '0';
+                        clonedDoc.body.style.background = '#ffffff';
+                        clonedDoc.body.style.width = '650px';
+                        clonedDoc.body.style.height = '920px';
+                        clonedDoc.body.style.overflow = 'hidden';
+
+                        targetPage.style.position = 'relative';
+                        targetPage.style.margin = '0 auto';
+                        targetPage.style.left = '0';
+                        targetPage.style.top = '0';
+                        targetPage.style.width = '650px';
+                        targetPage.style.height = '920px';
+                        targetPage.style.boxShadow = 'none';
+                        targetPage.style.background = '#ffffff';
+
+                        // Explicitly enforce table cell widths in cloned DOM so html2canvas renders full width
+                        const allTables = targetPage.querySelectorAll('table');
+                        allTables.forEach((tbl) => {
+                            tbl.style.setProperty('width', '100%', 'important');
+                            tbl.style.setProperty('min-width', '100%', 'important');
+                            tbl.style.setProperty('max-width', '100%', 'important');
+                            tbl.style.setProperty('table-layout', 'fixed', 'important');
+                            tbl.style.setProperty('border-collapse', 'collapse', 'important');
+                            tbl.style.setProperty('box-sizing', 'border-box', 'important');
+                            tbl.style.setProperty('display', 'table', 'important');
+
+                            if (tbl.parentElement) {
+                                tbl.parentElement.style.setProperty('width', '100%', 'important');
+                                tbl.parentElement.style.setProperty('display', 'block', 'important');
+                                tbl.parentElement.style.setProperty('box-sizing', 'border-box', 'important');
                             }
-                            [data-pdf-page-key="${pageKey}"] .pg-page-border {
-                                background: #ffffff !important;
-                                box-shadow: none !important;
+
+                            if (tbl.classList.contains('pg-cost-table')) {
+                                tbl.querySelectorAll('tr').forEach((tr) => {
+                                    const cells = tr.querySelectorAll('th, td');
+                                    if (cells.length === 3) {
+                                        cells[0].style.setProperty('width', '48%', 'important');
+                                        cells[1].style.setProperty('width', '24%', 'important');
+                                        cells[2].style.setProperty('width', '28%', 'important');
+                                    } else if (cells.length === 2) {
+                                        cells[0].style.setProperty('width', '72%', 'important');
+                                        cells[1].style.setProperty('width', '28%', 'important');
+                                    }
+                                });
                             }
-                        `;
-                        clonedDoc.head.appendChild(whiteBaseStyle);
+
+                            if (tbl.classList.contains('pg-info-table') || tbl.classList.contains('pg-bank-table') || tbl.classList.contains('pg-client-table')) {
+                                tbl.querySelectorAll('tr').forEach((tr) => {
+                                    const cells = tr.querySelectorAll('th, td');
+                                    if (cells.length === 2) {
+                                        cells[0].style.setProperty('width', '30%', 'important');
+                                        cells[1].style.setProperty('width', '70%', 'important');
+                                    }
+                                });
+                            }
+                        });
+
+                        // Explicitly enforce clean signature styles in cloned DOM
+                        targetPage.querySelectorAll('.pg-signatures').forEach((sigBox) => {
+                            sigBox.style.setProperty('background', '#fafafa', 'important');
+                            sigBox.style.setProperty('border', '1px solid #e2e8f0', 'important');
+                            sigBox.style.setProperty('box-shadow', 'none', 'important');
+                            sigBox.style.setProperty('display', 'flex', 'important');
+                        });
+
+                        targetPage.querySelectorAll('.pg-sig-space').forEach((sp) => {
+                            sp.style.setProperty('height', '36px', 'important');
+                            sp.style.setProperty('background', 'transparent', 'important');
+                            sp.style.setProperty('display', 'block', 'important');
+                        });
+
+                        targetPage.querySelectorAll('.pg-sig-line').forEach((line) => {
+                            line.style.setProperty('height', '1px', 'important');
+                            line.style.setProperty('max-height', '1px', 'important');
+                            line.style.setProperty('min-height', '1px', 'important');
+                            line.style.setProperty('background', '#94a3b8', 'important');
+                            line.style.setProperty('border', 'none', 'important');
+                            line.style.setProperty('box-shadow', 'none', 'important');
+                            line.style.setProperty('width', '100%', 'important');
+                            line.style.setProperty('margin', '0 0 6px 0', 'important');
+                            line.style.setProperty('padding', '0', 'important');
+                            line.style.setProperty('display', 'block', 'important');
+                        });
+
+                        clonedDoc.body.appendChild(targetPage);
                     }
 
-                    if (stripAllBackgrounds) {
-                        const target = clonedDoc.querySelector(`[data-pdf-page-key="${pageKey}"]`);
-                        if (!target) return;
-
-                        const styleTag = clonedDoc.createElement('style');
-                        styleTag.textContent = `
-                            [data-pdf-page-key="${pageKey}"],
-                            [data-pdf-page-key="${pageKey}"] * {
-                                background-image: none !important;
-                                -webkit-mask-image: none !important;
-                                mask-image: none !important;
-                                border-image: none !important;
-                                list-style-image: none !important;
-                            }
-                            [data-pdf-page-key="${pageKey}"] *::before,
-                            [data-pdf-page-key="${pageKey}"] *::after {
-                                background-image: none !important;
-                                -webkit-mask-image: none !important;
-                                mask-image: none !important;
-                                border-image: none !important;
-                                list-style-image: none !important;
-                            }
-                        `;
-                        clonedDoc.head.appendChild(styleTag);
-                    }
+                    const styleTag = clonedDoc.createElement('style');
+                    styleTag.textContent = PDF_INJECTED_STYLES;
+                    clonedDoc.head.appendChild(styleTag);
                 }
             });
 
@@ -777,6 +1362,12 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
             const previewRoot = previewRef.current;
             if (!previewRoot) throw new Error('Preview root not found');
 
+            previewPanel = previewRoot.closest('.pg-preview-panel') || previewRoot.parentElement;
+            if (previewPanel) {
+                prevScrollTop = previewPanel.scrollTop;
+                previewPanel.scrollTop = 0;
+            }
+
             zoomArea = previewRoot.querySelector('.pg-preview-zoom-area');
             if (zoomArea) {
                 originalZoomAreaTransform = zoomArea.style.transform;
@@ -789,7 +1380,6 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
             const pages = Array.from(previewRoot.querySelectorAll('.pg-page'));
             if (!pages.length) throw new Error('Preview pages not found');
 
-            const previewPanel = previewRoot.closest('.pg-preview-panel') || previewRoot.parentElement;
             ensureElementVisible(previewPanel, 'Preview panel');
             pages.forEach((page, idx) => ensureElementVisible(page, `Page ${idx + 1}`));
 
@@ -800,6 +1390,27 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
             });
 
             await waitForInlineImages(previewRoot);
+
+            // Convert images in preview to base64 Data URLs so html2canvas renders them synchronously without CORS issues
+            const allImages = Array.from(previewRoot.querySelectorAll('img'));
+            for (const img of allImages) {
+                if (img.src && img.src.startsWith('data:')) continue;
+                try {
+                    if (img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+                        const cvs = document.createElement('canvas');
+                        cvs.width = img.naturalWidth;
+                        cvs.height = img.naturalHeight;
+                        const ctx = cvs.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        const dataUrl = cvs.toDataURL('image/png');
+                        convertedImages.push({ img, origSrc: img.src });
+                        img.src = dataUrl;
+                    }
+                } catch (imgErr) {
+                    // Ignore tainted image error
+                }
+            }
+
             await waitForFrames(2);
 
             const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
@@ -808,23 +1419,7 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
 
             for (let i = 0; i < pages.length; i++) {
                 const page = pages[i];
-                const rect = page.getBoundingClientRect();
-                if (rect.width === 0 || rect.height === 0) {
-                    throw new Error(`Page ${i + 1} has zero width or height before render`);
-                }
-
-                let canvas;
-                try {
-                    canvas = await renderSafePage(page, String(i), false);
-                } catch (error) {
-                    const message = error?.message || String(error);
-                    if (!/createPattern|InvalidStateError/i.test(message)) {
-                        throw error;
-                    }
-                    console.warn(`[PDF] Retrying page ${i + 1} with background sanitization due to pattern error`);
-                    canvas = await renderSafePage(page, String(i), true);
-                }
-
+                const canvas = await renderSafePage(page, String(i));
                 const imgData = canvas.toDataURL('image/jpeg', 0.98);
                 if (i > 0) pdf.addPage();
                 pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH, undefined, 'FAST');
@@ -832,6 +1427,15 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
 
             return pdf;
         } finally {
+            // Restore converted image sources
+            convertedImages.forEach(({ img, origSrc }) => {
+                try { img.src = origSrc; } catch (e) {}
+            });
+
+            if (previewPanel) {
+                previewPanel.scrollTop = prevScrollTop;
+            }
+
             if (zoomArea) {
                 zoomArea.style.transform = originalZoomAreaTransform;
                 zoomArea.style.transformOrigin = originalZoomAreaTransformOrigin;
@@ -864,6 +1468,22 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
                     .replace(/[/\\?%*:|"<>]/g, '_')
                     .trim();
                 pdf.save(fileName || `${safeTitle}.pdf`);
+
+                // Also update the proposal's pdfEditorState in the database if proposalId exists
+                if (proposalId) {
+                    try {
+                        const base64Pdf = pdf.output('datauristring');
+                        api.put(`/proposals/${proposalId}`, {
+                            ...form,
+                            proposalType: 'domestic',
+                            pdfEditorState: {
+                                ...(form.pdfEditorState || {}),
+                                base64Pdf: base64Pdf,
+                                savedAt: new Date().toISOString()
+                            }
+                        }).catch(e => console.warn('Background PDF state sync warning:', e.message));
+                    } catch (e) { /* ignore */ }
+                }
             }
         } catch (error) {
             console.error('PDF generation error:', error);
@@ -1058,26 +1678,38 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
                     <div className="pg-subtitle">{form.title || 'Dynamic Website'}</div>
 
                     {/* Company Info Table */}
-                    <table className="pg-info-table">
-                        <tbody>
-                            <tr><td className="pg-it-label">Prepared By</td><td className="pg-it-value">{COMPANY.shortName}</td></tr>
-                            <tr><td className="pg-it-label">Website</td><td className="pg-it-value">{COMPANY.website}</td></tr>
-                            <tr><td className="pg-it-label">Email</td><td className="pg-it-value">{COMPANY.email}</td></tr>
-                            <tr><td className="pg-it-label">Address</td><td className="pg-it-value">{COMPANY.address}</td></tr>
-                        </tbody>
-                    </table>
+                    <div className="pg-table-wrap" style={{ width: '100%', display: 'block', boxSizing: 'border-box' }}>
+                        <table className="pg-info-table" style={{ width: '100%', minWidth: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                            <colgroup>
+                                <col style={{ width: '30%' }} />
+                                <col style={{ width: '70%' }} />
+                            </colgroup>
+                            <tbody>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Prepared By</td><td className="pg-it-value" style={{ width: '70%' }}>{COMPANY.shortName}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Website</td><td className="pg-it-value" style={{ width: '70%' }}>{COMPANY.website}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Email</td><td className="pg-it-value" style={{ width: '70%' }}>{COMPANY.email}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Address</td><td className="pg-it-value" style={{ width: '70%' }}>{COMPANY.address}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
 
                     {/* Client Info */}
                     <div className="pg-section-title">CLIENT INFORMATION</div>
-                    <table className="pg-info-table pg-client-table">
-                        <tbody>
-                            {/* Client Name row removed as per request */}
-                            <tr><td className="pg-it-label">Contact Person</td><td className="pg-it-value">{form.contactName || '—'}</td></tr>
-                            <tr><td className="pg-it-label">Email</td><td className="pg-it-value">{form.clientEmail || '—'}</td></tr>
-                            <tr><td className="pg-it-label">Phone</td><td className="pg-it-value">{form.clientPhone || '—'}</td></tr>
-                            <tr><td className="pg-it-label">Address</td><td className="pg-it-value">{form.clientAddress || '—'}</td></tr>
-                        </tbody>
-                    </table>
+                    <div className="pg-table-wrap" style={{ width: '100%', display: 'block', boxSizing: 'border-box' }}>
+                        <table className="pg-info-table pg-client-table" style={{ width: '100%', minWidth: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                            <colgroup>
+                                <col style={{ width: '30%' }} />
+                                <col style={{ width: '70%' }} />
+                            </colgroup>
+                            <tbody>
+                                {/* Client Name row removed as per request */}
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Contact Person</td><td className="pg-it-value" style={{ width: '70%' }}>{form.contactName || '—'}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Email</td><td className="pg-it-value" style={{ width: '70%' }}>{form.clientEmail || '—'}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Phone</td><td className="pg-it-value" style={{ width: '70%' }}>{form.clientPhone || '—'}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Address</td><td className="pg-it-value" style={{ width: '70%' }}>{form.clientAddress || '—'}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
 
                     {form.proposalNumber && (
                         <div className="pg-meta-row">
@@ -1158,58 +1790,71 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
                     <div className="pg-costing-header">
                         COSTING FOR {(form.title || 'PROJECT').toUpperCase()}
                     </div>
-                    <table className="pg-cost-table">
-                        <thead>
-                            <tr>
-                                <th>Individuals</th>
-                                <th>Term's</th>
-                                <th>Price Rs.(₹)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {form.items.map((item, idx) => (
-                                <tr key={idx}>
-                                    <td>{item.description || '—'}</td>
-                                    <td>{item.quantity > 1 ? `${item.quantity} units` : 'Total'}</td>
-                                    <td className="pg-ct-amount">{fmtINR(item.amount)}/-</td>
+                    <div className="pg-table-wrap" style={{ width: '100%', display: 'block', boxSizing: 'border-box' }}>
+                        <table className="pg-cost-table" style={{ width: '100%', minWidth: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                            <colgroup>
+                                <col style={{ width: '48%' }} />
+                                <col style={{ width: '24%' }} />
+                                <col style={{ width: '28%' }} />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th style={{ width: '48%' }}>Individuals</th>
+                                    <th style={{ width: '24%' }}>Term's</th>
+                                    <th style={{ width: '28%', textAlign: 'right' }}>Price Rs.(₹)</th>
                                 </tr>
-                            ))}
-                            <tr className="pg-ct-summary">
-                                <td colSpan="2"><strong>Sub Total</strong></td>
-                                <td className="pg-ct-amount"><strong>{fmtINR(form.subtotal)}/-</strong></td>
-                            </tr>
-                            {form.taxAmount > 0 && (
+                            </thead>
+                            <tbody>
+                                {form.items.map((item, idx) => (
+                                    <tr key={idx}>
+                                        <td style={{ width: '48%' }}>{item.description || '—'}</td>
+                                        <td style={{ width: '24%' }}>{item.quantity > 1 ? `${item.quantity} units` : 'Total'}</td>
+                                        <td className="pg-ct-amount" style={{ width: '28%', textAlign: 'right' }}>{fmtINR(item.amount)}/-</td>
+                                    </tr>
+                                ))}
                                 <tr className="pg-ct-summary">
-                                    <td colSpan="2">GST {form.taxPercentage}%</td>
-                                    <td className="pg-ct-amount">{fmtINR(form.taxAmount)}/-</td>
+                                    <td colSpan="2" style={{ width: '72%' }}><strong>Sub Total</strong></td>
+                                    <td className="pg-ct-amount" style={{ width: '28%', textAlign: 'right' }}><strong>{fmtINR(form.subtotal)}/-</strong></td>
                                 </tr>
-                            )}
-                            {form.discount > 0 && (
-                                <tr className="pg-ct-summary">
-                                    <td colSpan="2">Discount</td>
-                                    <td className="pg-ct-amount">-{fmtINR(form.discount)}/-</td>
+                                {form.taxAmount > 0 && (
+                                    <tr className="pg-ct-summary">
+                                        <td colSpan="2" style={{ width: '72%' }}>GST {form.taxPercentage}%</td>
+                                        <td className="pg-ct-amount" style={{ width: '28%', textAlign: 'right' }}>{fmtINR(form.taxAmount)}/-</td>
+                                    </tr>
+                                )}
+                                {form.discount > 0 && (
+                                    <tr className="pg-ct-summary">
+                                        <td colSpan="2" style={{ width: '72%' }}>Discount</td>
+                                        <td className="pg-ct-amount" style={{ width: '28%', textAlign: 'right' }}>-{fmtINR(form.discount)}/-</td>
+                                    </tr>
+                                )}
+                                <tr className="pg-ct-total">
+                                    <td colSpan="2" style={{ width: '72%' }}><strong>Offered Price / Net Amount</strong></td>
+                                    <td className="pg-ct-amount" style={{ width: '28%', textAlign: 'right' }}><strong>{fmtINR(form.total)}/-</strong></td>
                                 </tr>
-                            )}
-                            <tr className="pg-ct-total">
-                                <td colSpan="2"><strong>Offered Price / Net Amount</strong></td>
-                                <td className="pg-ct-amount"><strong>{fmtINR(form.total)}/-</strong></td>
-                            </tr>
-                        </tbody>
-                    </table>
+                            </tbody>
+                        </table>
+                    </div>
 
                     {/* Payment Details */}
                     <div className="pg-costing-header">
                         PAYMENT DETAILS
                     </div>
-                    <table className="pg-info-table pg-bank-table">
-                        <tbody>
-                            <tr><td className="pg-it-label">Account Name</td><td className="pg-it-value">{COMPANY.accountName}</td></tr>
-                            <tr><td className="pg-it-label">Account Number</td><td className="pg-it-value">{COMPANY.accountNumber}</td></tr>
-                            <tr><td className="pg-it-label">IFSC Code</td><td className="pg-it-value">{COMPANY.ifsc}</td></tr>
-                            <tr><td className="pg-it-label">Bank Name</td><td className="pg-it-value">{COMPANY.bankName}</td></tr>
-                            <tr><td className="pg-it-label">UPI ID</td><td className="pg-it-value">{COMPANY.upi}</td></tr>
-                        </tbody>
-                    </table>
+                    <div className="pg-table-wrap" style={{ width: '100%', display: 'block', boxSizing: 'border-box' }}>
+                        <table className="pg-info-table pg-bank-table" style={{ width: '100%', minWidth: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                            <colgroup>
+                                <col style={{ width: '30%' }} />
+                                <col style={{ width: '70%' }} />
+                            </colgroup>
+                            <tbody>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Account Name</td><td className="pg-it-value" style={{ width: '70%' }}>{COMPANY.accountName}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Account Number</td><td className="pg-it-value" style={{ width: '70%' }}>{COMPANY.accountNumber}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>IFSC Code</td><td className="pg-it-value" style={{ width: '70%' }}>{COMPANY.ifsc}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>Bank Name</td><td className="pg-it-value" style={{ width: '70%' }}>{COMPANY.bankName}</td></tr>
+                                <tr><td className="pg-it-label" style={{ width: '30%' }}>UPI ID</td><td className="pg-it-value" style={{ width: '70%' }}>{COMPANY.upi}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
 
                     <div className="pg-payment-note">
                         Note: Pay only on Company's account or on QR Code. Don't Pay on any employee's account or QR Code.
@@ -1298,7 +1943,10 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
                             {authorizedSigPreview ? (
                                 <img src={authorizedSigPreview} alt="Authorized Signature" style={{ maxHeight: '50px', maxWidth: '150px', objectFit: 'contain', margin: '8px 0' }} />
                             ) : (
-                                <div className="pg-sig-line" />
+                                <>
+                                    <div className="pg-sig-space" style={{ height: '36px', width: '100%', background: 'transparent' }} />
+                                    <div className="pg-sig-line" style={{ height: '1px', maxHeight: '1px', minHeight: '1px', background: '#94a3b8', width: '100%', margin: '0 0 6px 0', border: 'none' }} />
+                                </>
                             )}
                             <div className="pg-sig-label"><strong>Authorized Signatory</strong></div>
                             <div className="pg-sig-name">{COMPANY.shortName}</div>
@@ -1308,7 +1956,10 @@ export function DomesticProposalGenerator({ isOpen, onClose, onSuccess, proposal
                             {clientSigPreview ? (
                                 <img src={clientSigPreview} alt="Client Signature" style={{ maxHeight: '50px', maxWidth: '150px', objectFit: 'contain', margin: '8px 0' }} />
                             ) : (
-                                <div className="pg-sig-line" />
+                                <>
+                                    <div className="pg-sig-space" style={{ height: '36px', width: '100%', background: 'transparent' }} />
+                                    <div className="pg-sig-line" style={{ height: '1px', maxHeight: '1px', minHeight: '1px', background: '#94a3b8', width: '100%', margin: '0 0 6px 0', border: 'none' }} />
+                                </>
                             )}
                             <div className="pg-sig-label"><strong>Client Name & Signature</strong></div>
                             <div className="pg-sig-name">Date: ________________</div>

@@ -1717,3 +1717,58 @@
 @media (max-width: 480px) {
   .is-stats-grid { grid-template-columns: 1fr; }
 }
+
+/* =============================================
+   Quick Range Selection Bar & Menu Styles
+   ============================================= */
+.leads-range-select-bar {
+  animation: leadsFadeInDown 0.16s ease-out;
+}
+
+@keyframes leadsFadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ist-select-menu-item {
+  transition: background-color 0.12s ease, color 0.12s ease;
+  user-select: none;
+}
+
+.ist-select-menu-item:hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+.leads-range-chip-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.leads-range-chip-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.leads-range-chip-btn.active {
+  background: #16a34a !important;
+  color: #ffffff !important;
+  border-color: #16a34a !important;
+  box-shadow: 0 1px 3px rgba(22, 163, 74, 0.3);
+}
+

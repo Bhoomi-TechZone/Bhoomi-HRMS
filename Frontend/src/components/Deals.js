@@ -173,6 +173,24 @@ function Deals() {
     roleName === 'saleshead' ||
     roleName === 'head of sales';
 
+  const isAdmin =
+    roleName === 'admin' ||
+    roleName === 'super admin' ||
+    roleName === 'director' ||
+    (user?.email || '').toLowerCase().startsWith('admin@');
+
+  const DATA_CUTOFF_DATE = new Date('2026-10-17T00:00:00+05:30');
+
+  const [adminDataViewMode, setAdminDataViewMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('admin_crm_data_view_mode');
+      if (saved && ['all', 'new', 'old'].includes(saved.toLowerCase())) {
+        return saved.toLowerCase();
+      }
+    } catch (e) {}
+    return 'new';
+  });
+
   const isSales = roleName.includes('sales');
   const navigate = useNavigate();
   const csvInputRef = useRef(null);
@@ -209,6 +227,21 @@ function Deals() {
   const allDeals = React.useMemo(() => {
     const combined = [...deals]
       .filter(deal => {
+        const dealDate = new Date(deal.createdAt || 0);
+
+        if (isAdmin) {
+          if (adminDataViewMode === 'new') {
+            return dealDate >= DATA_CUTOFF_DATE;
+          }
+          if (adminDataViewMode === 'old') {
+            return dealDate < DATA_CUTOFF_DATE;
+          }
+          return true; // 'all'
+        }
+
+        // Non-admin roles strictly only see deals from 17 OCT 2026 onwards
+        if (dealDate < DATA_CUTOFF_DATE) return false;
+
         // Regular employees: only show deals owned or assigned to this user
         if (!hasFullAccess && user) {
           const userId = (user._id || user.id || '').toString();
@@ -881,6 +914,9 @@ function Deals() {
 
   const getStageBadgeStyle = (stage) => {
     switch (stage) {
+      case 'New Lead':
+      case 'New':
+        return { color: '#0284c7', background: '#e0f2fe' };
       case 'Qualification':
         return { color: '#2563eb', background: '#dbeafe' };
       case 'Proposal':
@@ -1467,6 +1503,7 @@ function Deals() {
                 }}
               >
                 <option value="all">All Stages</option>
+                <option value="New Lead">New Lead</option>
                 <option value="Qualification">Qualification</option>
                 <option value="Proposal">Proposal</option>
                 <option value="Negotiation">Negotiation</option>
@@ -1496,6 +1533,35 @@ function Deals() {
                 <option value="Partner">Partner</option>
                 <option value="Other">Other</option>
               </select>
+
+              {isAdmin && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', background: '#f8fafc', padding: '2px 4px', borderRadius: '8px', border: '1px solid #cbd5e1', gap: '3px' }}>
+                  <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', padding: '0 4px' }}>View:</span>
+                  {['all', 'new', 'old'].map(mode => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        setAdminDataViewMode(mode);
+                        try { localStorage.setItem('admin_crm_data_view_mode', mode); } catch (e) {}
+                      }}
+                      style={{
+                        border: 'none',
+                        background: adminDataViewMode === mode ? '#0284c7' : 'transparent',
+                        color: adminDataViewMode === mode ? '#ffffff' : '#64748b',
+                        fontSize: '11px',
+                        fontWeight: adminDataViewMode === mode ? 700 : 600,
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div style={{ fontSize: "12px", color: "#94a3b8", fontWeight: 600 }}>
                 Showing {filteredDeals.length === 0 ? 0 : pageStartIndex + 1}-{Math.min(pageStartIndex + paginatedDeals.length, filteredDeals.length)} of {filteredDeals.length}
@@ -1638,6 +1704,7 @@ function Deals() {
                               outline: "none"
                             }}
                           >
+                            <option value="New Lead">New Lead</option>
                             <option value="Qualification">Qualification</option>
                             <option value="Proposal">Proposal</option>
                             <option value="Negotiation">Negotiation</option>

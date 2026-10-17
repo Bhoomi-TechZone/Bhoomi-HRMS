@@ -45,11 +45,19 @@ function MyLeads() {
 
   const roleNameLower = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
   const roleNormalized = roleNameLower.replace(/\s+/g, ' ');
+  const designationLower = (user?.designation || '').toString().toLowerCase().trim();
+  const departmentLower = (user?.department || '').toString().toLowerCase().trim();
+  const emailLower = (user?.email || '').toString().toLowerCase().trim();
 
   const isAdmin =
     roleNormalized === 'admin' ||
-    roleNormalized === 'super admin' ||
-    roleNormalized === 'director' ||
+    roleNormalized.includes('admin') ||
+    roleNormalized.includes('superadmin') ||
+    roleNormalized.includes('director') ||
+    designationLower.includes('admin') ||
+    designationLower.includes('director') ||
+    departmentLower === 'administration' ||
+    emailLower.startsWith('admin@') ||
     user?.role?.name === 'Admin' ||
     user?.role?.name === 'Super Admin' ||
     user?.role?.name === 'Director';
@@ -73,6 +81,17 @@ function MyLeads() {
   const canAssignLeads = hasFullAccess;
   const isSales = roleNameLower.includes('sales');
 
+  // Move to Pipeline: ONLY Sales Head, Sales Manager, and Admin can move leads to pipeline
+  // Sales role and Sales Executive role must NOT have access and must NOT see the button
+  const isSalesExecutive = (
+    roleNormalized.includes('executive') ||
+    roleNormalized === 'sales' ||
+    roleNormalized === 'sales executive' ||
+    roleNormalized.includes('sales rep') ||
+    (isSales && !isSalesHead && !isSalesManager && !isAdmin)
+  );
+  const canMoveToPipeline = (isAdmin || isSalesHead || isSalesManager) && !isSalesExecutive;
+
   // ── Data ──────────────────────────────────────────────────────────────────
   const [leads, setLeads] = useState([]);          // regular leads
   const [metaLeads, setMetaLeads] = useState([]);  // meta leads (normalised)
@@ -91,7 +110,7 @@ function MyLeads() {
 
   // ── Pagination ────────────────────────────────────────────────────────────
   const [currentPage, setCurrentPage] = useState(1);
-  const LEADS_PER_PAGE = 10;
+  const [leadsPerPage, setLeadsPerPage] = useState(10);
 
   // ── Regular-lead modals ───────────────────────────────────────────────────
   const [selectedLead, setSelectedLead] = useState(null);
@@ -192,29 +211,91 @@ function MyLeads() {
   const [movePipelinePayload, setMovePipelinePayload] = useState(null);
   const [movingToPipeline, setMovingToPipeline] = useState(false);
   const [movePipelineSuccessInfo, setMovePipelineSuccessInfo] = useState(null);
+  const [bulkMovingToPipeline, setBulkMovingToPipeline] = useState(false);
   // ── Unmove from Pipeline Modal state ───────────────────────────────────────
   const [showUnmovePipelineModal, setShowUnmovePipelineModal] = useState(false);
   const [leadToUnmove, setLeadToUnmove] = useState(null);
   const [unmovingFromPipeline, setUnmovingFromPipeline] = useState(false);
-  // ── Multi Assign ──────────────────────────────────────────────────────────
+  // ── Multi Assign & Range Selection ───────────────────────────────────────
   const [multiAssignMode, setMultiAssignMode] = useState(false);
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
   const [showMultiAssignModal, setShowMultiAssignModal] = useState(false);
   const [multiAssignEmployee, setMultiAssignEmployee] = useState('');
   const [multiAssignSearch, setMultiAssignSearch] = useState('');
   const [multiAssigning, setMultiAssigning] = useState(false);
+  const [rangeFrom, setRangeFrom] = useState(1);
+  const [rangeTo, setRangeTo] = useState(50);
+  const [showHeaderSelectMenu, setShowHeaderSelectMenu] = useState(false);
+  const headerSelectMenuRef = useRef(null);
+
+  const handleSelectRange = (fromNum, toNum, replace = true) => {
+    if (!filteredLeads || filteredLeads.length === 0) return;
+    const fromVal = parseInt(fromNum, 10) || 1;
+    const toVal = parseInt(toNum, 10) || 1;
+    const start = Math.max(1, Math.min(fromVal, toVal));
+    const end = Math.min(filteredLeads.length, Math.max(fromVal, toVal));
+
+    const selectedSlice = filteredLeads.slice(start - 1, end);
+    const newSelected = replace ? new Set() : new Set(selectedLeadIds);
+    selectedSlice.forEach(l => {
+      newSelected.add(`${l._type}-${l._id}`);
+    });
+
+    setSelectedLeadIds(newSelected);
+    setRangeFrom(start);
+    setRangeTo(end);
+    if (!multiAssignMode) {
+      setMultiAssignMode(true);
+    }
+  };
+
+  const isExactRangeSelected = (from, to) => {
+    if (selectedLeadIds.size === 0) return false;
+    const start = Math.max(1, from);
+    const end = Math.min(filteredLeads.length, to);
+    const expectedCount = Math.max(0, end - start + 1);
+    if (selectedLeadIds.size !== expectedCount) return false;
+    const slice = filteredLeads.slice(start - 1, end);
+    return slice.every(l => selectedLeadIds.has(`${l._type}-${l._id}`));
+  };
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (headerSelectMenuRef.current && !headerSelectMenuRef.current.contains(e.target)) {
+        setShowHeaderSelectMenu(false);
+      }
+    };
+    if (showHeaderSelectMenu) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showHeaderSelectMenu]);
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const fetchAll = async () => {
     setLoading(true);
     try {
       const [leadsRes, metaRes, empRes] = await Promise.allSettled([
         api.get('/leads'),
-        api.get('/meta-leads?limit=1000'),
+        api.get('/meta-leads?limit=5000'),
         api.get('/employees/list').catch(() => api.get('/employees')),
       ]);
-      if (leadsRes.status === 'fulfilled') setLeads(leadsRes.value.data || []);
-      if (metaRes.status === 'fulfilled') setMetaLeads(metaRes.value.data.leads || []);
-      if (empRes.status === 'fulfilled') setEmployees((empRes.value.data || []).filter(u => u.isActive));
+      if (leadsRes.status === 'fulfilled') {
+        const raw = leadsRes.value.data;
+        setLeads(Array.isArray(raw) ? raw : (raw?.leads || []));
+      } else {
+        console.error('Failed to fetch regular leads:', leadsRes.reason);
+      }
+      if (metaRes.status === 'fulfilled') {
+        const raw = metaRes.value.data;
+        setMetaLeads(Array.isArray(raw) ? raw : (raw?.leads || []));
+      } else {
+        console.error('Failed to fetch meta leads:', metaRes.reason);
+      }
+      if (empRes.status === 'fulfilled') {
+        const rawEmp = empRes.value.data;
+        const empList = Array.isArray(rawEmp) ? rawEmp : (rawEmp?.employees || []);
+        setEmployees(empList.filter(u => u.isActive));
+      }
     } catch (err) {
       console.error('fetchAll error:', err);
     } finally {
@@ -818,14 +899,14 @@ function MyLeads() {
   }, [showFollowUpPanel]);
 
   // ── Pagination calculations ──────────────────────────────────────────────
-  const totalPages = Math.ceil(filteredLeads.length / LEADS_PER_PAGE);
-  const startIndex = (currentPage - 1) * LEADS_PER_PAGE;
-  const paginatedLeads = filteredLeads.slice(startIndex, startIndex + LEADS_PER_PAGE);
+  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / leadsPerPage));
+  const startIndex = (currentPage - 1) * leadsPerPage;
+  const paginatedLeads = filteredLeads.slice(startIndex, startIndex + leadsPerPage);
 
   // Reset to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy]);
+  }, [searchTerm, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy, leadsPerPage]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getStatusClass = (status) => ({
@@ -1783,7 +1864,7 @@ function MyLeads() {
       contactSource: lead._type === 'meta'
         ? (lead.pageName ? `Meta · ${lead.pageName}` : 'Meta')
         : (lead.source || 'Manual').replace(' - Buyer Lead', '').replace(' - Enquiry', ''),
-      leadStage: 'Meta Lead',
+      leadStage: 'New Lead',
       leadStatus: getEffectiveStatus(lead) || lead.status || 'New',
       company: lead.company || lead.businessCategory || '',
       address: lead.city || lead.country || '',
@@ -1804,11 +1885,12 @@ function MyLeads() {
     try {
       const res = await api.post('/pipeline-contacts/move-lead', movePipelinePayload);
       const contactId = res.data?.contact?._id;
+      const dealId = res.data?.deal?._id;
 
       const targetLeadId = movePipelinePayload.leadId;
       const historyEntry = {
         action: 'Moved to Pipeline',
-        details: `Lead moved to Pipeline Contacts under "Meta Lead" stage by ${user?.firstName || 'User'}`,
+        details: `Lead moved to Pipeline Deals under "New Lead" stage by ${user?.firstName || 'User'}`,
         date: new Date()
       };
 
@@ -1817,6 +1899,7 @@ function MyLeads() {
           ...m,
           movedToPipeline: true,
           pipelineContactId: contactId || m.pipelineContactId,
+          pipelineDealId: dealId || m.pipelineDealId,
           history: [...(m.history || []), historyEntry]
         } : m));
       } else {
@@ -1824,6 +1907,7 @@ function MyLeads() {
           ...l,
           movedToPipeline: true,
           pipelineContactId: contactId || l.pipelineContactId,
+          pipelineDealId: dealId || l.pipelineDealId,
           history: [...(l.history || []), historyEntry]
         } : l));
       }
@@ -1831,13 +1915,70 @@ function MyLeads() {
       setShowMovePipelineModal(false);
       setMovePipelineSuccessInfo({
         contactName: `${movePipelinePayload.firstName} ${movePipelinePayload.lastName}`.trim(),
-        stage: 'Meta Lead',
+        stage: 'New Lead',
         isUnmoved: false
       });
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to move lead to pipeline');
     } finally {
       setMovingToPipeline(false);
+    }
+  };
+
+  const handleBulkMoveToPipeline = async () => {
+    if (selectedLeadIds.size === 0) {
+      alert('Please select at least one lead to move.');
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to move all ${selectedLeadIds.size} selected lead(s) into Deals in Pipeline under the "New Lead" stage?`)) {
+      return;
+    }
+
+    setBulkMovingToPipeline(true);
+    try {
+      const selectedArr = Array.from(selectedLeadIds);
+      const leadsToMove = selectedArr.map(compositeId => {
+        const [type, ...rest] = compositeId.split('-');
+        const id = rest.join('-');
+        return { id, type };
+      });
+
+      const res = await api.post('/pipeline-contacts/bulk-move-leads', { leads: leadsToMove });
+
+      const movedSet = new Set(selectedArr);
+      const historyEntry = {
+        action: 'Moved to Pipeline',
+        details: `Lead moved in bulk to Deals under "New Lead" stage by ${user?.firstName || 'User'}`,
+        date: new Date()
+      };
+
+      setLeads(prev => prev.map(l => movedSet.has(`regular-${l._id}`) ? {
+        ...l,
+        movedToPipeline: true,
+        history: [...(l.history || []), historyEntry]
+      } : l));
+
+      setMetaLeads(prev => prev.map(m => movedSet.has(`meta-${m._id}`) ? {
+        ...m,
+        movedToPipeline: true,
+        history: [...(m.history || []), historyEntry]
+      } : m));
+
+      const movedCount = res.data?.count || selectedLeadIds.size;
+      setMovePipelineSuccessInfo({
+        contactName: `${movedCount} Lead(s)`,
+        stage: 'New Lead',
+        isUnmoved: false
+      });
+
+      setSelectedLeadIds(new Set());
+      setMultiAssignMode(false);
+    } catch (err) {
+      console.error('Bulk move error:', err);
+      alert(err.response?.data?.message || 'Failed to move selected leads to pipeline.');
+    } finally {
+      setBulkMovingToPipeline(false);
     }
   };
 
@@ -3020,7 +3161,7 @@ function MyLeads() {
             <button className="ist-btn-ghost" onClick={clearFilters} style={{ padding: '7px 12px', fontSize: '11px' }}>Clear</button>
           )}
 
-          {canMultiAssign && (
+          {(canMultiAssign || canMoveToPipeline) && (
             <button
               className="ist-btn-ghost leads-multi-assign-btn"
               onClick={() => {
@@ -3047,11 +3188,11 @@ function MyLeads() {
                 <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
-              <span style={{ position: 'relative', zIndex: 1 }}>{multiAssignMode ? `Cancel (${selectedLeadIds.size} selected)` : 'Multi Assign'}</span>
+              <span style={{ position: 'relative', zIndex: 1 }}>{multiAssignMode ? `Cancel (${selectedLeadIds.size} selected)` : 'Select Leads'}</span>
             </button>
           )}
 
-          {multiAssignMode && selectedLeadIds.size > 0 && (
+          {multiAssignMode && selectedLeadIds.size > 0 && canMultiAssign && (
             <button
               className="ist-btn-ghost leads-multi-assign-btn"
               onClick={() => setShowMultiAssignModal(true)}
@@ -3074,10 +3215,166 @@ function MyLeads() {
             </button>
           )}
 
+          {multiAssignMode && selectedLeadIds.size > 0 && canMoveToPipeline && (
+            <button
+              className="ist-btn-ghost leads-multi-move-btn"
+              onClick={handleBulkMoveToPipeline}
+              disabled={bulkMovingToPipeline}
+              title="Move all selected leads into Deals in Pipeline under 'New Lead' stage in one shot"
+              style={{
+                padding: '7px 12px',
+                fontSize: '11px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                whiteSpace: 'nowrap',
+                borderColor: '#7c3aed',
+                color: '#7c3aed',
+                background: '#f5f3ff',
+                cursor: bulkMovingToPipeline ? 'not-allowed' : 'pointer',
+                fontWeight: 600
+              }}
+            >
+              <svg style={{ position: 'relative', zIndex: 1 }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="5" height="18" rx="1" />
+                <rect x="10" y="3" width="5" height="11" rx="1" />
+                <rect x="17" y="3" width="5" height="15" rx="1" />
+              </svg>
+              <span style={{ position: 'relative', zIndex: 1 }}>
+                {bulkMovingToPipeline ? 'Moving...' : `Move ${selectedLeadIds.size} to Deals`}
+              </span>
+            </button>
+          )}
+
           <span style={{ fontSize: '12px', color: '#94a3b8', marginLeft: 'auto', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 600 }}>
             {filteredLeads.length} of {statsLeads.length}
           </span>
         </div>
+
+        {/* Quick Range Selection Bar for Batch Leads (1 to 10, 1 to 50, etc.) */}
+        {multiAssignMode && (
+          <div className="leads-range-select-bar" style={{
+            margin: '0 16px 14px 16px',
+            padding: '10px 14px',
+            background: '#ffffff',
+            border: '1.5px solid #bbf7d0',
+            borderRadius: '10px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+            boxShadow: '0 2px 8px rgba(16, 185, 129, 0.08)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                  Select Leads:
+                </span>
+                {[
+                  { label: '1 to 10', from: 1, to: 10 },
+                  { label: '1 to 20', from: 1, to: 20 },
+                  { label: '1 to 50', from: 1, to: 50 },
+                  { label: '1 to 100', from: 1, to: 100 },
+                ].map(preset => {
+                  const isActive = isExactRangeSelected(preset.from, preset.to);
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      className={`leads-range-chip-btn ${isActive ? 'active' : ''}`}
+                      onClick={() => handleSelectRange(preset.from, preset.to)}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Custom Range Inputs (e.g. 1 to 50, or 20 to 80) */}
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#f8fafc', padding: '3px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Custom:</span>
+                <span style={{ fontSize: '11px', color: '#475569' }}>#</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={filteredLeads.length || 1}
+                  value={rangeFrom}
+                  onChange={(e) => setRangeFrom(e.target.value)}
+                  style={{
+                    width: '46px',
+                    padding: '2px 4px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '4px',
+                    textAlign: 'center'
+                  }}
+                  placeholder="1"
+                />
+                <span style={{ fontSize: '11px', color: '#475569' }}>to</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={filteredLeads.length || 1}
+                  value={rangeTo}
+                  onChange={(e) => setRangeTo(e.target.value)}
+                  style={{
+                    width: '46px',
+                    padding: '2px 4px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '4px',
+                    textAlign: 'center'
+                  }}
+                  placeholder="50"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSelectRange(rangeFrom, rangeTo)}
+                  style={{
+                    border: 'none',
+                    background: '#16a34a',
+                    color: '#ffffff',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    padding: '3px 9px',
+                    borderRadius: '5px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Select Range
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#166534' }}>
+                <strong>{selectedLeadIds.size}</strong> of {filteredLeads.length} leads selected
+              </span>
+
+              {selectedLeadIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedLeadIds(new Set())}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#dc2626',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  Deselect All
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Success Alert Banner for Move / Unmove from Pipeline */}
         {movePipelineSuccessInfo && (
@@ -3184,27 +3481,154 @@ function MyLeads() {
               <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
                 <tr style={{ boxShadow: '0 1px 0 #f1f5f9' }}>
                   {multiAssignMode && (
-                    <th style={{ width: '36px', textAlign: 'center', padding: '0 8px' }}>
-                      <input
-                        type="checkbox"
-                        style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#3b775e' }}
-                        checked={paginatedLeads.length > 0 && paginatedLeads.every(l => selectedLeadIds.has(`${l._type}-${l._id}`))}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedLeadIds(prev => {
-                              const next = new Set(prev);
-                              paginatedLeads.forEach(l => next.add(`${l._type}-${l._id}`));
-                              return next;
-                            });
-                          } else {
-                            setSelectedLeadIds(prev => {
-                              const next = new Set(prev);
-                              paginatedLeads.forEach(l => next.delete(`${l._type}-${l._id}`));
-                              return next;
-                            });
-                          }
-                        }}
-                      />
+                    <th style={{ width: '52px', textAlign: 'center', padding: '0 6px', position: 'relative' }}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                        <input
+                          type="checkbox"
+                          style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#3b775e' }}
+                          checked={paginatedLeads.length > 0 && paginatedLeads.every(l => selectedLeadIds.has(`${l._type}-${l._id}`))}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedLeadIds(prev => {
+                                const next = new Set(prev);
+                                paginatedLeads.forEach(l => next.add(`${l._type}-${l._id}`));
+                                return next;
+                              });
+                            } else {
+                              setSelectedLeadIds(prev => {
+                                const next = new Set(prev);
+                                paginatedLeads.forEach(l => next.delete(`${l._type}-${l._id}`));
+                                return next;
+                              });
+                            }
+                          }}
+                          title="Select / Deselect all on current page"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowHeaderSelectMenu(prev => !prev);
+                          }}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            color: '#64748b',
+                            padding: '2px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          title="Select range options (1 to 10, 1 to 50, etc.)"
+                        >
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <polyline points="6 9 12 15 18 9" />
+                          </svg>
+                        </button>
+                      </div>
+
+                      {showHeaderSelectMenu && (
+                        <div
+                          ref={headerSelectMenuRef}
+                          style={{
+                            position: 'absolute',
+                            top: '100%',
+                            left: '0',
+                            marginTop: '4px',
+                            background: '#ffffff',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '8px',
+                            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.18)',
+                            zIndex: 1000,
+                            minWidth: '180px',
+                            textAlign: 'left',
+                            padding: '6px 0',
+                            fontFamily: "'Inter', sans-serif"
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div style={{ padding: '4px 12px', fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>
+                            Select Lead Range
+                          </div>
+                          <div
+                            className="ist-select-menu-item"
+                            onClick={() => {
+                              handleSelectRange(1, 10);
+                              setShowHeaderSelectMenu(false);
+                            }}
+                            style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', color: '#1e293b' }}
+                          >
+                            Select 1 to 10
+                          </div>
+                          <div
+                            className="ist-select-menu-item"
+                            onClick={() => {
+                              handleSelectRange(1, 20);
+                              setShowHeaderSelectMenu(false);
+                            }}
+                            style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', color: '#1e293b' }}
+                          >
+                            Select 1 to 20
+                          </div>
+                          <div
+                            className="ist-select-menu-item"
+                            onClick={() => {
+                              handleSelectRange(1, 50);
+                              setShowHeaderSelectMenu(false);
+                            }}
+                            style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', color: '#1e293b' }}
+                          >
+                            Select 1 to 50
+                          </div>
+                          <div
+                            className="ist-select-menu-item"
+                            onClick={() => {
+                              handleSelectRange(1, 100);
+                              setShowHeaderSelectMenu(false);
+                            }}
+                            style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', color: '#1e293b' }}
+                          >
+                            Select 1 to 100
+                          </div>
+                          <div style={{ borderTop: '1px solid #f1f5f9', margin: '4px 0' }}></div>
+                          <div
+                            className="ist-select-menu-item"
+                            onClick={() => {
+                              setSelectedLeadIds(prev => {
+                                const next = new Set(prev);
+                                paginatedLeads.forEach(l => next.add(`${l._type}-${l._id}`));
+                                return next;
+                              });
+                              setShowHeaderSelectMenu(false);
+                            }}
+                            style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', color: '#1e293b' }}
+                          >
+                            Current Page ({paginatedLeads.length})
+                          </div>
+                          <div
+                            className="ist-select-menu-item"
+                            onClick={() => {
+                              const allSet = new Set(filteredLeads.map(l => `${l._type}-${l._id}`));
+                              setSelectedLeadIds(allSet);
+                              setShowHeaderSelectMenu(false);
+                            }}
+                            style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', color: '#1e293b' }}
+                          >
+                            All Leads ({filteredLeads.length})
+                          </div>
+                          <div style={{ borderTop: '1px solid #f1f5f9', margin: '4px 0' }}></div>
+                          <div
+                            className="ist-select-menu-item"
+                            onClick={() => {
+                              setSelectedLeadIds(new Set());
+                              setShowHeaderSelectMenu(false);
+                            }}
+                            style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer', color: '#dc2626' }}
+                          >
+                            Deselect All
+                          </div>
+                        </div>
+                      )}
                     </th>
                   )}
                   <th>#</th>
@@ -3589,36 +4013,38 @@ function MyLeads() {
                                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
                               </button>
 
-                              {/* 2. Move / Unmove Pipeline button */}
-                              {lead.movedToPipeline ? (
-                                <button
-                                  className="ist-action-btn"
-                                  title="Moved to Pipeline — Click to Unmove"
-                                  onClick={() => handleOpenUnmovePipeline(lead)}
-                                  onMouseEnter={e => e.currentTarget.style.background = '#ecfdf5'}
-                                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                  style={{ position: 'relative' }}
-                                >
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
-                                    <polyline points="1 4 1 10 7 10" />
-                                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                                  </svg>
-                                  <span style={{ position: 'absolute', top: '1px', right: '1px', width: '5px', height: '5px', borderRadius: '50%', background: '#10b981' }} />
-                                </button>
-                              ) : (
-                                <button
-                                  className="ist-action-btn"
-                                  title="Move to Pipeline (Meta Lead stage)"
-                                  onClick={() => handleOpenMoveToPipeline(lead)}
-                                  onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
-                                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                >
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="3" y="3" width="5" height="18" rx="1" />
-                                    <rect x="10" y="3" width="5" height="11" rx="1" />
-                                    <rect x="17" y="3" width="5" height="15" rx="1" />
-                                  </svg>
-                                </button>
+                              {/* 2. Move / Unmove Pipeline button — restricted to Sales Head, Sales Manager, Admin */}
+                              {canMoveToPipeline && (
+                                lead.movedToPipeline ? (
+                                  <button
+                                    className="ist-action-btn"
+                                    title="Moved to Pipeline Deals — Click to Unmove"
+                                    onClick={() => handleOpenUnmovePipeline(lead)}
+                                    onMouseEnter={e => e.currentTarget.style.background = '#ecfdf5'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                    style={{ position: 'relative' }}
+                                  >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="1 4 1 10 7 10" />
+                                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                                    </svg>
+                                    <span style={{ position: 'absolute', top: '1px', right: '1px', width: '5px', height: '5px', borderRadius: '50%', background: '#10b981' }} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    className="ist-action-btn"
+                                    title="Move to Pipeline Deals (New Lead stage)"
+                                    onClick={() => handleOpenMoveToPipeline(lead)}
+                                    onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                  >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <rect x="3" y="3" width="5" height="18" rx="1" />
+                                      <rect x="10" y="3" width="5" height="11" rx="1" />
+                                      <rect x="17" y="3" width="5" height="15" rx="1" />
+                                    </svg>
+                                  </button>
+                                )
                               )}
 
                               {/* 3. Delete — only with canDelete */}
@@ -3705,70 +4131,72 @@ function MyLeads() {
                                       </button>
                                     )}
 
-                                    {/* Move / Unmove Pipeline in Dropdown */}
-                                    {lead.movedToPipeline ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setOpenActionMenuDrop(null);
-                                          handleOpenUnmovePipeline(lead);
-                                        }}
-                                        style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          gap: '8px',
-                                          width: '100%',
-                                          textAlign: 'left',
-                                          padding: '7px 10px',
-                                          borderRadius: '6px',
-                                          border: 'none',
-                                          background: 'transparent',
-                                          color: '#059669',
-                                          fontSize: '11.5px',
-                                          fontWeight: 600,
-                                          cursor: 'pointer'
-                                        }}
-                                        onMouseEnter={e => e.currentTarget.style.background = '#ecfdf5'}
-                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                      >
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                          <polyline points="1 4 1 10 7 10" />
-                                          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                                        </svg>
-                                        <span>Unmove from Pipeline</span>
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setOpenActionMenuDrop(null);
-                                          handleOpenMoveToPipeline(lead);
-                                        }}
-                                        style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          gap: '8px',
-                                          width: '100%',
-                                          textAlign: 'left',
-                                          padding: '7px 10px',
-                                          borderRadius: '6px',
-                                          border: 'none',
-                                          background: 'transparent',
-                                          color: '#6d28d9',
-                                          fontSize: '11.5px',
-                                          fontWeight: 500,
-                                          cursor: 'pointer'
-                                        }}
-                                        onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
-                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                      >
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <rect x="3" y="3" width="5" height="18" rx="1" />
-                                          <rect x="10" y="3" width="5" height="11" rx="1" />
-                                          <rect x="17" y="3" width="5" height="15" rx="1" />
-                                        </svg>
-                                        <span>Move to Pipeline</span>
-                                      </button>
+                                    {/* Move / Unmove Pipeline in Dropdown — restricted to Sales Head, Sales Manager, Admin */}
+                                    {canMoveToPipeline && (
+                                      lead.movedToPipeline ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setOpenActionMenuDrop(null);
+                                            handleOpenUnmovePipeline(lead);
+                                          }}
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px',
+                                            width: '100%',
+                                            textAlign: 'left',
+                                            padding: '7px 10px',
+                                            borderRadius: '6px',
+                                            border: 'none',
+                                            background: 'transparent',
+                                            color: '#059669',
+                                            fontSize: '11.5px',
+                                            fontWeight: 600,
+                                            cursor: 'pointer'
+                                          }}
+                                          onMouseEnter={e => e.currentTarget.style.background = '#ecfdf5'}
+                                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                        >
+                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="1 4 1 10 7 10" />
+                                            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                                          </svg>
+                                          <span>Unmove from Pipeline</span>
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setOpenActionMenuDrop(null);
+                                            handleOpenMoveToPipeline(lead);
+                                          }}
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px',
+                                            width: '100%',
+                                            textAlign: 'left',
+                                            padding: '7px 10px',
+                                            borderRadius: '6px',
+                                            border: 'none',
+                                            background: 'transparent',
+                                            color: '#6d28d9',
+                                            fontSize: '11.5px',
+                                            fontWeight: 500,
+                                            cursor: 'pointer'
+                                          }}
+                                          onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
+                                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                        >
+                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <rect x="3" y="3" width="5" height="18" rx="1" />
+                                            <rect x="10" y="3" width="5" height="11" rx="1" />
+                                            <rect x="17" y="3" width="5" height="15" rx="1" />
+                                          </svg>
+                                          <span>Move to Deals (New Lead)</span>
+                                        </button>
+                                      )
                                     )}
 
                                     {/* Note — for regular CRM leads */}
@@ -3849,12 +4277,41 @@ function MyLeads() {
           )}
         </div>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div style={{ padding: '12px 16px', borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        {/* Pagination & Rows Per Page */}
+        <div style={{ padding: '12px 16px', borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
-              Page {currentPage} of {totalPages}
+              Page {currentPage} of {totalPages} ({filteredLeads.length} total leads)
             </span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#64748b' }}>
+              <span>Show:</span>
+              <select
+                value={leadsPerPage}
+                onChange={(e) => {
+                  const newSize = parseInt(e.target.value, 10);
+                  setLeadsPerPage(newSize);
+                  setCurrentPage(1);
+                }}
+                style={{
+                  padding: '3px 8px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: '#334155',
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value={10}>10 per page</option>
+                <option value={20}>20 per page</option>
+                <option value={50}>50 per page</option>
+                <option value={100}>100 per page</option>
+              </select>
+            </div>
+          </div>
+
+          {totalPages > 1 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <button
                 className="ist-pagination-btn"
@@ -3894,8 +4351,8 @@ function MyLeads() {
                 Next →
               </button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* ── Regular Lead Modals ─────────────────────────────────────────────── */}
@@ -4518,10 +4975,10 @@ function MyLeads() {
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#1e1b4b' }}>
-                    Move Lead to Pipeline
+                    Move Lead to Deals in Pipeline
                   </h3>
                   <div style={{ fontSize: '11.5px', color: '#6d28d9', marginTop: '1px' }}>
-                    Will appear under <strong>Contacts → Meta Lead</strong> stage
+                    Will appear under <strong>Deals → New Lead</strong> stage
                   </div>
                 </div>
               </div>
@@ -4578,7 +5035,7 @@ function MyLeads() {
                       color: '#7c3aed',
                       border: '1px solid #ddd6fe'
                     }}>
-                      Meta Lead
+                      New Lead
                     </span>
                   </div>
                 </div>
@@ -4631,7 +5088,7 @@ function MyLeads() {
               </div>
 
               <div style={{ fontSize: '11.5px', color: '#64748b', lineHeight: 1.4 }}>
-                This action will create or update this contact in the Pipeline Contacts board under the <strong>Meta Lead</strong> column with full details respectively.
+                This action will create this lead in the Pipeline Deals board under the <strong>New Lead</strong> stage with full contact details.
               </div>
             </div>
 
@@ -4765,7 +5222,7 @@ function MyLeads() {
                     Unmove Lead from Pipeline
                   </h3>
                   <div style={{ fontSize: '11.5px', color: '#c2410c', marginTop: '1px' }}>
-                    Remove from <strong>Pipeline Contacts (Meta Lead stage)</strong>
+                    Remove from <strong>Pipeline Deals (New Lead stage)</strong>
                   </div>
                 </div>
               </div>

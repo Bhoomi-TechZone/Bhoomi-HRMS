@@ -493,6 +493,7 @@ const isValidCompanyDomain = (domain) => {
 };
 
 const DEFAULT_PIPELINES = [
+  { id: 'New Lead', name: 'New Lead', badgeClass: 'new' },
   { id: 'Initial', name: 'Initial', badgeClass: 'new' },
   { id: 'Sales Pipeline', name: 'Sales Pipeline', badgeClass: 'hot' },
   { id: 'Enterprise Pipeline', name: 'Enterprise Pipeline', badgeClass: 'cold' },
@@ -502,6 +503,7 @@ const DEFAULT_PIPELINES = [
 ];
 
 const DEFAULT_STAGES = [
+  { id: 'New Lead', name: 'New Lead', badgeClass: 'new' },
   { id: 'New', name: 'New', badgeClass: 'new' },
   { id: 'Hot', name: 'Hot', badgeClass: 'hot' },
   { id: 'Old', name: 'Old', badgeClass: 'old' },
@@ -511,6 +513,7 @@ const DEFAULT_STAGES = [
 ];
 
 const PIPELINE_OPTIONS = [
+  'New Lead',
   'Initial',
   'Sales Pipeline',
   'Enterprise Pipeline',
@@ -2269,8 +2272,17 @@ function TableStatusPill({ status, onSelectStatus }) {
   );
 }
 
-// Cutoff timestamp: old pipeline data (before this cutoff) is strictly visible ONLY to Admin
-const DATA_CUTOFF_DATE = new Date('2026-10-16T19:00:00+05:30');
+// Cutoff timestamp: 17 OCT 2026 00:00:00 IST
+const DATA_CUTOFF_DATE = new Date('2026-10-17T00:00:00+05:30');
+
+// Safe item date extractor
+const getItemCreationDate = (item) => {
+  if (!item) return new Date(0);
+  const raw = item.createdAt || item.createdTime || item.date || item.addedOn;
+  if (!raw) return new Date(0);
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? new Date(0) : d;
+};
 
 function Pipeline() {
   const { user, hasPermission } = useAuth();
@@ -2300,10 +2312,18 @@ function Pipeline() {
   }, [roleNormalized]);
 
   const isAdmin = useMemo(() => {
+    const des = (user?.designation || '').toString().toLowerCase().trim();
+    const dept = (user?.department || '').toString().toLowerCase().trim();
+    const em = (user?.email || '').toString().toLowerCase().trim();
     return (
       roleNormalized === 'admin' ||
-      roleNormalized === 'super admin' ||
-      roleNormalized === 'director' ||
+      roleNormalized.includes('admin') ||
+      roleNormalized.includes('superadmin') ||
+      roleNormalized.includes('director') ||
+      des.includes('admin') ||
+      des.includes('director') ||
+      dept === 'administration' ||
+      em.startsWith('admin@') ||
       user?.role?.name === 'Admin' ||
       user?.role?.name === 'Super Admin' ||
       user?.role?.name === 'Director'
@@ -2329,13 +2349,48 @@ function Pipeline() {
     return isAdmin || hasPermission('pipeline', 'delete') || hasPermission('deals', 'delete') || hasPermission('contacts', 'delete') || hasPermission('companies', 'delete') || hasPermission('tasks', 'delete');
   }, [isAdmin, hasPermission]);
 
+  // Admin Data View Mode ('new' | 'old' | 'all') - defaults to 'new' (hiding old historical pipeline data)
+  const [adminDataViewMode, setAdminDataViewMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('admin_crm_data_view_mode');
+      if (saved && ['all', 'new', 'old'].includes(saved.toLowerCase())) {
+        return saved.toLowerCase();
+      }
+    } catch (e) {}
+    return 'new';
+  });
+
+  const handleSetAdminDataViewMode = useCallback((mode) => {
+    const clean = (mode || 'new').toLowerCase();
+    setAdminDataViewMode(clean);
+    try {
+      localStorage.setItem('admin_crm_data_view_mode', clean);
+    } catch (e) {}
+  }, []);
+
   // Ownership verification for data isolation
   const isItemOwnedByUser = useCallback((item, type = 'deal') => {
-    if (isAdmin) return true;
-    if (!item || !user) return false;
+    if (!item) return false;
 
-    // Old pipeline items (created before cutoff date) are strictly visible ONLY to Admin
-    const itemDate = new Date(item.createdAt || item.date || 0);
+    const itemDate = getItemCreationDate(item);
+
+    // Admin Data View Mode controls what data the admin views:
+    // 'new' => only data from 17 OCT 2026 onwards (itemDate >= DATA_CUTOFF_DATE)
+    // 'old' => only data before 17 OCT 2026 (itemDate < DATA_CUTOFF_DATE)
+    // 'all' => all data (both old and new)
+    if (isAdmin) {
+      if (adminDataViewMode === 'new') {
+        return itemDate >= DATA_CUTOFF_DATE;
+      }
+      if (adminDataViewMode === 'old') {
+        return itemDate < DATA_CUTOFF_DATE;
+      }
+      return true; // 'all' mode
+    }
+
+    if (!user) return false;
+
+    // For non-admin roles (Sales Head, Sales Manager, Executives), old pipeline items before 17 OCT 2026 are strictly hidden
     if (itemDate < DATA_CUTOFF_DATE) return false;
 
     if (hasFullAccess) return true;
@@ -2375,7 +2430,7 @@ function Pipeline() {
     }
 
     return false;
-  }, [user, hasFullAccess, isAdmin]);
+  }, [user, hasFullAccess, isAdmin, adminDataViewMode]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [deals, setDeals] = useState([]);
@@ -2386,9 +2441,12 @@ function Pipeline() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const filtered = parsed.filter(p => !deleted.includes((p.name || p.id || '').toLowerCase()));
+          let filtered = parsed.filter(p => !deleted.includes((p.name || p.id || '').toLowerCase()));
+          if (!filtered.some(p => (p.name || p.id || '').toLowerCase() === 'new lead') && !deleted.includes('new lead')) {
+            filtered = [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new' }, ...filtered];
+          }
           if (!filtered.some(p => (p.name || p.id || '').toLowerCase() === 'initial') && !deleted.includes('initial')) {
-            return [{ id: 'Initial', name: 'Initial', badgeClass: 'new' }, ...filtered];
+            filtered = [{ id: 'Initial', name: 'Initial', badgeClass: 'new' }, ...filtered];
           }
           return filtered;
         }
@@ -2402,7 +2460,12 @@ function Pipeline() {
       const saved = localStorage.getItem('crm_stages');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          if (!parsed.some(s => (s.name || s.id || '').toLowerCase() === 'new lead')) {
+            return [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new' }, ...parsed];
+          }
+          return parsed;
+        }
       }
     } catch (e) { }
     return DEFAULT_STAGES;
@@ -2415,9 +2478,12 @@ function Pipeline() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const list = parsed.filter(p => !deleted.includes(String(p).toLowerCase()));
+          let list = parsed.filter(p => !deleted.includes(String(p).toLowerCase()));
+          if (!list.some(p => p.toLowerCase() === 'new lead') && !deleted.includes('new lead')) {
+            list = ['New Lead', ...list];
+          }
           if (!list.some(p => p.toLowerCase() === 'initial') && !deleted.includes('initial')) {
-            return ['Initial', ...list];
+            list = ['Initial', ...list];
           }
           return list;
         }
@@ -8136,6 +8202,86 @@ function Pipeline() {
               );
             })}
           </ul>
+
+          {/* Admin Data View Mode Section at bottom of sub-sidebar */}
+          {isAdmin && !isSidebarCollapsed && (
+            <div className="pipeline-sidebar-data-view-card">
+              <div className="pipeline-sidebar-data-view-header">
+                <div className="pipeline-sidebar-data-view-label-wrap">
+                  <Calendar size={13} className="pipeline-sidebar-data-view-icon" />
+                  <span className="pipeline-sidebar-data-view-label">Data View Mode</span>
+                </div>
+                <span className={`pipeline-data-view-pill-badge ${adminDataViewMode}`}>
+                  {adminDataViewMode.toUpperCase()}
+                </span>
+              </div>
+
+              <div className="pipeline-data-view-segmented-control" role="group" aria-label="Data View Mode">
+                <button
+                  type="button"
+                  className={`pipeline-data-view-btn ${adminDataViewMode === 'all' ? 'active' : ''}`}
+                  onClick={() => handleSetAdminDataViewMode('all')}
+                  title="Show all historical and new pipeline data"
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  className={`pipeline-data-view-btn ${adminDataViewMode === 'new' ? 'active' : ''}`}
+                  onClick={() => handleSetAdminDataViewMode('new')}
+                  title="Show only new data from 17 Oct 2026"
+                >
+                  New
+                </button>
+                <button
+                  type="button"
+                  className={`pipeline-data-view-btn ${adminDataViewMode === 'old' ? 'active' : ''}`}
+                  onClick={() => handleSetAdminDataViewMode('old')}
+                  title="Show only old data before 17 Oct 2026"
+                >
+                  Old
+                </button>
+              </div>
+
+              <div className="pipeline-data-view-status-caption">
+                {adminDataViewMode === 'new' && (
+                  <span className="pipeline-data-view-desc new">
+                    <span className="status-dot green"></span>
+                    From 17 OCT 2026
+                  </span>
+                )}
+                {adminDataViewMode === 'old' && (
+                  <span className="pipeline-data-view-desc old">
+                    <span className="status-dot amber"></span>
+                    Before 17 OCT 2026
+                  </span>
+                )}
+                {adminDataViewMode === 'all' && (
+                  <span className="pipeline-data-view-desc all">
+                    <span className="status-dot purple"></span>
+                    All Old + New Data
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Collapsed state quick toggle button */}
+          {isAdmin && isSidebarCollapsed && (
+            <div className="pipeline-sidebar-data-view-collapsed" title={`Data View Mode: ${adminDataViewMode.toUpperCase()} (Click to cycle All/New/Old)`}>
+              <button
+                type="button"
+                className={`pipeline-data-view-collapsed-btn ${adminDataViewMode}`}
+                onClick={() => {
+                  const nextMode = adminDataViewMode === 'new' ? 'old' : adminDataViewMode === 'old' ? 'all' : 'new';
+                  handleSetAdminDataViewMode(nextMode);
+                }}
+              >
+                <Calendar size={13} />
+                <span className="collapsed-mode-indicator">{adminDataViewMode[0].toUpperCase()}</span>
+              </button>
+            </div>
+          )}
         </aside>
       )}
 
