@@ -219,6 +219,12 @@ mongoose
       console.error("[Worker] Gmail sync error:", err.message);
     }
 
+    try {
+      require("./cron/followupReminderWorker")(io);
+    } catch (err) {
+      console.error("[Worker] Follow-up reminder worker error:", err.message);
+    }
+
     /* ================= LISTEN ================= */
     server.listen(PORT, () => {
       console.log(`\n======================================================`);

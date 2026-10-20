@@ -3,11 +3,14 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { 
   Bell, Check, BellRing, Megaphone, Briefcase, 
-  Target, Umbrella, Info, DollarSign, UserCheck, Building, CheckSquare 
+  Target, Umbrella, Info, DollarSign, UserCheck, Building, CheckSquare, Calendar
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const getNotificationIcon = (type) => {
+const getNotificationIcon = (type, title = '') => {
+  if (type === 'Follow-up' || type === 'Followup' || (title && (title.includes('Follow-up') || title.includes('Followup')))) {
+    return <Calendar size={18} color="#0284c7" />;
+  }
   switch(type) {
     case 'Announcement': return <Megaphone size={18} />;
     case 'Project': return <Briefcase size={18} />;
@@ -138,19 +141,19 @@ function Notifications() {
                   padding: '10px', 
                   borderRadius: '10px' 
                 }}>
-                  {getNotificationIcon(notification.type)}
+                  {getNotificationIcon(notification.type, notification.title)}
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                     <h4 style={{ margin: 0, fontSize: '15px', color: '#0f172a', fontWeight: notification.isRead ? 500 : 700 }}>
-                      {notification.title}
+                      {notification.title ? notification.title.replace(/[📅⏰]/g, '').trim() : ''}
                     </h4>
                     <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>
                       {formatTime(notification.createdAt)}
                     </span>
                   </div>
                   <p style={{ margin: 0, fontSize: '14px', color: notification.isRead ? '#64748b' : '#334155', lineHeight: '1.5' }}>
-                    {notification.message}
+                    {notification.message ? notification.message.replace(/[📅⏰]/g, '').trim() : ''}
                   </p>
                 </div>
                 {!notification.isRead && (

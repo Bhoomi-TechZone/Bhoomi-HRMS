@@ -166,14 +166,28 @@ export const AuthProvider = ({ children }) => {
     };
   }, [user]);
 
-  // Fetch initial notifications globally
+  // Fetch initial notifications globally and poll periodically
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (user && token) {
+    if (!user || !token) return;
+
+    const fetchNotifications = () => {
       api.get('/notifications')
         .then(res => {
           const fetchedNotifications = res.data || [];
-          setNotifications(fetchedNotifications);
+          setNotifications(prev => {
+            // Check if there are newly arrived unread notifications that were not in prev
+            const prevIds = new Set((prev || []).map(p => p._id));
+            const brandNew = fetchedNotifications.filter(n => !n.isRead && !prevIds.has(n._id));
+            if (initialLoadRef.current && brandNew.length > 0) {
+              setActiveToast(brandNew[0]);
+              const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.toUpperCase().indexOf('MAC') >= 0;
+              const soundUrl = isMac ? '/sounds/that-was-quick-606.m4r' : '/sounds/that-was-quick-606.mp3';
+              const audio = new Audio(soundUrl);
+              audio.play().catch(err => console.log('Browser blocked audio playback:', err));
+            }
+            return fetchedNotifications;
+          });
           
           if (!initialLoadRef.current) {
             initialLoadRef.current = true;
@@ -201,7 +215,11 @@ export const AuthProvider = ({ children }) => {
             console.error('Error fetching notifications:', err);
           }
         });
-    }
+    };
+
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 25000);
+    return () => clearInterval(interval);
   }, [user]);
 
   useEffect(() => {

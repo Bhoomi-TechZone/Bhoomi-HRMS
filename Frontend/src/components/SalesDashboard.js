@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Chart } from 'chart.js/auto';
 import { createPortal } from 'react-dom';
-import { LogIn, Timer, Hourglass, XCircle, Clock, Camera, CheckCircle2, Loader2, RefreshCw, AlertTriangle, Coffee, Utensils } from 'lucide-react';
+import { LogIn, Timer, Hourglass, XCircle, Clock, Camera, CheckCircle2, Loader2, RefreshCw, AlertTriangle, Coffee, Utensils, Calendar, UserCheck, FileText, Pin } from 'lucide-react';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import './SalesDashboard.css';
@@ -1295,11 +1295,11 @@ function SalesDashboard() {
   };
 
   const activityIcons = {
-    'Status Change': { icon: '🔄', color: '#166534' },
-    'Assignment Update': { icon: '🤝', color: '#15803d' },
-    'Note Added': { icon: '📝', color: '#65a30d' },
-    'Follow-up Set': { icon: '📅', color: '#16a34a' },
-    default: { icon: '📌', color: '#64748b' },
+    'Status Change': { icon: <RefreshCw size={13} />, color: '#166534' },
+    'Assignment Update': { icon: <UserCheck size={13} />, color: '#15803d' },
+    'Note Added': { icon: <FileText size={13} />, color: '#65a30d' },
+    'Follow-up Set': { icon: <Calendar size={13} />, color: '#16a34a' },
+    default: { icon: <Pin size={13} />, color: '#64748b' },
   };
 
   const attendanceStatus = todayAttendance

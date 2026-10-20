@@ -161,6 +161,144 @@ const formatDateDDMMYYYY = (dateStr) => {
   return `${day}-${month}-${year}`;
 };
 
+// Helper to parse follow-up scheduled date and time into timestamp
+const parseFollowUpDateTime = (dateStr, timeStr) => {
+  if (!dateStr) return null;
+  try {
+    let year, month, day;
+    const str = String(dateStr).trim();
+    const isoMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    const splitMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+
+    if (isoMatch) {
+      year = parseInt(isoMatch[1], 10);
+      month = parseInt(isoMatch[2], 10);
+      day = parseInt(isoMatch[3], 10);
+    } else if (splitMatch) {
+      const p1 = parseInt(splitMatch[1], 10);
+      const p2 = parseInt(splitMatch[2], 10);
+      year = parseInt(splitMatch[3], 10);
+
+      if (p1 > 12) {
+        day = p1;
+        month = p2;
+      } else if (p2 > 12) {
+        month = p1;
+        day = p2;
+      } else {
+        day = p1;
+        month = p2;
+      }
+    } else {
+      const d = new Date(str);
+      if (isNaN(d.getTime())) return null;
+      year = d.getFullYear();
+      month = d.getMonth() + 1;
+      day = d.getDate();
+    }
+
+    let hours = 10;
+    let minutes = 0;
+
+    if (timeStr && typeof timeStr === 'string' && timeStr.trim()) {
+      const clean = timeStr.trim();
+      const ampmMatch = clean.match(/^(\d{1,2})[:.](\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+      if (ampmMatch) {
+        let h = parseInt(ampmMatch[1], 10);
+        const m = parseInt(ampmMatch[2], 10);
+        const period = ampmMatch[3] ? ampmMatch[3].toUpperCase() : null;
+
+        if (period === 'PM' && h !== 12) {
+          h += 12;
+        } else if (period === 'AM' && h === 12) {
+          h = 0;
+        }
+        hours = h;
+        minutes = m;
+      }
+    }
+
+    const yStr = String(year).padStart(4, '0');
+    const mStr = String(month).padStart(2, '0');
+    const dStr = String(day).padStart(2, '0');
+    const hStr = String(hours).padStart(2, '0');
+    const minStr = String(minutes).padStart(2, '0');
+
+    // Aligned to Indian Standard Time (Asia/Kolkata, UTC+05:30)
+    const isoTarget = `${yStr}-${mStr}-${dStr}T${hStr}:${minStr}:00+05:30`;
+    const targetDate = new Date(isoTarget);
+
+    return isNaN(targetDate.getTime()) ? null : targetDate;
+  } catch (e) {
+    return null;
+  }
+};
+
+// Returns true if the scheduled follow-up time has already passed
+const isFollowUpTimePassed = (act) => {
+  if (!act) return false;
+  const dateVal = act.followUpDate || act.date;
+  if (!dateVal) return false;
+  const targetDate = parseFollowUpDateTime(dateVal, act.followUpTime || act.time);
+  if (!targetDate) return false;
+  return targetDate.getTime() <= Date.now();
+};
+
+// Checks if current user is permitted to edit this follow-up (allowed only if scheduled time has not passed)
+const canUserEditFollowUp = (act, currentUser, isSuperAdminOrHead = false) => {
+  if (!act || act.type !== 'followup') return false;
+  // If time has passed, editing is not allowed
+  if (isFollowUpTimePassed(act)) return false;
+  // If already completed or cancelled, cannot edit
+  if (act.status === 'Completed' || act.status === 'Cancelled') return false;
+
+  if (isSuperAdminOrHead) return true;
+  if (!currentUser) return false;
+
+  const currentUserId = (currentUser._id || currentUser.id || '').toString();
+  const actCreatorId = (act.createdBy?._id || act.createdBy || '').toString();
+  if (currentUserId && actCreatorId && currentUserId === actCreatorId) return true;
+
+  const currentFullName = `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim().toLowerCase();
+  const currentEmail = (currentUser.email || '').trim().toLowerCase();
+  const currentOfficialEmail = (currentUser.officialEmail || '').trim().toLowerCase();
+  const author = (act.author || '').trim().toLowerCase();
+
+  if (currentFullName && author === currentFullName) return true;
+  if (currentEmail && author === currentEmail) return true;
+  if (currentOfficialEmail && author === currentOfficialEmail) return true;
+
+  return false;
+};
+
+// Checks if current user is permitted to view an activity (specifically follow-ups)
+// Admin, Sales Head, and Sales Manager can view ALL follow-ups.
+// Sales Executives can ONLY view follow-ups they personally created.
+const canUserViewActivity = (act, currentUser, isSuperAdminOrHead = false) => {
+  if (!act) return false;
+  // Non-followup activities (deal status events, payments, notes, tasks) are part of standard audit trail
+  if (act.type !== 'followup') return true;
+
+  // Admin, Sales Head, Sales Manager have full company visibility
+  if (isSuperAdminOrHead) return true;
+  if (!currentUser) return false;
+
+  const currentUserId = (currentUser._id || currentUser.id || '').toString();
+  const actCreatorId = (act.createdBy?._id || act.createdBy || '').toString();
+  if (currentUserId && actCreatorId && currentUserId === actCreatorId) return true;
+
+  const currentFullName = `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim().toLowerCase();
+  const currentEmail = (currentUser.email || '').trim().toLowerCase();
+  const currentOfficialEmail = (currentUser.officialEmail || '').trim().toLowerCase();
+  const author = (act.author || '').trim().toLowerCase();
+
+  if (currentFullName && author === currentFullName) return true;
+  if (currentEmail && author === currentEmail) return true;
+  if (currentOfficialEmail && author === currentOfficialEmail) return true;
+
+  return false;
+};
+
 // Global Phone Formatter (+CC 000-000-0000 format)
 const formatPhoneNumber = (rawPhone, defaultCountryCode = '+91') => {
   if (!rawPhone || typeof rawPhone !== 'string') return '';
@@ -2532,11 +2670,13 @@ function Pipeline() {
   const [newPipelineName, setNewPipelineName] = useState('');
   const [editingPipelineId, setEditingPipelineId] = useState(null);
   const [editingPipelineName, setEditingPipelineName] = useState('');
-  const [{ tab: activeTab, view: viewMode, detailTab: detailActiveTab, stage: selectedStageFilter }, setQueryState] = useContextualQueryState({
+  const [{ tab: activeTab, view: viewMode, detailTab: detailActiveTab, stage: selectedStageFilter, dealId: queryDealId, contactId: queryContactId }, setQueryState] = useContextualQueryState({
     tab: 'deals',
     view: 'kanban',
     detailTab: 'all',
     stage: 'all',
+    dealId: '',
+    contactId: '',
   });
 
   const setActiveTab = useCallback((tab) => setQueryState({ tab }), [setQueryState]);
@@ -2559,6 +2699,15 @@ function Pipeline() {
   const lastDealScrollTopRef = useRef(0);
   const [draggedDealId, setDraggedDealId] = useState(null);
   const [dragOverColumnId, setDragOverColumnId] = useState(null);
+  const [selectedKanbanDealIds, setSelectedKanbanDealIds] = useState([]);
+  const [isBulkMoveDropdownOpen, setIsBulkMoveDropdownOpen] = useState(false);
+  const cardClickTimerRef = useRef(null);
+
+  // Clear kanban multi-selection when tab or view mode changes
+  useEffect(() => {
+    setSelectedKanbanDealIds([]);
+    setIsBulkMoveDropdownOpen(false);
+  }, [activeTab, viewMode]);
 
   // Live currency exchange rates to INR from official Frankfurter v2 API
   const [exchangeRatesToINR, setExchangeRatesToINR] = useState({ INR: 1 });
@@ -2620,7 +2769,19 @@ function Pipeline() {
   }, [deals, hoveredActivityDealId]);
 
   // Detailed Deal 2-Section Page State
-  const [detailedDealId, setDetailedDealId] = useState(null);
+  const [detailedDealId, setDetailedDealId] = useState(() => queryDealId || null);
+
+  useEffect(() => {
+    if (queryDealId && queryDealId !== detailedDealId) {
+      setDetailedDealId(queryDealId);
+    }
+  }, [queryDealId]);
+
+  useEffect(() => {
+    if (queryContactId && queryContactId !== detailedContactId) {
+      setDetailedContactId(queryContactId);
+    }
+  }, [queryContactId]);
   const [dealActivities, setDealActivities] = useState(() => {
     try {
       const saved = localStorage.getItem('crm_deal_activities');
@@ -2639,6 +2800,30 @@ function Pipeline() {
   const [newActivityContent, setNewActivityContent] = useState('');
   const [newActivitySubject, setNewActivitySubject] = useState('');
   const [isComposingActivity, setIsComposingActivity] = useState(false);
+
+  // Dedicated Follow-up Tab State
+  const [isComposingFollowUp, setIsComposingFollowUp] = useState(false);
+  const [followUpFormData, setFollowUpFormData] = useState({
+    title: '',
+    channel: 'Call', // 'Call' | 'Meeting' | 'WhatsApp' | 'Email' | 'Demo' | 'Visit'
+    status: 'Scheduled', // 'Scheduled' | 'Completed' | 'Follow-up Needed' | 'Rescheduled' | 'Missed'
+    followUpDate: new Date().toISOString().slice(0, 10),
+    followUpTime: '11:00',
+    nextFollowUpDate: '',
+    remarks: ''
+  });
+  const [isSubmittingFollowUp, setIsSubmittingFollowUp] = useState(false);
+  const [editingFollowUp, setEditingFollowUp] = useState(null);
+  const [editFollowUpForm, setEditFollowUpForm] = useState({
+    title: '',
+    channel: 'Call',
+    status: 'Scheduled',
+    followUpDate: '',
+    followUpTime: '11:00',
+    nextFollowUpDate: '',
+    remarks: ''
+  });
+  const [isSavingEditFollowUp, setIsSavingEditFollowUp] = useState(false);
 
   const detailedDeal = useMemo(() => {
     if (!detailedDealId) return null;
@@ -2986,11 +3171,14 @@ function Pipeline() {
     }).toUpperCase();
 
     const newActivity = {
-      id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      ...activityData,
+      id: activityData.id || `act-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       type: activityData.type || 'activity',
       title: activityData.title || 'Activity Update',
-      content: activityData.content || '',
+      content: activityData.content || activityData.remarks || '',
+      remarks: activityData.remarks || activityData.content || '',
       author: authorName,
+      createdBy: activityData.createdBy || user?._id || user?.id || null,
       time: (activityData.time || formattedTime).toUpperCase(),
       date: activityData.date || formattedDate,
       createdAt: activityData.createdAt || now.toISOString(),
@@ -3985,7 +4173,12 @@ function Pipeline() {
     const seen = new Set();
     const unique = all.filter(a => {
       if (!a) return false;
-      const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
+      // Role-based visibility isolation:
+      // Sales Executives can ONLY see follow-ups they personally created.
+      // Admin, Sales Head, and Sales Manager can see ALL follow-ups.
+      if (!canUserViewActivity(a, user, hasFullAccess)) return false;
+
+      const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || a.remarks || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
       if (seen.has(contentKey)) return false;
       seen.add(contentKey);
       return true;
@@ -3995,6 +4188,7 @@ function Pipeline() {
       payment: 11,
       task: 10,
       deal: 9,
+      followup: 8.5,
       note: 8,
       email: 7,
       message: 6,
@@ -4013,7 +4207,7 @@ function Pipeline() {
       const pB = typePriority[b.type] || (b.title && b.title.includes('Company') ? 5 : 4);
       return pB - pA;
     });
-  }, [detailedDeal, dealActivities, dealSpecificTasks, getDealPaymentRecords, user]);
+  }, [detailedDeal, dealActivities, dealSpecificTasks, getDealPaymentRecords, user, hasFullAccess]);
 
   const matchedDealsForContact = useMemo(() => {
     if (!detailedContact) return [];
@@ -4197,7 +4391,12 @@ function Pipeline() {
     const seen = new Set();
     const unique = all.filter(a => {
       if (!a) return false;
-      const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
+      // Role-based visibility isolation:
+      // Sales Executives can ONLY see follow-ups they personally created.
+      // Admin, Sales Head, and Sales Manager can see ALL follow-ups.
+      if (!canUserViewActivity(a, user, hasFullAccess)) return false;
+
+      const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || a.remarks || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
       if (seen.has(contentKey)) return false;
       seen.add(contentKey);
       return true;
@@ -4207,6 +4406,7 @@ function Pipeline() {
       payment: 11,
       task: 10,
       deal: 9,
+      followup: 8.5,
       note: 8,
       email: 7,
       message: 6,
@@ -4225,7 +4425,7 @@ function Pipeline() {
       const pB = typePriority[b.type] || (b.title && b.title.includes('Company') ? 5 : 4);
       return pB - pA;
     });
-  }, [detailedContact, dealActivities, contactSpecificTasks, matchedDealsForContact, getContactPaymentRecords, user]);
+  }, [detailedContact, dealActivities, contactSpecificTasks, matchedDealsForContact, getContactPaymentRecords, user, hasFullAccess]);
 
   // Dynamic activities for hovered deal / contact in Activity Popover
   const hoveredActivities = useMemo(() => {
@@ -4369,6 +4569,7 @@ function Pipeline() {
       const seen = new Set();
       const unique = all.filter(a => {
         if (!a) return false;
+        if (!canUserViewActivity(a, user, hasFullAccess)) return false;
         const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
         if (seen.has(contentKey)) return false;
         seen.add(contentKey);
@@ -4561,6 +4762,7 @@ function Pipeline() {
       const seen = new Set();
       const unique = all.filter(a => {
         if (!a) return false;
+        if (!canUserViewActivity(a, user, hasFullAccess)) return false;
         const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
         if (seen.has(contentKey)) return false;
         seen.add(contentKey);
@@ -4592,7 +4794,7 @@ function Pipeline() {
     }
 
     return [];
-  }, [hoveredDeal, hoveredContact, dealActivities, tasks, deals, getDealPaymentRecords, getContactPaymentRecords, user]);
+  }, [hoveredDeal, hoveredContact, dealActivities, tasks, deals, getDealPaymentRecords, getContactPaymentRecords, user, hasFullAccess]);
 
   // Upcoming next step tasks for hovered item
   const hoveredUpcomingTasks = useMemo(() => {
@@ -5661,6 +5863,318 @@ function Pipeline() {
     setIsComposingActivity(false);
   };
 
+  const getFollowUpChannelIcon = (channel, size = 16) => {
+    const ch = (channel || 'call').toLowerCase();
+    if (ch.includes('call') || ch.includes('phone')) return <Phone size={size} />;
+    if (ch.includes('meeting')) return <Users size={size} />;
+    if (ch.includes('whatsapp') || ch.includes('message')) return <MessageSquare size={size} />;
+    if (ch.includes('email') || ch.includes('mail')) return <Mail size={size} />;
+    if (ch.includes('demo')) return <Briefcase size={size} />;
+    if (ch.includes('visit')) return <Building2 size={size} />;
+    return <Phone size={size} />;
+  };
+
+  const handleAddFollowUp = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const isContactAct = activeTab === 'contacts' || (!detailedDealId && !!detailedContactId);
+    const targetId = isContactAct ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : (detailedContact ? detailedContact._id : null));
+    if (!targetId) return;
+
+    if (!followUpFormData.remarks || !followUpFormData.remarks.trim()) {
+      alert('Please enter remarks for this follow-up.');
+      return;
+    }
+
+    setIsSubmittingFollowUp(true);
+    try {
+      const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+      const authorRoleName = user?.role?.name || user?.role || (roleName ? roleName.charAt(0).toUpperCase() + roleName.slice(1) : 'Sales Executive');
+
+      const titleDefault = followUpFormData.title.trim() || `${followUpFormData.channel} Follow-up`;
+      const now = new Date();
+      const formattedDate = formatDateDDMMYYYY(now);
+      const formattedTime = now.toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      }).toUpperCase();
+
+      const formatTime12H = (val) => {
+        if (!val) return '';
+        if (/am|pm/i.test(val)) return val;
+        const [h, m] = val.split(':');
+        let hours = parseInt(h, 10);
+        if (isNaN(hours)) return val;
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+        const hh = hours < 10 ? `0${hours}` : `${hours}`;
+        return `${hh}:${m || '00'} ${ampm}`;
+      };
+
+      const followUpActivity = {
+        id: `followup-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        type: 'followup',
+        title: titleDefault,
+        channel: followUpFormData.channel,
+        status: followUpFormData.status,
+        followUpDate: followUpFormData.followUpDate,
+        followUpTime: formatTime12H(followUpFormData.followUpTime),
+        nextFollowUpDate: followUpFormData.nextFollowUpDate || '',
+        remarks: followUpFormData.remarks.trim(),
+        content: followUpFormData.remarks.trim(),
+        author: authorName,
+        authorRole: authorRoleName,
+        createdBy: user?._id || user?.id || null,
+        time: formattedTime,
+        date: formattedDate,
+        createdAt: now.toISOString(),
+        timestamp: Date.now()
+      };
+
+      await logActivity(targetId, followUpActivity, isContactAct);
+
+      setFollowUpFormData({
+        title: '',
+        channel: 'Call',
+        status: 'Scheduled',
+        followUpDate: new Date().toISOString().slice(0, 10),
+        followUpTime: '11:00',
+        nextFollowUpDate: '',
+        remarks: ''
+      });
+      setIsComposingFollowUp(false);
+    } catch (err) {
+      console.error('Error logging follow-up:', err);
+    } finally {
+      setIsSubmittingFollowUp(false);
+    }
+  };
+
+  const handleUpdateFollowUpStatus = async (actId, newStatus) => {
+    const isContactAct = activeTab === 'contacts' || (!detailedDealId && !!detailedContactId);
+    const targetId = isContactAct ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : (detailedContact ? detailedContact._id : null));
+    if (!targetId) return;
+
+    setDealActivities(prev => {
+      const currentList = prev[targetId] || [];
+      return {
+        ...prev,
+        [targetId]: currentList.map(a => (a.id === actId || a._id === actId) ? { ...a, status: newStatus } : a)
+      };
+    });
+
+    if (isContactAct) {
+      setContacts(prev => prev.map(c => {
+        if (c._id === targetId) {
+          const acts = (c.activities || []).map(a => (a.id === actId || a._id === actId) ? { ...a, status: newStatus } : a);
+          return { ...c, activities: acts };
+        }
+        return c;
+      }));
+    } else {
+      setDeals(prev => prev.map(d => {
+        if (d._id === targetId) {
+          const acts = (d.activities || []).map(a => (a.id === actId || a._id === actId) ? { ...a, status: newStatus } : a);
+          return { ...d, activities: acts };
+        }
+        return d;
+      }));
+    }
+
+    try {
+      if (!isContactAct && targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
+        await api.patch(`/deals/${targetId}/activities/${actId}`, { status: newStatus });
+      }
+    } catch (err) {
+      console.warn('API update follow-up status error:', err.message);
+    }
+  };
+
+  const handleDeleteFollowUp = async (actId) => {
+    if (!window.confirm('Are you sure you want to delete this follow-up?')) return;
+    const isContactAct = activeTab === 'contacts' || (!detailedDealId && !!detailedContactId);
+    const targetId = isContactAct ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : (detailedContact ? detailedContact._id : null));
+    if (!targetId) return;
+
+    setDealActivities(prev => {
+      const currentList = prev[targetId] || [];
+      return {
+        ...prev,
+        [targetId]: currentList.filter(a => a.id !== actId && a._id !== actId)
+      };
+    });
+
+    if (isContactAct) {
+      setContacts(prev => prev.map(c => {
+        if (c._id === targetId) {
+          const acts = (c.activities || []).filter(a => a.id !== actId && a._id !== actId);
+          return { ...c, activities: acts };
+        }
+        return c;
+      }));
+    } else {
+      setDeals(prev => prev.map(d => {
+        if (d._id === targetId) {
+          const acts = (d.activities || []).filter(a => a.id !== actId && a._id !== actId);
+          return { ...d, activities: acts };
+        }
+        return d;
+      }));
+    }
+
+    try {
+      if (!isContactAct && targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
+        await api.delete(`/deals/${targetId}/activities/${actId}`);
+      } else if (isContactAct && targetId && !targetId.toString().startsWith('contact-')) {
+        await api.delete(`/pipeline-contacts/${targetId}/activities/${actId}`);
+      }
+    } catch (err) {
+      console.warn('API delete follow-up error:', err.message);
+    }
+  };
+
+  const convertTimeTo24H = (timeStr) => {
+    if (!timeStr) return '11:00';
+    const clean = String(timeStr).trim();
+    if (/^\d{2}:\d{2}$/.test(clean)) return clean;
+    const match = clean.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+    if (!match) return '11:00';
+    let h = parseInt(match[1], 10);
+    const m = match[2];
+    const period = match[3] ? match[3].toUpperCase() : null;
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${m}`;
+  };
+
+  const handleOpenEditFollowUp = (act, entityType = null, entityId = null) => {
+    if (!act) return;
+    if (isFollowUpTimePassed(act)) {
+      alert('The scheduled time for this follow-up has already passed. It cannot be edited.');
+      return;
+    }
+
+    const determinedEntityType = entityType || (activeTab === 'contacts' || (!detailedDealId && !!detailedContactId) ? 'contact' : 'deal');
+    const determinedEntityId = entityId || (determinedEntityType === 'contact' ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : null));
+
+    let dateStr = act.followUpDate || act.date || new Date().toISOString().slice(0, 10);
+    const ddmmyyyy = String(dateStr).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (ddmmyyyy) {
+      dateStr = `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+    }
+
+    setEditingFollowUp({
+      ...act,
+      _targetEntityType: determinedEntityType,
+      _targetEntityId: determinedEntityId
+    });
+
+    setEditFollowUpForm({
+      id: act.id || act._id,
+      title: act.title || '',
+      channel: act.channel || 'Call',
+      status: act.status || 'Scheduled',
+      followUpDate: dateStr,
+      followUpTime: convertTimeTo24H(act.followUpTime),
+      nextFollowUpDate: act.nextFollowUpDate || '',
+      remarks: act.remarks || act.content || ''
+    });
+  };
+
+  const handleSaveEditFollowUp = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!editingFollowUp) return;
+
+    if (!editFollowUpForm.remarks || !editFollowUpForm.remarks.trim()) {
+      alert('Please enter remarks for this follow-up.');
+      return;
+    }
+
+    const targetDate = parseFollowUpDateTime(editFollowUpForm.followUpDate, editFollowUpForm.followUpTime);
+    if (targetDate && targetDate.getTime() <= Date.now()) {
+      alert('The selected follow-up date and time is in the past. Please choose an upcoming date and time.');
+      return;
+    }
+
+    const isContactAct = editingFollowUp._targetEntityType === 'contact' || activeTab === 'contacts' || (!detailedDealId && !!detailedContactId);
+    const targetId = editingFollowUp._targetEntityId || (isContactAct ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : (detailedContact ? detailedContact._id : null)));
+    if (!targetId) return;
+
+    const actId = editingFollowUp.id || editingFollowUp._id;
+
+    const formatTime12H = (val) => {
+      if (!val) return '';
+      if (/am|pm/i.test(val)) return val;
+      const [h, m] = val.split(':');
+      let hours = parseInt(h, 10);
+      if (isNaN(hours)) return val;
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      const hh = hours < 10 ? `0${hours}` : `${hours}`;
+      return `${hh}:${m || '00'} ${ampm}`;
+    };
+
+    const formattedTime12 = formatTime12H(editFollowUpForm.followUpTime);
+    const updatedPayload = {
+      title: editFollowUpForm.title.trim() || `${editFollowUpForm.channel} Follow-up`,
+      channel: editFollowUpForm.channel,
+      status: editFollowUpForm.status,
+      followUpDate: editFollowUpForm.followUpDate,
+      followUpTime: formattedTime12,
+      nextFollowUpDate: editFollowUpForm.nextFollowUpDate || '',
+      remarks: editFollowUpForm.remarks.trim(),
+      content: editFollowUpForm.remarks.trim()
+    };
+
+    setIsSavingEditFollowUp(true);
+
+    try {
+      // 1. Update dealActivities local state
+      setDealActivities(prev => {
+        const currentList = prev[targetId] || [];
+        return {
+          ...prev,
+          [targetId]: currentList.map(a => (a.id === actId || a._id === actId) ? { ...a, ...updatedPayload } : a)
+        };
+      });
+
+      // 2. Update entities in state
+      if (isContactAct) {
+        setContacts(prev => prev.map(c => {
+          if (c._id === targetId) {
+            const acts = (c.activities || []).map(a => (a.id === actId || a._id === actId) ? { ...a, ...updatedPayload } : a);
+            return { ...c, activities: acts };
+          }
+          return c;
+        }));
+        if (targetId && !targetId.toString().startsWith('contact-')) {
+          await api.patch(`/pipeline-contacts/${targetId}/activities/${actId}`, updatedPayload);
+        }
+      } else {
+        setDeals(prev => prev.map(d => {
+          if (d._id === targetId) {
+            const acts = (d.activities || []).map(a => (a.id === actId || a._id === actId) ? { ...a, ...updatedPayload } : a);
+            return { ...d, activities: acts };
+          }
+          return d;
+        }));
+        if (targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
+          await api.patch(`/deals/${targetId}/activities/${actId}`, updatedPayload);
+        }
+      }
+
+      setEditingFollowUp(null);
+    } catch (err) {
+      console.error('Error saving follow-up edit:', err);
+      alert(err.response?.data?.message || 'Failed to update follow-up. Please try again.');
+    } finally {
+      setIsSavingEditFollowUp(false);
+    }
+  };
+
   const [companyFormData, setCompanyFormData] = useState({
     name: '',
     domain: '',
@@ -5854,6 +6368,10 @@ function Pipeline() {
   }, [detailedDeal, companies]);
 
   const handleAddPipeline = async (customName) => {
+    if (!hasFullAccess) {
+      alert('Only Admin, Sales Head, and Sales Manager can add new stages.');
+      return;
+    }
     const trimmed = (typeof customName === 'string' ? customName : (addPipelineModalName || newPipelineName)).trim();
     if (!trimmed) return;
     if (pipelines.some(p => p.name.toLowerCase() === trimmed.toLowerCase())) {
@@ -5895,12 +6413,21 @@ function Pipeline() {
 
   const handleStartEditPipeline = (pipeline, e) => {
     if (e) e.stopPropagation();
+    if (!hasFullAccess) {
+      alert('Only Admin, Sales Head, and Sales Manager can edit stage names.');
+      return;
+    }
     setEditingPipelineId(pipeline.id);
     setEditingPipelineName(pipeline.name);
     setActiveColMenuId(null);
   };
 
   const handleSaveEditPipeline = async (pipelineId) => {
+    if (!hasFullAccess) {
+      alert('Only Admin, Sales Head, and Sales Manager can edit stage names.');
+      setEditingPipelineId(null);
+      return;
+    }
     const trimmed = editingPipelineName.trim();
     if (!trimmed) {
       setEditingPipelineId(null);
@@ -5940,8 +6467,8 @@ function Pipeline() {
 
   const handleDeletePipeline = async (pipelineId, e) => {
     if (e) e.stopPropagation();
-    if (!canDelete) {
-      alert('You do not have permission to delete stages.');
+    if (!hasFullAccess) {
+      alert('You do not have permission to delete stages. Only Admin, Sales Head, and Sales Manager can delete stages.');
       return;
     }
     const pipeline = pipelines.find(p => p.id === pipelineId);
@@ -5993,6 +6520,10 @@ function Pipeline() {
 
   // Contact Stage Handlers
   const handleAddContactStage = async (customName) => {
+    if (!hasFullAccess) {
+      alert('Only Admin, Sales Head, and Sales Manager can add new stages.');
+      return;
+    }
     const trimmed = (typeof customName === 'string' ? customName : (addStageModalName || newContactStageName)).trim();
     if (!trimmed) return;
     if (contactStages.some(s => s.name.toLowerCase() === trimmed.toLowerCase())) {
@@ -6034,12 +6565,21 @@ function Pipeline() {
 
   const handleStartEditContactStage = (stage, e) => {
     if (e) e.stopPropagation();
+    if (!hasFullAccess) {
+      alert('Only Admin, Sales Head, and Sales Manager can edit stage names.');
+      return;
+    }
     setEditingContactStageId(stage.id);
     setEditingContactStageName(stage.name);
     setActiveColMenuId(null);
   };
 
   const handleSaveEditContactStage = async (stageId) => {
+    if (!hasFullAccess) {
+      alert('Only Admin, Sales Head, and Sales Manager can edit stage names.');
+      setEditingContactStageId(null);
+      return;
+    }
     const trimmed = editingContactStageName.trim();
     if (!trimmed) {
       setEditingContactStageId(null);
@@ -6079,8 +6619,8 @@ function Pipeline() {
 
   const handleDeleteContactStage = async (stageId, e) => {
     if (e) e.stopPropagation();
-    if (!canDelete) {
-      alert('You do not have permission to delete stages.');
+    if (!hasFullAccess) {
+      alert('You do not have permission to delete stages. Only Admin, Sales Head, and Sales Manager can delete stages.');
       return;
     }
     const cleanId = String(stageId || '').trim();
@@ -6507,6 +7047,7 @@ function Pipeline() {
       setIsMilestonePopoverOpen(false);
       setIsContactAddedByPopoverOpen(false);
       setIsDealAddedByPopoverOpen(false);
+      setIsBulkMoveDropdownOpen(false);
     };
     const handleClickOutsideCurrency = (e) => {
       if (currencyRef.current && !currencyRef.current.contains(e.target)) {
@@ -6639,6 +7180,31 @@ function Pipeline() {
     setIsDateDropdownOpen(false);
   };
 
+  // Helper to determine the single, canonical stage/column a deal belongs to
+  const getDealStageName = useCallback((deal, currentPipelines) => {
+    if (!deal) return '';
+    const dPipe = (deal.pipeline || '').trim();
+    const dStage = (deal.stage || '').trim();
+    const cols = currentPipelines || pipelines || [];
+
+    // 1. If deal.pipeline matches a column on the board, that is its column
+    const matchedByPipeline = cols.find(p =>
+      (p.name || '').trim().toLowerCase() === dPipe.toLowerCase() ||
+      (p.id || '').trim().toLowerCase() === dPipe.toLowerCase()
+    );
+    if (matchedByPipeline) return matchedByPipeline.name;
+
+    // 2. Otherwise if deal.stage matches a column on the board, that is its column
+    const matchedByStage = cols.find(p =>
+      (p.name || '').trim().toLowerCase() === dStage.toLowerCase() ||
+      (p.id || '').trim().toLowerCase() === dStage.toLowerCase()
+    );
+    if (matchedByStage) return matchedByStage.name;
+
+    // 3. Fallback: default to the first column on the board
+    return cols.length > 0 ? cols[0].name : (dPipe || dStage || '');
+  }, [pipelines]);
+
   // Filter deals based on selected stage, owner, date criteria and sort criteria
   const filteredDeals = useMemo(() => {
     return deals.filter(deal => {
@@ -6692,9 +7258,8 @@ function Pipeline() {
       }
       if (selectedStageFilter !== 'all') {
         const sFilter = selectedStageFilter.toLowerCase();
-        const dStage = (deal.stage || '').toLowerCase();
-        const dPipe = (deal.pipeline || '').toLowerCase();
-        if (dStage !== sFilter && dPipe !== sFilter) {
+        const stageName = getDealStageName(deal, pipelines).toLowerCase();
+        if (stageName !== sFilter) {
           return false;
         }
       }
@@ -6768,7 +7333,7 @@ function Pipeline() {
       const db = parseDealDate(b.createdAt) || parseDealDate(b.date) || new Date(0);
       return db - da;
     });
-  }, [deals, selectedStageFilter, sortBy, ownerFilter, dealStatusFilter, dealOriginFilter, getDealContactOrigin, dateFilter, customDateStart, customDateEnd, dealSearchQuery, isItemOwnedByUser]);
+  }, [deals, selectedStageFilter, sortBy, ownerFilter, dealStatusFilter, dealOriginFilter, getDealContactOrigin, dateFilter, customDateStart, customDateEnd, dealSearchQuery, isItemOwnedByUser, getDealStageName, pipelines]);
 
   // Dynamic badge counts for left navigation menu tabs
   const activeDealsCount = useMemo(() => {
@@ -6794,16 +7359,9 @@ function Pipeline() {
       counts[p.name] = 0;
       counts[p.id] = 0;
     });
-    const activePipelineNames = new Set(pipelines.map(p => (p.name || p.id || '').toLowerCase()));
     filteredDeals.forEach(d => {
-      const dealPipeline = (d.pipeline || '').trim().toLowerCase();
-      const dealStage = (d.stage || '').trim().toLowerCase();
-      const matchedP = pipelines.find(p =>
-        (p.name || '').trim().toLowerCase() === dealPipeline ||
-        (p.id || '').trim().toLowerCase() === dealPipeline ||
-        (p.name || '').trim().toLowerCase() === dealStage ||
-        (p.id || '').trim().toLowerCase() === dealStage
-      );
+      const stageName = getDealStageName(d, pipelines);
+      const matchedP = pipelines.find(p => (p.name || '').trim().toLowerCase() === stageName.trim().toLowerCase());
       if (matchedP) {
         counts[matchedP.name] = (counts[matchedP.name] || 0) + 1;
         if (matchedP.id !== matchedP.name) {
@@ -6818,25 +7376,29 @@ function Pipeline() {
       }
     });
     return counts;
-  }, [filteredDeals, pipelines]);
+  }, [filteredDeals, pipelines, getDealStageName]);
 
   // Handle pipeline change (move deal to another pipeline)
   const handleMovePipeline = async (dealId, nextPipeline, e) => {
     if (e) e.stopPropagation();
+    const updateData = {
+      pipeline: nextPipeline,
+      stage: nextPipeline
+    };
     try {
       if (dealId && !dealId.toString().startsWith('deal-')) {
-        await api.put(`/deals/${dealId}`, { pipeline: nextPipeline });
+        await api.put(`/deals/${dealId}`, updateData);
       }
     } catch (err) {
       console.warn('Move pipeline API sync:', err.message);
     }
     setDeals(prev =>
-      prev.map(d => (d._id === dealId ? { ...d, pipeline: nextPipeline } : d))
+      prev.map(d => (String(d._id) === String(dealId) ? { ...d, ...updateData } : d))
     );
     logActivity(dealId, {
       type: 'deal',
-      title: 'Pipeline Moved',
-      content: `Moved deal to pipeline "${nextPipeline}".`
+      title: 'Stage Moved',
+      content: `Moved deal to stage "${nextPipeline}".`
     });
     setActiveMenuId(null);
     setMoveSubmenuDealId(null);
@@ -6845,15 +7407,19 @@ function Pipeline() {
   // Handle stage change (move deal)
   const handleMoveStage = async (dealId, nextStage, e) => {
     if (e) e.stopPropagation();
+    const updateData = {
+      pipeline: nextStage,
+      stage: nextStage
+    };
     try {
       if (dealId && !dealId.toString().startsWith('deal-')) {
-        await api.put(`/deals/${dealId}`, { stage: nextStage });
+        await api.put(`/deals/${dealId}`, updateData);
       }
     } catch (err) {
       console.warn('Move stage API sync:', err.message);
     }
     setDeals(prev =>
-      prev.map(d => (d._id === dealId ? { ...d, stage: nextStage } : d))
+      prev.map(d => (String(d._id) === String(dealId) ? { ...d, ...updateData } : d))
     );
     logActivity(dealId, {
       type: 'deal',
@@ -6959,26 +7525,164 @@ function Pipeline() {
   const handleDrop = async (e, targetPipelineName) => {
     e.preventDefault();
     if (!canUpdate) return;
-    const dealId = e.dataTransfer.getData('text/plain') || draggedDealId;
+    const dealId = e.dataTransfer?.getData('text/plain') || draggedDealId;
     if (dealId) {
-      try {
-        if (dealId && !dealId.toString().startsWith('deal-')) {
-          await api.put(`/deals/${dealId}`, { pipeline: targetPipelineName });
-        }
-      } catch (err) {
-        console.warn('Drop move pipeline API sync:', err.message);
-      }
+      const targetDealIds = (selectedKanbanDealIds.includes(dealId))
+        ? selectedKanbanDealIds
+        : [dealId];
+
+      const updateData = {
+        pipeline: targetPipelineName,
+        stage: targetPipelineName
+      };
+
       setDeals(prev =>
-        prev.map(d => (d._id === dealId ? { ...d, pipeline: targetPipelineName } : d))
+        prev.map(d => targetDealIds.includes(String(d._id)) ? { ...d, ...updateData } : d)
       );
-      logActivity(dealId, {
-        type: 'deal',
-        title: 'Pipeline Moved',
-        content: `Moved deal to pipeline "${targetPipelineName}".`
-      });
+
+      const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+      for (const id of targetDealIds) {
+        try {
+          if (id && !id.toString().startsWith('deal-')) {
+            await api.put(`/deals/${id}`, updateData);
+          }
+        } catch (err) {
+          console.warn('Drop move pipeline API sync:', err.message);
+        }
+        logActivity(id, {
+          type: 'deal',
+          title: 'Stage Moved',
+          content: `Moved deal to "${targetPipelineName}".`,
+          author: authorName
+        });
+      }
+
+      if (selectedKanbanDealIds.includes(dealId)) {
+        setSelectedKanbanDealIds([]);
+      }
     }
     setDraggedDealId(null);
     setDragOverColumnId(null);
+  };
+
+  // Kanban Double Click on Card: multi-select all cards in that specific stage column
+  const handleCardDoubleClick = (deal, stageDeals, stageName, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    // Cancel any scheduled single-click deal detail opening
+    if (cardClickTimerRef.current) {
+      clearTimeout(cardClickTimerRef.current);
+      cardClickTimerRef.current = null;
+    }
+
+    const stageDealIds = (stageDeals || []).map(d => d._id);
+    if (stageDealIds.length === 0) return;
+
+    setSelectedKanbanDealIds(prev => {
+      const allStageSelected = stageDealIds.every(id => prev.includes(id));
+      if (allStageSelected) {
+        // If all cards in this stage were already selected, toggle off / deselect them
+        return prev.filter(id => !stageDealIds.includes(id));
+      } else {
+        // Multi-select all cards of this stage (retaining any already selected cards in other stages)
+        return Array.from(new Set([...prev, ...stageDealIds]));
+      }
+    });
+  };
+
+  // Toggle individual card checkbox selection
+  const handleToggleDealSelection = (dealId, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (cardClickTimerRef.current) {
+      clearTimeout(cardClickTimerRef.current);
+      cardClickTimerRef.current = null;
+    }
+    setSelectedKanbanDealIds(prev =>
+      prev.includes(dealId) ? prev.filter(id => id !== dealId) : [...prev, dealId]
+    );
+  };
+
+  // Toggle all cards of a stage from column header
+  const handleToggleStageSelection = (stageDeals, e) => {
+    if (e) e.stopPropagation();
+    const stageDealIds = (stageDeals || []).map(d => d._id);
+    if (stageDealIds.length === 0) return;
+    setSelectedKanbanDealIds(prev => {
+      const allStageSelected = stageDealIds.every(id => prev.includes(id));
+      if (allStageSelected) {
+        return prev.filter(id => !stageDealIds.includes(id));
+      } else {
+        return Array.from(new Set([...prev, ...stageDealIds]));
+      }
+    });
+  };
+
+  // Debounced single click on card to avoid conflict with double-click
+  const handleDealCardClick = (dealId, e) => {
+    if (e) e.stopPropagation();
+    if (cardClickTimerRef.current) {
+      clearTimeout(cardClickTimerRef.current);
+      cardClickTimerRef.current = null;
+    }
+    cardClickTimerRef.current = setTimeout(() => {
+      setDetailedDealId(dealId);
+      cardClickTimerRef.current = null;
+    }, 230);
+  };
+
+  // Bulk move all selected deals to a target stage
+  const handleBulkMoveStage = async (targetStage) => {
+    if (!targetStage || selectedKanbanDealIds.length === 0) return;
+    const dealIdsToMove = [...selectedKanbanDealIds];
+    const updateData = { pipeline: targetStage, stage: targetStage };
+    const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+
+    setDeals(prev =>
+      prev.map(d => dealIdsToMove.includes(d._id) ? { ...d, ...updateData } : d)
+    );
+
+    for (const id of dealIdsToMove) {
+      try {
+        if (id && !id.toString().startsWith('deal-')) {
+          await api.put(`/deals/${id}`, updateData);
+        }
+      } catch (err) {
+        console.warn(`Bulk move deal ${id} API error:`, err.message);
+      }
+      logActivity(id, {
+        type: 'deal',
+        title: 'Stage Moved',
+        content: `Moved deal to "${targetStage}" via bulk action.`,
+        author: authorName
+      });
+    }
+
+    setIsBulkMoveDropdownOpen(false);
+    setSelectedKanbanDealIds([]);
+  };
+
+  // Bulk delete all selected deals
+  const handleBulkDeleteDeals = async () => {
+    if (!canDelete || selectedKanbanDealIds.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${selectedKanbanDealIds.length} selected deal(s)?`)) {
+      const dealIdsToDelete = [...selectedKanbanDealIds];
+      setDeals(prev => prev.filter(d => !dealIdsToDelete.includes(d._id)));
+      for (const id of dealIdsToDelete) {
+        try {
+          if (id && !id.toString().startsWith('deal-')) {
+            await api.delete(`/deals/${id}`);
+          }
+        } catch (err) {
+          console.warn(`Bulk delete deal ${id} API error:`, err.message);
+        }
+      }
+      setSelectedKanbanDealIds([]);
+    }
   };
 
   // Activity popover hover handlers with screen bounds calculation & fixed positioning
@@ -7192,7 +7896,7 @@ function Pipeline() {
         if (editingDeal._id && !editingDeal._id.toString().startsWith('deal-')) {
           const res = await api.put(`/deals/${editingDeal._id}`, updatePayload);
           if (res.data) {
-            setDeals(prev => prev.map(d => (d._id === editingDeal._id ? { ...res.data, assignedTo: matchedOwnerEmp || res.data.assignedTo } : d)));
+            setDeals(prev => prev.map(d => (String(d._id) === String(editingDeal._id) ? { ...res.data, assignedTo: matchedOwnerEmp || res.data.assignedTo } : d)));
             setEditingDeal(null);
             setShowCreateModal(false);
             return;
@@ -7204,7 +7908,7 @@ function Pipeline() {
 
       setDeals(prev =>
         prev.map(d =>
-          d._id === editingDeal._id
+          String(d._id) === String(editingDeal._id)
             ? {
               ...d,
               ...updatePayload,
@@ -7837,22 +8541,26 @@ function Pipeline() {
 
   const handleChangeDealStage = async (newStage) => {
     if (!detailedDeal) return;
+    const updateData = {
+      pipeline: newStage,
+      stage: newStage
+    };
     try {
       if (detailedDeal._id && !detailedDeal._id.toString().startsWith('deal-')) {
-        await api.put(`/deals/${detailedDeal._id}`, { stage: newStage });
+        await api.put(`/deals/${detailedDeal._id}`, updateData);
       }
     } catch (err) {
       console.warn('Change deal stage API sync:', err.message);
     }
     setDeals(prev =>
-      prev.map(d => (d._id === detailedDeal._id ? { ...d, stage: newStage } : d))
+      prev.map(d => (String(d._id) === String(detailedDeal._id) ? { ...d, ...updateData } : d))
     );
     const newAct = {
       id: `act-${Date.now()}`,
       type: 'activity',
       author: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Admin' : 'Admin',
       title: `Stage updated to ${newStage}`,
-      content: `Moved deal stage to ${newStage} in pipeline ${detailedDeal.pipeline}.`,
+      content: `Moved deal stage to ${newStage}.`,
       time: 'Just now',
       date: formatDateDDMMYYYY(new Date())
     };
@@ -8484,14 +9192,15 @@ function Pipeline() {
                                         type="button"
                                         className={`pipeline-card-menu-item ${isSelected ? 'active' : ''}`}
                                         onClick={async () => {
+                                          const updateData = { pipeline: p.name, stage: p.name };
                                           try {
                                             if (detailedDeal._id && !detailedDeal._id.toString().startsWith('deal-sample-')) {
-                                              await api.put(`/deals/${detailedDeal._id}`, { pipeline: p.name });
+                                              await api.put(`/deals/${detailedDeal._id}`, updateData);
                                             }
                                           } catch (err) {
                                             console.warn('Update deal pipeline API error:', err.message);
                                           }
-                                          setDeals(prev => prev.map(d => d._id === detailedDeal._id ? { ...d, pipeline: p.name } : d));
+                                          setDeals(prev => prev.map(d => String(d._id) === String(detailedDeal._id) ? { ...d, ...updateData } : d));
                                           logActivity(detailedDeal._id, {
                                             type: 'deal',
                                             title: 'Pipeline Stage Updated',
@@ -8549,14 +9258,15 @@ function Pipeline() {
                                         type="button"
                                         className={`pipeline-card-menu-item ${isSelected ? 'active' : ''}`}
                                         onClick={async () => {
+                                          const updateData = { stage: s.name, pipeline: s.name };
                                           try {
                                             if (detailedDeal._id && !detailedDeal._id.toString().startsWith('deal-sample-')) {
-                                              await api.put(`/deals/${detailedDeal._id}`, { stage: s.name });
+                                              await api.put(`/deals/${detailedDeal._id}`, updateData);
                                             }
                                           } catch (err) {
                                             console.warn('Update deal stage API error:', err.message);
                                           }
-                                          setDeals(prev => prev.map(d => d._id === detailedDeal._id ? { ...d, stage: s.name } : d));
+                                          setDeals(prev => prev.map(d => String(d._id) === String(detailedDeal._id) ? { ...d, ...updateData } : d));
                                           logActivity(detailedDeal._id, {
                                             type: 'deal',
                                             title: 'Status Updated',
@@ -9317,6 +10027,15 @@ function Pipeline() {
                         </button>
                         <button
                           type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'followups' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('followups')}
+                        >
+                          <Calendar size={14} />
+                          <span>Follow-ups</span>
+                          <span className="pipeline-act-tab-badge">{currentDealActivities.filter(a => a.type === 'followup').length}</span>
+                        </button>
+                        <button
+                          type="button"
                           className={`pipeline-act-tab-btn ${detailActiveTab === 'emails' ? 'active' : ''}`}
                           onClick={() => setDetailActiveTab('emails')}
                         >
@@ -9357,6 +10076,18 @@ function Pipeline() {
                           >
                             <Plus size={13} />
                             <span>Add Note</span>
+                          </button>
+                        )}
+                        {detailActiveTab === 'followups' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            onClick={() => {
+                              setIsComposingFollowUp(prev => !prev);
+                            }}
+                          >
+                            <Plus size={13} />
+                            <span>Add Follow-up</span>
                           </button>
                         )}
                         {detailActiveTab === 'emails' && (
@@ -9548,6 +10279,359 @@ function Pipeline() {
                           </div>
                         )}
                       </div>
+                    ) : detailActiveTab === 'followups' ? (
+                      /* Follow-up Timeline Chaining View */
+                      <div className="pipeline-followup-container">
+                        {/* Header Stats & Quick Action Bar */}
+                        <div className="pipeline-followup-header-stats">
+                          <div className="pipeline-followup-stats-left">
+                            <div className="pipeline-followup-stats-icon">
+                              <Calendar size={18} />
+                            </div>
+                            <div>
+                              <h4 className="pipeline-followup-stats-title">Follow-up Timeline & Touchpoints</h4>
+                              <p className="pipeline-followup-stats-desc">Connected touchpoint chain of client discussions, meetings, and outcomes</p>
+                            </div>
+                          </div>
+
+                          <div className="pipeline-followup-stats-pills">
+                            <span className="pipeline-followup-stat-pill total">
+                              Total: {currentDealActivities.filter(a => a.type === 'followup').length}
+                            </span>
+                            <span className="pipeline-followup-stat-pill completed">
+                              <Check size={11} />
+                              Completed: {currentDealActivities.filter(a => a.type === 'followup' && a.status === 'Completed').length}
+                            </span>
+                            <span className="pipeline-followup-stat-pill scheduled">
+                              <Clock size={11} />
+                              Scheduled: {currentDealActivities.filter(a => a.type === 'followup' && (a.status === 'Scheduled' || !a.status)).length}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Inline Follow-up Composer */}
+                        {isComposingFollowUp && (
+                          <form onSubmit={handleAddFollowUp} className="pipeline-followup-composer-card">
+                            <div className="pipeline-followup-composer-header">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Calendar size={16} style={{ color: '#0284c7' }} />
+                                <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '14px' }}>Log New Deal Follow-up</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setIsComposingFollowUp(false)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+
+                            {/* Channel Pills Selector */}
+                            <div className="pipeline-followup-field-group">
+                              <label className="pipeline-followup-field-label">Follow-up Channel / Touchpoint Type</label>
+                              <div className="pipeline-followup-channels-bar">
+                                {[
+                                  { key: 'Call', label: 'Phone Call', icon: <Phone size={13} />, className: 'channel-call' },
+                                  { key: 'Meeting', label: 'Meeting', icon: <Users size={13} />, className: 'channel-meeting' },
+                                  { key: 'WhatsApp', label: 'WhatsApp', icon: <MessageSquare size={13} />, className: 'channel-whatsapp' },
+                                  { key: 'Email', label: 'Email', icon: <Mail size={13} />, className: 'channel-email' },
+                                  { key: 'Demo', label: 'Product Demo', icon: <Briefcase size={13} />, className: 'channel-demo' },
+                                  { key: 'Visit', label: 'Site Visit', icon: <Building2 size={13} />, className: 'channel-visit' }
+                                ].map(ch => (
+                                  <button
+                                    key={ch.key}
+                                    type="button"
+                                    className={`pipeline-channel-btn ${ch.className} ${followUpFormData.channel === ch.key ? 'active' : ''}`}
+                                    onClick={() => setFollowUpFormData(prev => ({ ...prev, channel: ch.key }))}
+                                  >
+                                    {ch.icon}
+                                    <span>{ch.label}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Inputs Grid */}
+                            <div className="pipeline-followup-form-grid">
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Follow-up Title / Purpose</label>
+                                <input
+                                  type="text"
+                                  className="pipeline-followup-field-input"
+                                  placeholder={`e.g. ${followUpFormData.channel} regarding proposal & next steps`}
+                                  value={followUpFormData.title}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, title: e.target.value }))}
+                                />
+                              </div>
+
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Scheduled / Conducted Date</label>
+                                <input
+                                  type="date"
+                                  className="pipeline-followup-field-input"
+                                  value={followUpFormData.followUpDate}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, followUpDate: e.target.value }))}
+                                  required
+                                />
+                              </div>
+
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Time</label>
+                                <input
+                                  type="time"
+                                  className="pipeline-followup-field-input"
+                                  value={followUpFormData.followUpTime}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, followUpTime: e.target.value }))}
+                                />
+                              </div>
+
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Outcome / Status</label>
+                                <select
+                                  className="pipeline-followup-field-input"
+                                  value={followUpFormData.status}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, status: e.target.value }))}
+                                >
+                                  <option value="Scheduled">Scheduled / Upcoming</option>
+                                  <option value="Completed">Completed</option>
+                                  <option value="Follow-up Needed">Follow-up Needed</option>
+                                  <option value="Rescheduled">Rescheduled</option>
+                                  <option value="Missed">Missed / No Answer</option>
+                                </select>
+                              </div>
+
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Next Follow-up Date (Optional)</label>
+                                <input
+                                  type="date"
+                                  className="pipeline-followup-field-input"
+                                  value={followUpFormData.nextFollowUpDate}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, nextFollowUpDate: e.target.value }))}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Remarks Field */}
+                            <div className="pipeline-followup-field-group">
+                              <label className="pipeline-followup-field-label">
+                                Remarks & Discussion Details <span style={{ color: '#ef4444' }}>*</span>
+                              </label>
+                              <textarea
+                                className="pipeline-followup-remarks-textarea"
+                                placeholder="Enter detailed remarks, client feedback, discussion points, agreed next action items, or objections raised..."
+                                value={followUpFormData.remarks}
+                                onChange={e => setFollowUpFormData(prev => ({ ...prev, remarks: e.target.value }))}
+                                required
+                              />
+                            </div>
+
+                            {/* Composer Footer */}
+                            <div className="pipeline-followup-composer-footer">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#64748b' }}>
+                                <User size={13} />
+                                <span>
+                                  Adding as: <strong style={{ color: '#0f172a' }}>{(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System'}</strong>
+                                  {' '}({user?.role?.name || user?.role || (roleName ? roleName.charAt(0).toUpperCase() + roleName.slice(1) : 'Sales Executive')})
+                                </span>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <button
+                                  type="button"
+                                  className="pipeline-btn-cancel"
+                                  onClick={() => setIsComposingFollowUp(false)}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="submit"
+                                  className="pipeline-btn-save"
+                                  disabled={isSubmittingFollowUp}
+                                >
+                                  {isSubmittingFollowUp ? 'Saving...' : 'Save Follow-up'}
+                                </button>
+                              </div>
+                            </div>
+                          </form>
+                        )}
+
+                        {/* Chaining Timeline View */}
+                        {(() => {
+                          const followUps = currentDealActivities.filter(a => a.type === 'followup');
+                          if (followUps.length === 0) {
+                            return (
+                              <div className="pipeline-empty-state-mini" style={{ padding: '48px 20px', textAlign: 'center', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                                <Calendar size={36} style={{ color: '#0284c7', marginBottom: '10px', opacity: 0.7 }} />
+                                <h4 style={{ margin: '0 0 6px 0', fontSize: '15px', fontWeight: 600, color: '#1e293b' }}>No Follow-ups Recorded Yet</h4>
+                                <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#64748b', maxWidth: '420px', marginInline: 'auto' }}>
+                                  Track scheduled calls, meetings, WhatsApp conversations, and customer touchpoints in a sequential chaining timeline.
+                                </p>
+                                <button
+                                  type="button"
+                                  className="pipeline-btn-add-followup"
+                                  style={{ margin: '0 auto' }}
+                                  onClick={() => setIsComposingFollowUp(true)}
+                                >
+                                  <Plus size={14} />
+                                  <span>Log First Follow-up</span>
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="pipeline-chain-timeline-wrapper">
+                              {/* The connecting vertical chain track */}
+                              <div className="pipeline-chain-track-line" />
+
+                              {/* Chained Node Items */}
+                              {followUps.map((act, idx) => {
+                                const chKey = (act.channel || 'Call').toLowerCase();
+                                const chClass = `channel-${chKey.includes('call') ? 'call' : chKey.includes('meeting') ? 'meeting' : chKey.includes('whatsapp') ? 'whatsapp' : chKey.includes('email') ? 'email' : chKey.includes('demo') ? 'demo' : chKey.includes('visit') ? 'visit' : 'call'}`;
+                                
+                                const statusKey = (act.status || 'Scheduled').toLowerCase().replace(/\s+/g, '-');
+                                const statusClass = `status-${statusKey.includes('completed') ? 'completed' : statusKey.includes('rescheduled') ? 'rescheduled' : statusKey.includes('missed') ? 'missed' : statusKey.includes('needed') ? 'followup-needed' : 'scheduled'}`;
+
+                                const authorInitials = (act.author || 'AS')
+                                  .split(' ')
+                                  .map(n => n[0])
+                                  .join('')
+                                  .slice(0, 2)
+                                  .toUpperCase();
+
+                                return (
+                                  <div key={act.id || act._id || idx} className="pipeline-chain-node-row">
+                                    {/* Left Chaining Node Indicator */}
+                                    <div className="pipeline-chain-marker-wrap">
+                                      <div className={`pipeline-chain-marker-circle ${statusClass}`} title={`Channel: ${act.channel || 'Call'}`}>
+                                        {getFollowUpChannelIcon(act.channel, 18)}
+                                      </div>
+                                      <span className="pipeline-chain-step-pill">
+                                        #{followUps.length - idx}
+                                      </span>
+                                    </div>
+
+                                    {/* Chaining Card Content */}
+                                    <div className="pipeline-chain-card">
+                                      {/* Top Row: Channel, Title, Status, Logged When */}
+                                      <div className="pipeline-chain-card-top">
+                                        <div className="pipeline-chain-card-title-group">
+                                          <span className={`pipeline-chain-channel-chip ${chClass}`}>
+                                            {getFollowUpChannelIcon(act.channel, 12)}
+                                            <span>{act.channel || 'Call'}</span>
+                                          </span>
+
+                                          <span className="pipeline-chain-title-text">
+                                            {act.title || `${act.channel || 'Touchpoint'} Follow-up`}
+                                          </span>
+
+                                          <span className={`pipeline-chain-status-pill ${statusClass}`}>
+                                            {statusClass.includes('completed') && <Check size={11} />}
+                                            {statusClass.includes('scheduled') && <Clock size={11} />}
+                                            <span>{act.status || 'Scheduled'}</span>
+                                          </span>
+                                        </div>
+
+                                        <div className="pipeline-chain-logged-time" title={formatActivityTimestamp(act)}>
+                                          <Clock size={12} />
+                                          <span>Added {formatRelativeActivityTime(act) || formatActivityTimestamp(act)}</span>
+                                        </div>
+                                      </div>
+
+                                      {/* Meta Bar: Author (Who added), Scheduled Date & Time */}
+                                      <div className="pipeline-chain-meta-bar">
+                                        <div className="pipeline-chain-author-badge">
+                                          <div className="pipeline-chain-author-avatar">{authorInitials}</div>
+                                          <span>{act.author || 'Admin System'}</span>
+                                          {act.authorRole && (
+                                            <span className="pipeline-chain-author-role">{act.authorRole}</span>
+                                          )}
+                                        </div>
+
+                                        {(act.followUpDate || act.date) && (
+                                          <div className="pipeline-chain-sched-item">
+                                            <Calendar size={13} style={{ color: '#0284c7' }} />
+                                            <span>
+                                              Date: <strong>{act.followUpDate ? formatDateDDMMYYYY(act.followUpDate) : act.date}</strong>
+                                              {act.followUpTime ? ` at ${act.followUpTime}` : ''}
+                                            </span>
+                                          </div>
+                                        )}
+
+                                        {act.nextFollowUpDate && (
+                                          <div className="pipeline-chain-sched-item" style={{ color: '#6366f1' }}>
+                                            <ArrowRightLeft size={12} />
+                                            <span>Next Follow-up: <strong>{formatDateDDMMYYYY(act.nextFollowUpDate)}</strong></span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* Remarks Field (Prominent & Clean) */}
+                                      <div className={`pipeline-chain-remarks-box ${statusClass}`}>
+                                        <div className="pipeline-chain-remarks-header">
+                                          <FileText size={12} />
+                                          <span>Remarks & Outcomes</span>
+                                        </div>
+                                        <p className="pipeline-chain-remarks-content">
+                                          {act.remarks || act.content || 'No detailed remarks recorded.'}
+                                        </p>
+                                      </div>
+
+                                      {/* Bottom Actions */}
+                                      <div className="pipeline-chain-footer-actions">
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          {act.status !== 'Completed' ? (
+                                            <button
+                                              type="button"
+                                              className="pipeline-chain-mark-btn"
+                                              onClick={() => handleUpdateFollowUpStatus(act.id || act._id, 'Completed')}
+                                            >
+                                              <Check size={12} />
+                                              <span>Mark as Completed</span>
+                                            </button>
+                                          ) : (
+                                            <span style={{ fontSize: '11.5px', color: '#059669', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                              <CheckCircle size={13} />
+                                              <span>Completed Touchpoint</span>
+                                            </span>
+                                          )}
+
+                                          {canUserEditFollowUp(act, user, hasFullAccess) ? (
+                                            <button
+                                              type="button"
+                                              className="pipeline-chain-edit-btn"
+                                              title="Edit scheduled follow-up"
+                                              onClick={() => handleOpenEditFollowUp(act, 'deal', detailedDeal?._id)}
+                                            >
+                                              <Edit2 size={12} />
+                                              <span>Edit</span>
+                                            </button>
+                                          ) : isFollowUpTimePassed(act) && act.status !== 'Completed' ? (
+                                            <span className="pipeline-chain-expired-badge" title="Scheduled time has already passed; editing is disabled">
+                                              <Clock size={11} /> Time Passed
+                                            </span>
+                                          ) : null}
+                                        </div>
+
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <button
+                                            type="button"
+                                            className="pipeline-mini-icon-btn danger"
+                                            title="Delete Follow-up"
+                                            onClick={() => handleDeleteFollowUp(act.id || act._id)}
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     ) : (
                       /* Activity Timeline Feed */
                       <div className="pipeline-activity-timeline-feed" style={{ marginTop: (isComposingActivity && ((detailActiveTab === 'notes' && newActivityType === 'note') || (detailActiveTab === 'emails' && newActivityType === 'email') || (detailActiveTab === 'messages' && newActivityType === 'message'))) ? '16px' : '0' }}>
@@ -9566,16 +10650,19 @@ function Pipeline() {
                         ) : currentDealActivities.filter(act => {
                           if (detailActiveTab === 'all') return true;
                           if (detailActiveTab === 'notes') return act.type === 'note';
+                          if (detailActiveTab === 'followups') return act.type === 'followup';
                           return true;
                         }).length > 0 ? (
                           currentDealActivities.filter(act => {
                             if (detailActiveTab === 'all') return true;
                             if (detailActiveTab === 'notes') return act.type === 'note';
+                            if (detailActiveTab === 'followups') return act.type === 'followup';
                             return true;
                           }).map(act => (
                             <div key={act.id} className="pipeline-timeline-item-card">
                               <div className={`pipeline-timeline-icon-wrap ${act.type || 'activity'}`}>
                                 {act.type === 'note' && <FileText size={18} />}
+                                {act.type === 'followup' && <Calendar size={18} />}
                                 {act.type === 'email' && <Mail size={18} />}
                                 {act.type === 'message' && <MessageSquare size={18} />}
                                 {act.type === 'task' && <CheckSquare size={18} />}
@@ -9583,19 +10670,68 @@ function Pipeline() {
                                 {act.type === 'contact' && <User size={18} />}
                                 {act.type === 'company' && <Building2 size={18} />}
                                 {act.type === 'payment' && <CreditCard size={18} />}
-                                {(act.type === 'activity' || !['note', 'email', 'message', 'task', 'deal', 'contact', 'company', 'payment'].includes(act.type)) && <Tag size={18} />}
+                                {(act.type === 'activity' || !['note', 'followup', 'email', 'message', 'task', 'deal', 'contact', 'company', 'payment'].includes(act.type)) && <Tag size={18} />}
                               </div>
 
                               <div className="pipeline-timeline-content">
                                 <div className="pipeline-timeline-header-row">
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                     <span className="pipeline-timeline-author-title">{act.author}</span>
                                     <span style={{ fontSize: '12px', color: '#64748b' }}>• {act.title}</span>
+                                    {act.type === 'followup' && act.status && (
+                                      <span className={`pipeline-chain-status-pill status-${(act.status || '').toLowerCase().replace(/\s+/g, '-')}`}>
+                                        {act.status}
+                                      </span>
+                                    )}
                                   </div>
-                                  <span className="pipeline-timeline-time-badge">{formatActivityTimestamp(act)}</span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    {act.type === 'followup' && (
+                                      canUserEditFollowUp(act, user, hasFullAccess) ? (
+                                        <button
+                                          type="button"
+                                          className="pipeline-timeline-mini-action-btn"
+                                          title="Edit Follow-up (available before scheduled time)"
+                                          onClick={() => handleOpenEditFollowUp(act, 'deal', detailedDeal?._id)}
+                                        >
+                                          <Edit2 size={11} />
+                                          <span>Edit</span>
+                                        </button>
+                                      ) : isFollowUpTimePassed(act) && act.status !== 'Completed' ? (
+                                        <span className="pipeline-chain-expired-badge" title="Scheduled time has already passed; editing is disabled">
+                                          <Clock size={11} /> Time Passed
+                                        </span>
+                                      ) : null
+                                    )}
+                                    <span className="pipeline-timeline-time-badge">{formatActivityTimestamp(act)}</span>
+                                  </div>
                                 </div>
 
-                                <p className="pipeline-timeline-body-text">{act.content}</p>
+                                {act.type === 'followup' ? (
+                                  <div className="pipeline-chain-remarks-box" style={{ margin: '6px 0 0 0' }}>
+                                    <div className="pipeline-chain-remarks-header">
+                                      <FileText size={11} />
+                                      <span>Remarks & Outcomes ({act.channel || 'Call'})</span>
+                                    </div>
+                                    <p className="pipeline-chain-remarks-content">{act.remarks || act.content}</p>
+                                    {(act.followUpDate || act.date) && (
+                                      <div style={{ marginTop: '6px', fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                          <Calendar size={13} color="#0284c7" />
+                                          Date: <strong style={{ color: '#334155' }}>{act.followUpDate ? formatDateDDMMYYYY(act.followUpDate) : act.date}</strong>
+                                          {act.followUpTime ? ` at ${act.followUpTime}` : ''}
+                                        </span>
+                                        {act.nextFollowUpDate && (
+                                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#6366f1' }}>
+                                            <ArrowRightLeft size={12} />
+                                            Next: <strong style={{ color: '#4338ca' }}>{formatDateDDMMYYYY(act.nextFollowUpDate)}</strong>
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <p className="pipeline-timeline-body-text">{act.content}</p>
+                                )}
                               </div>
                             </div>
                           ))
@@ -9605,6 +10741,11 @@ function Pipeline() {
                               <>
                                 <FileText size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
                                 <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No notes created yet.</p>
+                              </>
+                            ) : detailActiveTab === 'followups' ? (
+                              <>
+                                <Calendar size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                                <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No follow-ups recorded yet.</p>
                               </>
                             ) : (
                               <>
@@ -10326,7 +11467,7 @@ function Pipeline() {
                   )}
 
                   {/* More Options */}
-                  {canCreate && (
+                  {hasFullAccess && (
                     <div style={{ position: 'relative' }}>
                       <button
                         type="button"
@@ -10394,17 +11535,9 @@ function Pipeline() {
                 ) : (
                   <div className="pipeline-kanban-board">
                     {pipelines.map((pipeline, pIndex) => {
-                      const activePipelineNames = new Set(pipelines.map(p => (p.name || p.id || '').toLowerCase()));
                       const pipelineDeals = filteredDeals.filter(d => {
-                        const dp = (d.pipeline || '').trim().toLowerCase();
-                        const ds = (d.stage || '').trim().toLowerCase();
-                        const pName = (pipeline.name || '').trim().toLowerCase();
-                        const pId = (pipeline.id || '').trim().toLowerCase();
-                        if (dp === pName || dp === pId || ds === pName || ds === pId) return true;
-                        if ((!dp || (!activePipelineNames.has(dp) && !activePipelineNames.has(ds))) && pIndex === 0) {
-                          return true;
-                        }
-                        return false;
+                        const targetStage = getDealStageName(d, pipelines);
+                        return (targetStage || '').trim().toLowerCase() === (pipeline.name || '').trim().toLowerCase();
                       });
                       const count = pipelineDeals.length;
                       const totalStageAmountINR = pipelineDeals.reduce((sum, d) => sum + getDealValueInINR(d), 0);
@@ -10458,9 +11591,35 @@ function Pipeline() {
                                   <span className={`pipeline-stage-badge ${pipeline.badgeClass || 'new'}`}>
                                     {count}
                                   </span>
+                                  {(() => {
+                                    const stageSelectedCount = pipelineDeals.filter(d => selectedKanbanDealIds.includes(d._id)).length;
+                                    return stageSelectedCount > 0 ? (
+                                      <span className="pipeline-stage-selected-pill" title={`${stageSelectedCount} of ${count} deals selected`}>
+                                        <Check size={10} strokeWidth={3} />
+                                        <span>{stageSelectedCount} sel</span>
+                                      </span>
+                                    ) : null;
+                                  })()}
                                 </div>
 
                                 <div className="pipeline-col-header-actions" style={{ position: 'relative' }}>
+                                  {(() => {
+                                    const stageSelectedCount = pipelineDeals.filter(d => selectedKanbanDealIds.includes(d._id)).length;
+                                    const isAllStageSelected = count > 0 && stageSelectedCount === count;
+                                    if (count > 0 && (selectedKanbanDealIds.length > 0 || stageSelectedCount > 0)) {
+                                      return (
+                                        <button
+                                          type="button"
+                                          className={`pipeline-stage-select-all-btn ${isAllStageSelected ? 'all-selected' : ''}`}
+                                          onClick={(e) => handleToggleStageSelection(pipelineDeals, e)}
+                                          title={isAllStageSelected ? "Deselect all deals in this stage" : "Select all deals in this stage"}
+                                        >
+                                          {isAllStageSelected ? 'Deselect' : 'Select all'}
+                                        </button>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                   <button
                                     type="button"
                                     className="pipeline-col-action-btn more"
@@ -10494,7 +11653,7 @@ function Pipeline() {
                                           </div>
                                         </button>
                                       )}
-                                      {canUpdate && (
+                                      {hasFullAccess && (
                                         <button
                                           type="button"
                                           className="pipeline-card-menu-item"
@@ -10506,7 +11665,7 @@ function Pipeline() {
                                           </div>
                                         </button>
                                       )}
-                                      {canDelete && (
+                                      {hasFullAccess && (
                                         <>
                                           <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
                                           <button
@@ -10534,45 +11693,57 @@ function Pipeline() {
                             onDragOver={e => handleDragOver(e, pipeline.id)}
                             onDrop={e => handleDrop(e, pipeline.name)}
                           >
-                            {pipelineDeals.map(deal => (
-                              <div
-                                key={deal._id}
-                                className={`pipeline-card ${activeMenuId === deal._id ? 'menu-active' : ''} ${hoveredActivityDealId === deal._id ? 'activity-hovered' : ''} ${draggedDealId === deal._id ? 'dragging' : ''}`}
-                                draggable={canUpdate}
-                                onDragStart={e => handleDragStart(e, deal._id)}
-                                onDragEnd={handleDragEnd}
-                              >
-                                {/* Card Top: Avatar, Name, Location, 3-dots */}
-                                <div className="pipeline-card-top">
-                                  <div className="pipeline-card-person" style={{ cursor: 'pointer', alignItems: 'flex-start', minWidth: 0, overflow: 'hidden', flex: 1 }} onClick={() => setDetailedDealId(deal._id)}>
-                                    {deal.avatar ? (
-                                      <img
-                                        src={deal.avatar}
-                                        alt={deal.clientName}
-                                        className="pipeline-card-avatar"
-                                        onError={e => {
-                                          e.target.style.display = 'none';
-                                        }}
-                                      />
-                                    ) : (
-                                      <div className="pipeline-card-avatar">
-                                        {deal.clientName.charAt(0)}
-                                      </div>
-                                    )}
-                                    <div className="pipeline-card-name-wrap" style={{ minWidth: 0, overflow: 'hidden', flex: 1 }}>
-                                      <h4 className="pipeline-card-client-name" style={{ margin: 0 }}>
-                                        <button
-                                          type="button"
-                                          className="pipeline-card-client-name-link"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setDetailedDealId(deal._id);
+                            {pipelineDeals.map(deal => {
+                              const isSelected = selectedKanbanDealIds.includes(deal._id);
+                              return (
+                                <div
+                                  key={deal._id}
+                                  className={`pipeline-card ${isSelected ? 'selected' : ''} ${activeMenuId === deal._id ? 'menu-active' : ''} ${hoveredActivityDealId === deal._id ? 'activity-hovered' : ''} ${draggedDealId === deal._id ? 'dragging' : ''}`}
+                                  draggable={canUpdate}
+                                  onDragStart={e => handleDragStart(e, deal._id)}
+                                  onDragEnd={handleDragEnd}
+                                  onDoubleClick={(e) => handleCardDoubleClick(deal, pipelineDeals, pipeline.name, e)}
+                                  title="Double-click to select all deals in this stage"
+                                >
+                                  {/* Card Top: Checkbox, Avatar, Name, Location, 3-dots */}
+                                  <div className="pipeline-card-top">
+                                    <div
+                                      className={`pipeline-card-select-checkbox ${isSelected ? 'selected' : ''} ${selectedKanbanDealIds.length > 0 ? 'visible' : ''}`}
+                                      onClick={(e) => handleToggleDealSelection(deal._id, e)}
+                                      title={isSelected ? "Deselect deal (Double-click card to select all in stage)" : "Select deal (Double-click card to select all in stage)"}
+                                    >
+                                      {isSelected && <Check size={11} strokeWidth={3.5} />}
+                                    </div>
+                                    <div
+                                      className="pipeline-card-person"
+                                      style={{ cursor: 'pointer', alignItems: 'flex-start', minWidth: 0, overflow: 'hidden', flex: 1 }}
+                                      onClick={(e) => handleDealCardClick(deal._id, e)}
+                                    >
+                                      {deal.avatar ? (
+                                        <img
+                                          src={deal.avatar}
+                                          alt={deal.clientName}
+                                          className="pipeline-card-avatar"
+                                          onError={e => {
+                                            e.target.style.display = 'none';
                                           }}
-                                          title="View activity and deal details"
-                                        >
-                                          {deal.clientName}
-                                        </button>
-                                      </h4>
+                                        />
+                                      ) : (
+                                        <div className="pipeline-card-avatar">
+                                          {deal.clientName.charAt(0)}
+                                        </div>
+                                      )}
+                                      <div className="pipeline-card-name-wrap" style={{ minWidth: 0, overflow: 'hidden', flex: 1 }}>
+                                        <h4 className="pipeline-card-client-name" style={{ margin: 0 }}>
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-client-name-link"
+                                            onClick={(e) => handleDealCardClick(deal._id, e)}
+                                            title="View activity and deal details"
+                                          >
+                                            {deal.clientName}
+                                          </button>
+                                        </h4>
 
                                       {/* Origin + Status badge directly below deal name */}
                                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
@@ -10831,7 +12002,8 @@ function Pipeline() {
                                   </button>
                                 </div>
                               </div>
-                            ))}
+                            );
+                          })}
                           </div>
 
                           {/* Column Footer with Approx. Amount in INR converted via Frankfurter v2 */}
@@ -10969,6 +12141,85 @@ function Pipeline() {
                     </div>
                   </div>
                 )
+              )}
+
+              {/* Floating Bottom Bulk Action Toolbar for Multi-Selected Cards */}
+              {selectedKanbanDealIds.length > 0 && viewMode === 'kanban' && (
+                <div className="pipeline-kanban-bulk-bar" onClick={e => e.stopPropagation()}>
+                  <div className="pipeline-kanban-bulk-info">
+                    <div className="pipeline-kanban-bulk-badge">
+                      <Check size={14} strokeWidth={3} />
+                      <span>{selectedKanbanDealIds.length} {selectedKanbanDealIds.length === 1 ? 'deal' : 'deals'} selected</span>
+                    </div>
+                  </div>
+
+                  <div className="pipeline-kanban-bulk-actions">
+                    {/* Bulk Move Stage Dropdown */}
+                    {canUpdate && (
+                      <div style={{ position: 'relative' }}>
+                        <button
+                          type="button"
+                          className="pipeline-kanban-bulk-btn primary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsBulkMoveDropdownOpen(prev => !prev);
+                          }}
+                          title="Move selected deals to another stage"
+                        >
+                          <ArrowRightLeft size={13} />
+                          <span>Move Stage</span>
+                          <ChevronDown size={12} style={{ transform: isBulkMoveDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                        </button>
+
+                        {isBulkMoveDropdownOpen && (
+                          <div className="pipeline-card-dropdown-menu pipeline-bulk-move-menu" onClick={e => e.stopPropagation()}>
+                            <div className="pipeline-submenu-header">
+                              <span className="pipeline-submenu-title">Move Selected To</span>
+                            </div>
+                            {pipelines.map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className="pipeline-card-menu-item"
+                                onClick={() => handleBulkMoveStage(p.name)}
+                              >
+                                <span className={`pipeline-menu-indicator ${p.badgeClass || 'new'}`} />
+                                <span>{p.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Bulk Delete */}
+                    {canDelete && (
+                      <button
+                        type="button"
+                        className="pipeline-kanban-bulk-btn danger"
+                        onClick={handleBulkDeleteDeals}
+                        title="Delete selected deals"
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete</span>
+                      </button>
+                    )}
+
+                    {/* Deselect All */}
+                    <button
+                      type="button"
+                      className="pipeline-kanban-bulk-btn cancel"
+                      onClick={() => {
+                        setSelectedKanbanDealIds([]);
+                        setIsBulkMoveDropdownOpen(false);
+                      }}
+                      title="Clear selection"
+                    >
+                      <X size={13} />
+                      <span>Deselect All</span>
+                    </button>
+                  </div>
+                </div>
               )}
             </>
           )
@@ -11749,6 +13000,15 @@ function Pipeline() {
                         </button>
                         <button
                           type="button"
+                          className={`pipeline-act-tab-btn ${detailActiveTab === 'followups' ? 'active' : ''}`}
+                          onClick={() => setDetailActiveTab('followups')}
+                        >
+                          <Calendar size={14} />
+                          <span>Follow-ups</span>
+                          <span className="pipeline-act-tab-badge">{currentContactActivities.filter(a => a.type === 'followup').length}</span>
+                        </button>
+                        <button
+                          type="button"
                           className={`pipeline-act-tab-btn ${detailActiveTab === 'emails' ? 'active' : ''}`}
                           onClick={() => setDetailActiveTab('emails')}
                         >
@@ -11789,6 +13049,18 @@ function Pipeline() {
                           >
                             <Plus size={13} />
                             <span>Add Note</span>
+                          </button>
+                        )}
+                        {detailActiveTab === 'followups' && (
+                          <button
+                            type="button"
+                            className="pipeline-btn-add-activity-tab"
+                            onClick={() => {
+                              setIsComposingFollowUp(prev => !prev);
+                            }}
+                          >
+                            <Plus size={13} />
+                            <span>Add Follow-up</span>
                           </button>
                         )}
                         {detailActiveTab === 'emails' && (
@@ -11980,6 +13252,359 @@ function Pipeline() {
                           </div>
                         )}
                       </div>
+                    ) : detailActiveTab === 'followups' ? (
+                      /* Follow-up Timeline Chaining View */
+                      <div className="pipeline-followup-container">
+                        {/* Header Stats & Quick Action Bar */}
+                        <div className="pipeline-followup-header-stats">
+                          <div className="pipeline-followup-stats-left">
+                            <div className="pipeline-followup-stats-icon">
+                              <Calendar size={18} />
+                            </div>
+                            <div>
+                              <h4 className="pipeline-followup-stats-title">Follow-up Timeline & Touchpoints</h4>
+                              <p className="pipeline-followup-stats-desc">Connected touchpoint chain of client discussions, meetings, and outcomes</p>
+                            </div>
+                          </div>
+
+                          <div className="pipeline-followup-stats-pills">
+                            <span className="pipeline-followup-stat-pill total">
+                              Total: {currentContactActivities.filter(a => a.type === 'followup').length}
+                            </span>
+                            <span className="pipeline-followup-stat-pill completed">
+                              <Check size={11} />
+                              Completed: {currentContactActivities.filter(a => a.type === 'followup' && a.status === 'Completed').length}
+                            </span>
+                            <span className="pipeline-followup-stat-pill scheduled">
+                              <Clock size={11} />
+                              Scheduled: {currentContactActivities.filter(a => a.type === 'followup' && (a.status === 'Scheduled' || !a.status)).length}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Inline Follow-up Composer */}
+                        {isComposingFollowUp && (
+                          <form onSubmit={handleAddFollowUp} className="pipeline-followup-composer-card">
+                            <div className="pipeline-followup-composer-header">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Calendar size={16} style={{ color: '#0284c7' }} />
+                                <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '14px' }}>Log New Follow-up</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setIsComposingFollowUp(false)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+
+                            {/* Channel Pills Selector */}
+                            <div className="pipeline-followup-field-group">
+                              <label className="pipeline-followup-field-label">Follow-up Channel / Touchpoint Type</label>
+                              <div className="pipeline-followup-channels-bar">
+                                {[
+                                  { key: 'Call', label: 'Phone Call', icon: <Phone size={13} />, className: 'channel-call' },
+                                  { key: 'Meeting', label: 'Meeting', icon: <Users size={13} />, className: 'channel-meeting' },
+                                  { key: 'WhatsApp', label: 'WhatsApp', icon: <MessageSquare size={13} />, className: 'channel-whatsapp' },
+                                  { key: 'Email', label: 'Email', icon: <Mail size={13} />, className: 'channel-email' },
+                                  { key: 'Demo', label: 'Product Demo', icon: <Briefcase size={13} />, className: 'channel-demo' },
+                                  { key: 'Visit', label: 'Site Visit', icon: <Building2 size={13} />, className: 'channel-visit' }
+                                ].map(ch => (
+                                  <button
+                                    key={ch.key}
+                                    type="button"
+                                    className={`pipeline-channel-btn ${ch.className} ${followUpFormData.channel === ch.key ? 'active' : ''}`}
+                                    onClick={() => setFollowUpFormData(prev => ({ ...prev, channel: ch.key }))}
+                                  >
+                                    {ch.icon}
+                                    <span>{ch.label}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Inputs Grid */}
+                            <div className="pipeline-followup-form-grid">
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Follow-up Title / Purpose</label>
+                                <input
+                                  type="text"
+                                  className="pipeline-followup-field-input"
+                                  placeholder={`e.g. ${followUpFormData.channel} regarding project details`}
+                                  value={followUpFormData.title}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, title: e.target.value }))}
+                                />
+                              </div>
+
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Scheduled / Conducted Date</label>
+                                <input
+                                  type="date"
+                                  className="pipeline-followup-field-input"
+                                  value={followUpFormData.followUpDate}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, followUpDate: e.target.value }))}
+                                  required
+                                />
+                              </div>
+
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Time</label>
+                                <input
+                                  type="time"
+                                  className="pipeline-followup-field-input"
+                                  value={followUpFormData.followUpTime}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, followUpTime: e.target.value }))}
+                                />
+                              </div>
+
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Outcome / Status</label>
+                                <select
+                                  className="pipeline-followup-field-input"
+                                  value={followUpFormData.status}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, status: e.target.value }))}
+                                >
+                                  <option value="Scheduled">Scheduled / Upcoming</option>
+                                  <option value="Completed">Completed</option>
+                                  <option value="Follow-up Needed">Follow-up Needed</option>
+                                  <option value="Rescheduled">Rescheduled</option>
+                                  <option value="Missed">Missed / No Answer</option>
+                                </select>
+                              </div>
+
+                              <div className="pipeline-followup-field-group">
+                                <label className="pipeline-followup-field-label">Next Follow-up Date (Optional)</label>
+                                <input
+                                  type="date"
+                                  className="pipeline-followup-field-input"
+                                  value={followUpFormData.nextFollowUpDate}
+                                  onChange={e => setFollowUpFormData(prev => ({ ...prev, nextFollowUpDate: e.target.value }))}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Remarks Field */}
+                            <div className="pipeline-followup-field-group">
+                              <label className="pipeline-followup-field-label">
+                                Remarks & Discussion Details <span style={{ color: '#ef4444' }}>*</span>
+                              </label>
+                              <textarea
+                                className="pipeline-followup-remarks-textarea"
+                                placeholder="Enter detailed remarks, client feedback, discussion points, agreed next action items, or objections raised..."
+                                value={followUpFormData.remarks}
+                                onChange={e => setFollowUpFormData(prev => ({ ...prev, remarks: e.target.value }))}
+                                required
+                              />
+                            </div>
+
+                            {/* Composer Footer */}
+                            <div className="pipeline-followup-composer-footer">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#64748b' }}>
+                                <User size={13} />
+                                <span>
+                                  Adding as: <strong style={{ color: '#0f172a' }}>{(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System'}</strong>
+                                  {' '}({user?.role?.name || user?.role || (roleName ? roleName.charAt(0).toUpperCase() + roleName.slice(1) : 'Sales Executive')})
+                                </span>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <button
+                                  type="button"
+                                  className="pipeline-btn-cancel"
+                                  onClick={() => setIsComposingFollowUp(false)}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="submit"
+                                  className="pipeline-btn-save"
+                                  disabled={isSubmittingFollowUp}
+                                >
+                                  {isSubmittingFollowUp ? 'Saving...' : 'Save Follow-up'}
+                                </button>
+                              </div>
+                            </div>
+                          </form>
+                        )}
+
+                        {/* Chaining Timeline View */}
+                        {(() => {
+                          const followUps = currentContactActivities.filter(a => a.type === 'followup');
+                          if (followUps.length === 0) {
+                            return (
+                              <div className="pipeline-empty-state-mini" style={{ padding: '48px 20px', textAlign: 'center', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                                <Calendar size={36} style={{ color: '#0284c7', marginBottom: '10px', opacity: 0.7 }} />
+                                <h4 style={{ margin: '0 0 6px 0', fontSize: '15px', fontWeight: 600, color: '#1e293b' }}>No Follow-ups Recorded Yet</h4>
+                                <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#64748b', maxWidth: '420px', marginInline: 'auto' }}>
+                                  Track scheduled calls, meetings, WhatsApp conversations, and customer touchpoints in a sequential chaining timeline.
+                                </p>
+                                <button
+                                  type="button"
+                                  className="pipeline-btn-add-followup"
+                                  style={{ margin: '0 auto' }}
+                                  onClick={() => setIsComposingFollowUp(true)}
+                                >
+                                  <Plus size={14} />
+                                  <span>Log First Follow-up</span>
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="pipeline-chain-timeline-wrapper">
+                              {/* The connecting vertical chain track */}
+                              <div className="pipeline-chain-track-line" />
+
+                              {/* Chained Node Items */}
+                              {followUps.map((act, idx) => {
+                                const chKey = (act.channel || 'Call').toLowerCase();
+                                const chClass = `channel-${chKey.includes('call') ? 'call' : chKey.includes('meeting') ? 'meeting' : chKey.includes('whatsapp') ? 'whatsapp' : chKey.includes('email') ? 'email' : chKey.includes('demo') ? 'demo' : chKey.includes('visit') ? 'visit' : 'call'}`;
+                                
+                                const statusKey = (act.status || 'Scheduled').toLowerCase().replace(/\s+/g, '-');
+                                const statusClass = `status-${statusKey.includes('completed') ? 'completed' : statusKey.includes('rescheduled') ? 'rescheduled' : statusKey.includes('missed') ? 'missed' : statusKey.includes('needed') ? 'followup-needed' : 'scheduled'}`;
+
+                                const authorInitials = (act.author || 'AS')
+                                  .split(' ')
+                                  .map(n => n[0])
+                                  .join('')
+                                  .slice(0, 2)
+                                  .toUpperCase();
+
+                                return (
+                                  <div key={act.id || act._id || idx} className="pipeline-chain-node-row">
+                                    {/* Left Chaining Node Indicator */}
+                                    <div className="pipeline-chain-marker-wrap">
+                                      <div className={`pipeline-chain-marker-circle ${statusClass}`} title={`Channel: ${act.channel || 'Call'}`}>
+                                        {getFollowUpChannelIcon(act.channel, 18)}
+                                      </div>
+                                      <span className="pipeline-chain-step-pill">
+                                        #{followUps.length - idx}
+                                      </span>
+                                    </div>
+
+                                    {/* Chaining Card Content */}
+                                    <div className="pipeline-chain-card">
+                                      {/* Top Row: Channel, Title, Status, Logged When */}
+                                      <div className="pipeline-chain-card-top">
+                                        <div className="pipeline-chain-card-title-group">
+                                          <span className={`pipeline-chain-channel-chip ${chClass}`}>
+                                            {getFollowUpChannelIcon(act.channel, 12)}
+                                            <span>{act.channel || 'Call'}</span>
+                                          </span>
+
+                                          <span className="pipeline-chain-title-text">
+                                            {act.title || `${act.channel || 'Touchpoint'} Follow-up`}
+                                          </span>
+
+                                          <span className={`pipeline-chain-status-pill ${statusClass}`}>
+                                            {statusClass.includes('completed') && <Check size={11} />}
+                                            {statusClass.includes('scheduled') && <Clock size={11} />}
+                                            <span>{act.status || 'Scheduled'}</span>
+                                          </span>
+                                        </div>
+
+                                        <div className="pipeline-chain-logged-time" title={formatActivityTimestamp(act)}>
+                                          <Clock size={12} />
+                                          <span>Added {formatRelativeActivityTime(act) || formatActivityTimestamp(act)}</span>
+                                        </div>
+                                      </div>
+
+                                      {/* Meta Bar: Author (Who added), Scheduled Date & Time */}
+                                      <div className="pipeline-chain-meta-bar">
+                                        <div className="pipeline-chain-author-badge">
+                                          <div className="pipeline-chain-author-avatar">{authorInitials}</div>
+                                          <span>{act.author || 'Admin System'}</span>
+                                          {act.authorRole && (
+                                            <span className="pipeline-chain-author-role">{act.authorRole}</span>
+                                          )}
+                                        </div>
+
+                                        {(act.followUpDate || act.date) && (
+                                          <div className="pipeline-chain-sched-item">
+                                            <Calendar size={13} style={{ color: '#0284c7' }} />
+                                            <span>
+                                              Date: <strong>{act.followUpDate ? formatDateDDMMYYYY(act.followUpDate) : act.date}</strong>
+                                              {act.followUpTime ? ` at ${act.followUpTime}` : ''}
+                                            </span>
+                                          </div>
+                                        )}
+
+                                        {act.nextFollowUpDate && (
+                                          <div className="pipeline-chain-sched-item" style={{ color: '#6366f1' }}>
+                                            <ArrowRightLeft size={12} />
+                                            <span>Next Follow-up: <strong>{formatDateDDMMYYYY(act.nextFollowUpDate)}</strong></span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* Remarks Field (Prominent & Clean) */}
+                                      <div className={`pipeline-chain-remarks-box ${statusClass}`}>
+                                        <div className="pipeline-chain-remarks-header">
+                                          <FileText size={12} />
+                                          <span>Remarks & Outcomes</span>
+                                        </div>
+                                        <p className="pipeline-chain-remarks-content">
+                                          {act.remarks || act.content || 'No detailed remarks recorded.'}
+                                        </p>
+                                      </div>
+
+                                      {/* Bottom Actions */}
+                                      <div className="pipeline-chain-footer-actions">
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          {act.status !== 'Completed' ? (
+                                            <button
+                                              type="button"
+                                              className="pipeline-chain-mark-btn"
+                                              onClick={() => handleUpdateFollowUpStatus(act.id || act._id, 'Completed')}
+                                            >
+                                              <Check size={12} />
+                                              <span>Mark as Completed</span>
+                                            </button>
+                                          ) : (
+                                            <span style={{ fontSize: '11.5px', color: '#059669', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                              <CheckCircle size={13} />
+                                              <span>Completed Touchpoint</span>
+                                            </span>
+                                          )}
+
+                                          {canUserEditFollowUp(act, user, hasFullAccess) ? (
+                                            <button
+                                              type="button"
+                                              className="pipeline-chain-edit-btn"
+                                              title="Edit scheduled follow-up"
+                                              onClick={() => handleOpenEditFollowUp(act, 'contact', detailedContact?._id)}
+                                            >
+                                              <Edit2 size={12} />
+                                              <span>Edit</span>
+                                            </button>
+                                          ) : isFollowUpTimePassed(act) && act.status !== 'Completed' ? (
+                                            <span className="pipeline-chain-expired-badge" title="Scheduled time has already passed; editing is disabled">
+                                              <Clock size={11} /> Time Passed
+                                            </span>
+                                          ) : null}
+                                        </div>
+
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <button
+                                            type="button"
+                                            className="pipeline-mini-icon-btn danger"
+                                            title="Delete Follow-up"
+                                            onClick={() => handleDeleteFollowUp(act.id || act._id)}
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     ) : (
                       /* Timeline Stream */
                       <div className="pipeline-activity-timeline-feed" style={{ marginTop: (isComposingActivity && ((detailActiveTab === 'notes' && newActivityType === 'note') || (detailActiveTab === 'emails' && newActivityType === 'email') || (detailActiveTab === 'messages' && newActivityType === 'message'))) ? '16px' : '0' }}>
@@ -11998,16 +13623,19 @@ function Pipeline() {
                         ) : currentContactActivities.filter(act => {
                           if (detailActiveTab === 'all') return true;
                           if (detailActiveTab === 'notes') return act.type === 'note';
+                          if (detailActiveTab === 'followups') return act.type === 'followup';
                           return true;
                         }).length > 0 ? (
                           currentContactActivities.filter(act => {
                             if (detailActiveTab === 'all') return true;
                             if (detailActiveTab === 'notes') return act.type === 'note';
+                            if (detailActiveTab === 'followups') return act.type === 'followup';
                             return true;
                           }).map(act => (
                             <div key={act.id} className="pipeline-timeline-item-card">
                               <div className={`pipeline-timeline-icon-wrap ${act.type || 'activity'}`}>
                                 {act.type === 'note' && <FileText size={18} />}
+                                {act.type === 'followup' && <Calendar size={18} />}
                                 {act.type === 'email' && <Mail size={18} />}
                                 {act.type === 'message' && <MessageSquare size={18} />}
                                 {act.type === 'task' && <CheckSquare size={18} />}
@@ -12015,19 +13643,68 @@ function Pipeline() {
                                 {act.type === 'contact' && <User size={18} />}
                                 {act.type === 'company' && <Building2 size={18} />}
                                 {act.type === 'payment' && <CreditCard size={18} />}
-                                {(act.type === 'activity' || !['note', 'email', 'message', 'task', 'deal', 'contact', 'company', 'payment'].includes(act.type)) && <Tag size={18} />}
+                                {(act.type === 'activity' || !['note', 'followup', 'email', 'message', 'task', 'deal', 'contact', 'company', 'payment'].includes(act.type)) && <Tag size={18} />}
                               </div>
 
                               <div className="pipeline-timeline-content">
                                 <div className="pipeline-timeline-header-row">
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                     <span className="pipeline-timeline-author-title">{act.author}</span>
                                     <span style={{ fontSize: '12px', color: '#64748b' }}>• {act.title}</span>
+                                    {act.type === 'followup' && act.status && (
+                                      <span className={`pipeline-chain-status-pill status-${(act.status || '').toLowerCase().replace(/\s+/g, '-')}`}>
+                                        {act.status}
+                                      </span>
+                                    )}
                                   </div>
-                                  <span className="pipeline-timeline-time-badge">{formatActivityTimestamp(act)}</span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    {act.type === 'followup' && (
+                                      canUserEditFollowUp(act, user, hasFullAccess) ? (
+                                        <button
+                                          type="button"
+                                          className="pipeline-timeline-mini-action-btn"
+                                          title="Edit Follow-up (available before scheduled time)"
+                                          onClick={() => handleOpenEditFollowUp(act, 'contact', detailedContact?._id)}
+                                        >
+                                          <Edit2 size={11} />
+                                          <span>Edit</span>
+                                        </button>
+                                      ) : isFollowUpTimePassed(act) && act.status !== 'Completed' ? (
+                                        <span className="pipeline-chain-expired-badge" title="Scheduled time has already passed; editing is disabled">
+                                          <Clock size={11} /> Time Passed
+                                        </span>
+                                      ) : null
+                                    )}
+                                    <span className="pipeline-timeline-time-badge">{formatActivityTimestamp(act)}</span>
+                                  </div>
                                 </div>
 
-                                <p className="pipeline-timeline-body-text">{act.content}</p>
+                                {act.type === 'followup' ? (
+                                  <div className="pipeline-chain-remarks-box" style={{ margin: '6px 0 0 0' }}>
+                                    <div className="pipeline-chain-remarks-header">
+                                      <FileText size={11} />
+                                      <span>Remarks & Outcomes ({act.channel || 'Call'})</span>
+                                    </div>
+                                    <p className="pipeline-chain-remarks-content">{act.remarks || act.content}</p>
+                                    {(act.followUpDate || act.date) && (
+                                      <div style={{ marginTop: '6px', fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                          <Calendar size={13} color="#0284c7" />
+                                          Date: <strong style={{ color: '#334155' }}>{act.followUpDate ? formatDateDDMMYYYY(act.followUpDate) : act.date}</strong>
+                                          {act.followUpTime ? ` at ${act.followUpTime}` : ''}
+                                        </span>
+                                        {act.nextFollowUpDate && (
+                                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#6366f1' }}>
+                                            <ArrowRightLeft size={12} />
+                                            Next: <strong style={{ color: '#4338ca' }}>{formatDateDDMMYYYY(act.nextFollowUpDate)}</strong>
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <p className="pipeline-timeline-body-text">{act.content}</p>
+                                )}
                               </div>
                             </div>
                           ))
@@ -12037,6 +13714,11 @@ function Pipeline() {
                               <>
                                 <FileText size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
                                 <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No notes created yet.</p>
+                              </>
+                            ) : detailActiveTab === 'followups' ? (
+                              <>
+                                <Calendar size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                                <p style={{ margin: 0, fontSize: '13.5px', fontWeight: 500, color: '#64748b' }}>No follow-ups recorded yet.</p>
                               </>
                             ) : (
                               <>
@@ -13082,7 +14764,7 @@ function Pipeline() {
                                             </div>
                                           </button>
                                         )}
-                                        {canUpdate && (
+                                        {hasFullAccess && (
                                           <button
                                             type="button"
                                             className="pipeline-card-menu-item"
@@ -13094,7 +14776,7 @@ function Pipeline() {
                                             </div>
                                           </button>
                                         )}
-                                        {canDelete && (
+                                        {hasFullAccess && (
                                           <>
                                             <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
                                             <button
@@ -18317,6 +19999,228 @@ function Pipeline() {
                   );
                 })()}
               </div>
+            </div>
+          </div>,
+          document.body
+        )
+      }
+
+      {/* Edit Follow-up Modal */}
+      {editingFollowUp &&
+        createPortal(
+          <div className="pipeline-edit-modal-backdrop" onClick={() => !isSavingEditFollowUp && setEditingFollowUp(null)}>
+            <div className="pipeline-edit-modal-card" onClick={e => e.stopPropagation()}>
+              <form onSubmit={handleSaveEditFollowUp}>
+                <div className="pipeline-edit-modal-header">
+                  <div className="pipeline-edit-modal-title-wrap">
+                    <div className="pipeline-edit-modal-icon">
+                      <Calendar size={18} />
+                    </div>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                        Edit Scheduled Follow-up
+                      </h4>
+                      <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+                        Modify touchpoint details before the scheduled time arrives.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="pipeline-modal-close-btn"
+                    onClick={() => !isSavingEditFollowUp && setEditingFollowUp(null)}
+                    title="Close"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="pipeline-edit-modal-body">
+                  {/* Channel selection chips */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                      Interaction Channel
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {['Call', 'Meeting', 'WhatsApp', 'Email', 'Demo', 'Visit'].map(chName => (
+                        <button
+                          key={chName}
+                          type="button"
+                          className={`pipeline-followup-channel-chip ${editFollowUpForm.channel === chName ? 'active' : ''}`}
+                          onClick={() => setEditFollowUpForm(prev => ({ ...prev, channel: chName }))}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            border: editFollowUpForm.channel === chName ? '1.5px solid #0284c7' : '1px solid #e2e8f0',
+                            background: editFollowUpForm.channel === chName ? '#eff6ff' : '#f8fafc',
+                            color: editFollowUpForm.channel === chName ? '#0284c7' : '#64748b',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          {getFollowUpChannelIcon(chName, 13)}
+                          <span>{chName}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Title / Purpose */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '5px' }}>
+                      Title / Agenda <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="pipeline-input-field"
+                      placeholder="e.g. Requirement discussion, Contract review"
+                      value={editFollowUpForm.title}
+                      onChange={e => setEditFollowUpForm(prev => ({ ...prev, title: e.target.value }))}
+                      required
+                      style={{ width: '100%', boxSizing: 'border-box', height: '36px', padding: '0 10px', fontSize: '13px', borderRadius: '7px', border: '1px solid #cbd5e1' }}
+                    />
+                  </div>
+
+                  {/* Date & Time Picker */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '5px' }}>
+                        Scheduled Date <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        type="date"
+                        className="pipeline-input-field"
+                        value={editFollowUpForm.followUpDate}
+                        min={new Date().toISOString().slice(0, 10)}
+                        onChange={e => setEditFollowUpForm(prev => ({ ...prev, followUpDate: e.target.value }))}
+                        required
+                        style={{ width: '100%', boxSizing: 'border-box', height: '36px', padding: '0 10px', fontSize: '13px', borderRadius: '7px', border: '1px solid #cbd5e1' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '5px' }}>
+                        Scheduled Time <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        type="time"
+                        className="pipeline-input-field"
+                        value={editFollowUpForm.followUpTime}
+                        onChange={e => setEditFollowUpForm(prev => ({ ...prev, followUpTime: e.target.value }))}
+                        required
+                        style={{ width: '100%', boxSizing: 'border-box', height: '36px', padding: '0 10px', fontSize: '13px', borderRadius: '7px', border: '1px solid #cbd5e1' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Past-time Warning Notice */}
+                  {(() => {
+                    const parsed = parseFollowUpDateTime(editFollowUpForm.followUpDate, editFollowUpForm.followUpTime);
+                    const isPast = parsed && parsed.getTime() <= Date.now();
+                    if (!isPast) return null;
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '7px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '12px' }}>
+                        <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                        <span>The selected date and time is in the past. Please choose an upcoming time slot.</span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Status & Next Follow-up Date */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '5px' }}>
+                        Status
+                      </label>
+                      <select
+                        className="pipeline-input-field"
+                        value={editFollowUpForm.status}
+                        onChange={e => setEditFollowUpForm(prev => ({ ...prev, status: e.target.value }))}
+                        style={{ width: '100%', boxSizing: 'border-box', height: '36px', padding: '0 10px', fontSize: '13px', borderRadius: '7px', border: '1px solid #cbd5e1', background: '#fff' }}
+                      >
+                        <option value="Scheduled">Scheduled</option>
+                        <option value="Follow-up Needed">Follow-up Needed</option>
+                        <option value="Rescheduled">Rescheduled</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Missed">Missed</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '5px' }}>
+                        Next Follow-up Date (Optional)
+                      </label>
+                      <input
+                        type="date"
+                        className="pipeline-input-field"
+                        value={editFollowUpForm.nextFollowUpDate}
+                        min={editFollowUpForm.followUpDate || new Date().toISOString().slice(0, 10)}
+                        onChange={e => setEditFollowUpForm(prev => ({ ...prev, nextFollowUpDate: e.target.value }))}
+                        style={{ width: '100%', boxSizing: 'border-box', height: '36px', padding: '0 10px', fontSize: '13px', borderRadius: '7px', border: '1px solid #cbd5e1' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Remarks / Discussion notes */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '5px' }}>
+                      Remarks & Outcomes <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <textarea
+                      rows={3}
+                      className="pipeline-input-field"
+                      placeholder="Enter follow-up remarks, client responses, or key discussion points..."
+                      value={editFollowUpForm.remarks}
+                      onChange={e => setEditFollowUpForm(prev => ({ ...prev, remarks: e.target.value }))}
+                      required
+                      style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', fontSize: '13px', borderRadius: '7px', border: '1px solid #cbd5e1', resize: 'vertical' }}
+                    />
+                  </div>
+                </div>
+
+                <div className="pipeline-edit-modal-footer">
+                  <button
+                    type="button"
+                    className="pipeline-modal-cancel-btn"
+                    onClick={() => !isSavingEditFollowUp && setEditingFollowUp(null)}
+                    disabled={isSavingEditFollowUp}
+                    style={{ padding: '7px 14px', borderRadius: '7px', border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="pipeline-btn-primary"
+                    disabled={isSavingEditFollowUp || (() => {
+                      const p = parseFollowUpDateTime(editFollowUpForm.followUpDate, editFollowUpForm.followUpTime);
+                      return p && p.getTime() <= Date.now();
+                    })()}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '7px 16px',
+                      borderRadius: '7px',
+                      background: '#0284c7',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontSize: '12.5px',
+                      fontWeight: 600,
+                      cursor: isSavingEditFollowUp ? 'not-allowed' : 'pointer',
+                      opacity: (() => {
+                        const p = parseFollowUpDateTime(editFollowUpForm.followUpDate, editFollowUpForm.followUpTime);
+                        return (p && p.getTime() <= Date.now()) || isSavingEditFollowUp ? 0.6 : 1;
+                      })()
+                    }}
+                  >
+                    <Check size={14} />
+                    <span>{isSavingEditFollowUp ? 'Saving Changes...' : 'Save Changes'}</span>
+                  </button>
+                </div>
+              </form>
             </div>
           </div>,
           document.body

@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Bell, Check, BellRing, Trash2, Megaphone, Briefcase, 
-  Target, Umbrella, Info, Circle, DollarSign, Users, Building, CheckSquare, UserCheck
+  Target, Umbrella, Info, Circle, DollarSign, Users, Building, CheckSquare, UserCheck, Calendar
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 
-const getIconForType = (type) => {
+const getIconForType = (type, title = '') => {
+  if (type === 'Follow-up' || type === 'Followup' || (title && (title.includes('Follow-up') || title.includes('Followup')))) {
+    return <Calendar size={16} color="#0284c7" />;
+  }
   switch(type) {
     case 'Announcement': return <Megaphone size={16} color="#3b82f6" />;
     case 'Project': return <Briefcase size={16} color="#8b5cf6" />;
@@ -33,7 +36,7 @@ function NotificationBell({ filterType, filterTypes }) {
     }
     if (!filterType) return allNotifications;
     if (filterType === 'CRM' || filterType === 'Pipeline') {
-      return allNotifications.filter(n => ['Deal', 'Payment', 'Contact', 'Company', 'Task', 'CRM', 'Client'].includes(n.type));
+      return allNotifications.filter(n => ['Deal', 'Payment', 'Contact', 'Company', 'Task', 'CRM', 'Client', 'Follow-up', 'Followup'].includes(n.type));
     }
     return allNotifications.filter(n => n.type === filterType);
   })();
@@ -138,7 +141,7 @@ function NotificationBell({ filterType, filterTypes }) {
           position: 'absolute',
           top: '100%',
           right: 0,
-          width: '360px',
+          width: 'min(385px, calc(100vw - 24px))',
           background: 'white',
           borderRadius: '12px',
           boxShadow: '0 10px 25px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05)',
@@ -246,7 +249,7 @@ function NotificationBell({ filterType, filterTypes }) {
                     background: notif.isRead ? '#f1f5f9' : '#eff6ff',
                     flexShrink: 0
                   }}>
-                    {getIconForType(notif.type)}
+                    {getIconForType(notif.type, notif.title)}
                   </div>
                   
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -260,14 +263,14 @@ function NotificationBell({ filterType, filterTypes }) {
                         textOverflow: 'ellipsis', 
                         paddingRight: '8px' 
                       }}>
-                        {notif.title}
+                        {notif.title ? notif.title.replace(/[📅⏰]/g, '').trim() : ''}
                       </span>
                       <span style={{ fontSize: '11px', color: notif.isRead ? '#94a3b8' : '#64748b', whiteSpace: 'nowrap', fontWeight: '500', marginTop: '2px' }}>
                         {new Date(notif.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
-                    <p style={{ margin: 0, fontSize: '13px', color: '#475569', lineHeight: '1.45', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {notif.message}
+                    <p style={{ margin: 0, fontSize: '13px', color: '#475569', lineHeight: '1.45', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {notif.message ? notif.message.replace(/[📅⏰]/g, '').replace(/\s*\|\s*Notes:\s*/i, ' — Notes: ').trim() : ''}
                     </p>
                   </div>
                 </div>

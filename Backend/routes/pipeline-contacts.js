@@ -8,6 +8,7 @@ const MetaLead = require('../models/MetaLead');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
+const { notifyFollowUpScheduled, parseFollowUpDateTime } = require('../services/followupNotificationService');
 
 // Cutoff timestamp: old pipeline data (before this cutoff) is strictly visible ONLY to Admin
 const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-17T00:00:00+05:30');
@@ -84,6 +85,28 @@ function isContactOwnedByUser(contact, user, hasFullAccess, isAdmin) {
   return false;
 }
 
+// Filter activities: Admin, Sales Head, and Sales Manager see all activities.
+// Sales Executives and other non-full-access users only see follow-ups they personally created.
+function filterActivitiesForUser(activities, user, hasFullAccess) {
+  if (hasFullAccess || !Array.isArray(activities)) return activities;
+  const userId = (user._id || user.id || '').toString();
+  const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+  const userEmail = (user.email || '').trim().toLowerCase();
+  const userOfficialEmail = (user.officialEmail || '').trim().toLowerCase();
+
+  return activities.filter(act => {
+    if (act.type !== 'followup') return true;
+    const creatorId = (act.createdBy?._id || act.createdBy || '').toString();
+    const author = (act.author || '').trim().toLowerCase();
+
+    if (userId && creatorId && creatorId === userId) return true;
+    if (userFullName && author === userFullName) return true;
+    if (userEmail && author === userEmail) return true;
+    if (userOfficialEmail && author === userOfficialEmail) return true;
+    return false;
+  });
+}
+
 // Get all pipeline contacts
 router.get('/', auth, async (req, res) => {
   try {
@@ -146,13 +169,32 @@ router.get('/', auth, async (req, res) => {
       .populate('createdBy', 'firstName lastName email')
       .sort({ createdAt: -1 });
 
-    res.json(contacts || []);
+    const sanitizedContacts = (!hasFullAccess && Array.isArray(contacts))
+      ? contacts.map(c => {
+          const cObj = c.toObject ? c.toObject() : { ...c };
+          if (cObj.activities) {
+            cObj.activities = filterActivitiesForUser(cObj.activities, user, hasFullAccess);
+          }
+          return cObj;
+        })
+      : contacts;
+
+    res.json(sanitizedContacts || []);
   } catch (error) {
     console.error('Get pipeline contacts error:', error);
     try {
       // Fallback without populate if population schema has any issue
       const unpopulated = await PipelineContact.find(query).sort({ createdAt: -1 });
-      return res.json(unpopulated || []);
+      const sanitizedContacts = (!hasFullAccess && Array.isArray(unpopulated))
+        ? unpopulated.map(c => {
+            const cObj = c.toObject ? c.toObject() : { ...c };
+            if (cObj.activities) {
+              cObj.activities = filterActivitiesForUser(cObj.activities, user, hasFullAccess);
+            }
+            return cObj;
+          })
+        : unpopulated;
+      return res.json(sanitizedContacts || []);
     } catch (e) {
       res.status(500).json({ message: 'Server error', error: error.message });
     }
@@ -183,6 +225,12 @@ router.get('/:id', auth, async (req, res) => {
     // Role data isolation check
     if (!isContactOwnedByUser(contact, user, hasFullAccess, isAdmin)) {
       return res.status(403).json({ message: 'Access denied. You can only view your own contacts.' });
+    }
+
+    if (!hasFullAccess && contact.activities) {
+      const contactObj = contact.toObject ? contact.toObject() : { ...contact };
+      contactObj.activities = filterActivitiesForUser(contactObj.activities, user, hasFullAccess);
+      return res.json(contactObj);
     }
 
     res.json(contact);
@@ -1013,13 +1061,22 @@ router.post('/:id/activities', auth, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. You can only add activities to your own contacts.' });
     }
 
-    const { type, title, content, author, time, date } = req.body;
+    const { type, title, content, remarks, channel, status, followUpDate, followUpTime, nextFollowUpDate, author, authorRole, time, date } = req.body;
     const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Artiflow';
     const newActivity = {
       type: type || 'note',
       title: title || '',
-      content: content || '',
+      content: content || remarks || '',
+      remarks: remarks || content || '',
+      channel: channel || 'Call',
+      status: status || 'Scheduled',
+      followUpDate: followUpDate || '',
+      followUpTime: followUpTime || '',
+      nextFollowUpDate: nextFollowUpDate || '',
       author: author || userFullName,
+      authorRole: authorRole || (user?.role?.name || user?.role || ''),
+      createdBy: user._id,
+      reminderSent: false,
       time: time || 'Just now',
       date: date || new Date().toISOString().slice(0, 10),
       createdAt: new Date()
@@ -1028,9 +1085,138 @@ router.post('/:id/activities', auth, async (req, res) => {
     contact.activities.unshift(newActivity);
     await contact.save();
 
+    if (newActivity.type === 'followup') {
+      notifyFollowUpScheduled(req.app.get('socketio'), {
+        entity: contact,
+        activity: newActivity,
+        creatorUser: user,
+        isContact: true
+      }).catch(err => console.error('notifyFollowUpScheduled contact error:', err));
+    }
+
     res.status(201).json(newActivity);
   } catch (error) {
     console.error('Add contact activity error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Update contact activity (e.g. status or remarks)
+router.patch('/:id/activities/:activityId', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const contact = await PipelineContact.findById(req.params.id);
+    if (!contact) {
+      return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    const actId = req.params.activityId;
+    const activity = contact.activities.find(a => (a._id && a._id.toString() === actId) || a.id === actId);
+    if (!activity) {
+      return res.status(404).json({ message: 'Activity not found' });
+    }
+
+    const { status, remarks, content, followUpDate, followUpTime, nextFollowUpDate, title, channel } = req.body;
+
+    const { hasFullAccess, isAdmin } = checkAccess(user);
+    const isCreator = (activity.createdBy && activity.createdBy.toString() === user._id.toString()) ||
+      (activity.author && activity.author.toLowerCase() === `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase());
+
+    // User can only edit if creator or admin/sales head
+    if (!isCreator && !isAdmin && !hasFullAccess) {
+      return res.status(403).json({ message: 'Access denied. You can only edit follow-ups you created.' });
+    }
+
+    // Time check: if scheduled time has already passed, editing schedule is not allowed
+    if (activity.type === 'followup' && !isAdmin && !hasFullAccess) {
+      const scheduledTime = parseFollowUpDateTime(activity.followUpDate, activity.followUpTime);
+      if (scheduledTime && scheduledTime.getTime() <= Date.now()) {
+        const onlyStatusChange = status !== undefined && remarks === undefined && followUpDate === undefined && followUpTime === undefined && title === undefined && channel === undefined;
+        if (!onlyStatusChange) {
+          return res.status(400).json({ message: 'Cannot edit this follow-up because its scheduled time has already passed.' });
+        }
+      }
+    }
+
+    let rescheduled = false;
+    if (title !== undefined) activity.title = title;
+    if (channel !== undefined) activity.channel = channel;
+    if (status !== undefined) activity.status = status;
+    if (remarks !== undefined) {
+      activity.remarks = remarks;
+      activity.content = remarks;
+    }
+    if (content !== undefined && remarks === undefined) activity.content = content;
+    if (followUpDate !== undefined && followUpDate !== activity.followUpDate) {
+      activity.followUpDate = followUpDate;
+      rescheduled = true;
+    }
+    if (followUpTime !== undefined && followUpTime !== activity.followUpTime) {
+      activity.followUpTime = followUpTime;
+      rescheduled = true;
+    }
+    if (nextFollowUpDate !== undefined) activity.nextFollowUpDate = nextFollowUpDate;
+
+    if (rescheduled || (status && status !== 'Completed' && status !== 'Missed')) {
+      activity.reminderSent = false;
+      activity.reminderSentAt = null;
+    }
+
+    await contact.save();
+
+    if (rescheduled && activity.type === 'followup') {
+      notifyFollowUpScheduled(req.app.get('socketio'), {
+        entity: contact,
+        activity,
+        creatorUser: user,
+        isContact: true
+      }).catch(err => console.error('notifyFollowUpScheduled contact reschedule error:', err));
+    }
+
+    res.json(activity);
+  } catch (error) {
+    console.error('Update contact activity error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Delete contact activity
+router.delete('/:id/activities/:activityId', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const contact = await PipelineContact.findById(req.params.id);
+    if (!contact) {
+      return res.status(404).json({ message: 'Contact not found' });
+    }
+
+    const actId = req.params.activityId;
+    const activity = (contact.activities || []).find(a => (a._id && a._id.toString() === actId) || a.id === actId);
+    if (!activity) {
+      return res.status(404).json({ message: 'Activity not found' });
+    }
+
+    const { hasFullAccess, isAdmin } = checkAccess(user);
+    const isCreator = (activity.createdBy && activity.createdBy.toString() === user._id.toString()) ||
+      (activity.author && activity.author.toLowerCase() === `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase());
+
+    // User can only delete if creator or admin/sales head
+    if (!isCreator && !isAdmin && !hasFullAccess) {
+      return res.status(403).json({ message: 'Access denied. You can only delete follow-ups you created.' });
+    }
+
+    contact.activities = (contact.activities || []).filter(a => !(a._id && a._id.toString() === actId) && a.id !== actId);
+    await contact.save();
+    res.json({ message: 'Activity deleted successfully' });
+  } catch (error) {
+    console.error('Delete contact activity error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

@@ -3,6 +3,8 @@ const router = express.Router();
 const PipelineConfig = require('../models/PipelineConfig');
 const auth = require('../middleware/auth');
 
+const User = require('../models/User');
+
 // GET pipeline configuration
 router.get('/', auth, async (req, res) => {
   try {
@@ -18,9 +20,47 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// POST / PUT update pipeline configuration
+// POST / PUT update pipeline configuration (Restricted to Admin, Sales Head, and Sales Manager)
 router.post('/save', auth, async (req, res) => {
   try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+    const roleNormalized = roleName.replace(/\s+/g, ' ');
+    const designation = (user?.designation || '').toString().toLowerCase().trim();
+    const department = (user?.department || '').toString().toLowerCase().trim();
+    const email = (user?.email || '').toString().toLowerCase().trim();
+
+    const isSalesHead =
+      roleNormalized.includes('sales head') ||
+      roleNormalized === 'saleshead' ||
+      roleNormalized === 'head of sales';
+
+    const isSalesManager =
+      roleNormalized.includes('sales manager') ||
+      roleNormalized.includes('salesmanager') ||
+      roleNormalized === 'manager of sales';
+
+    const isAdmin =
+      roleNormalized === 'admin' ||
+      roleNormalized.includes('admin') ||
+      roleNormalized.includes('superadmin') ||
+      roleNormalized.includes('director') ||
+      designation.includes('admin') ||
+      designation.includes('director') ||
+      department === 'administration' ||
+      email.startsWith('admin@') ||
+      user?.role?.name === 'Admin' ||
+      user?.role?.name === 'Super Admin' ||
+      user?.role?.name === 'Director';
+
+    const hasFullAccess = isAdmin || isSalesHead || isSalesManager;
+    if (!hasFullAccess) {
+      return res.status(403).json({ message: 'Access denied. Only Admin, Sales Head, and Sales Manager can edit or configure pipeline stages.' });
+    }
     const {
       pipelines,
       stages,

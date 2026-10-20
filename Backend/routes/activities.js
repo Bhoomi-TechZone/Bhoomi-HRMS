@@ -58,7 +58,7 @@ router.get('/', auth, async (req, res) => {
                     title: `Leave Application`,
                     description: `${l.employee?.firstName} applied for ${l.leaveType} (${l.status})`,
                     timestamp: l.createdAt,
-                    icon: '📅'
+                    icon: 'calendar'
                 });
             });
 
@@ -138,7 +138,7 @@ router.get('/', auth, async (req, res) => {
                     title: `Leave Request`,
                     description: `Applied for ${l.leaveType} - Status: ${l.status}`,
                     timestamp: l.createdAt,
-                    icon: '📅'
+                    icon: 'calendar'
                 });
             });
 
