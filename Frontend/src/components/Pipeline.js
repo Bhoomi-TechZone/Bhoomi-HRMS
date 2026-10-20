@@ -3030,6 +3030,15 @@ function Pipeline() {
   const [customContactDateEnd, setCustomContactDateEnd] = useState('');
   const [contactSortBy, setContactSortBy] = useState('newest'); // 'newest', 'oldest', 'name_asc', 'name_desc', 'company', 'stage', 'status'
   const [contactViewMode, setContactViewMode] = useState('kanban'); // 'kanban' | 'table'
+  const [selectedKanbanContactIds, setSelectedKanbanContactIds] = useState([]);
+  const [isBulkMoveContactStageDropdownOpen, setIsBulkMoveContactStageDropdownOpen] = useState(false);
+  const contactClickTimerRef = useRef(null);
+
+  // Clear contacts multi-selection when tab or view mode changes
+  useEffect(() => {
+    setSelectedKanbanContactIds([]);
+    setIsBulkMoveContactStageDropdownOpen(false);
+  }, [activeTab, contactViewMode]);
 
   const [isContactSortDropdownOpen, setIsContactSortDropdownOpen] = useState(false);
   const [isContactOwnerDropdownOpen, setIsContactOwnerDropdownOpen] = useState(false);
@@ -3728,6 +3737,18 @@ function Pipeline() {
   const [companySortBy, setCompanySortBy] = useState('newest'); // 'newest', 'oldest', 'name_asc', 'name_desc', 'industry', 'country'
   const [isCompanySortDropdownOpen, setIsCompanySortDropdownOpen] = useState(false);
   const [companyViewMode, setCompanyViewMode] = useState('grid'); // 'grid' | 'list'
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState([]);
+  const [isBulkCompanyIndustryDropdownOpen, setIsBulkCompanyIndustryDropdownOpen] = useState(false);
+  const [isBulkCompanyOwnerDropdownOpen, setIsBulkCompanyOwnerDropdownOpen] = useState(false);
+  const companyClickTimerRef = useRef(null);
+
+  // Clear companies multi-selection when tab or view mode changes
+  useEffect(() => {
+    setSelectedCompanyIds([]);
+    setIsBulkCompanyIndustryDropdownOpen(false);
+    setIsBulkCompanyOwnerDropdownOpen(false);
+  }, [activeTab, companyViewMode]);
+
   const [showCreateCompanyModal, setShowCreateCompanyModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState(null);
   const [viewingCompany, setViewingCompany] = useState(null);
@@ -8522,21 +8543,217 @@ function Pipeline() {
   const handleContactDrop = async (e, targetStageName) => {
     e.preventDefault();
     if (!canUpdate) return;
-    const contactId = e.dataTransfer.getData('text/plain') || draggedContactId;
+    const contactId = e.dataTransfer?.getData('text/plain') || draggedContactId;
     if (contactId) {
-      try {
-        if (contactId && !contactId.toString().startsWith('contact-')) {
-          await api.put(`/pipeline-contacts/${contactId}`, { leadStage: targetStageName });
-        }
-      } catch (err) {
-        console.warn('Move contact stage API sync:', err.message);
-      }
+      const targetContactIds = (selectedKanbanContactIds.includes(contactId))
+        ? selectedKanbanContactIds
+        : [contactId];
+
+      const updateData = { leadStage: targetStageName };
       setContacts(prev =>
-        prev.map(c => (c._id === contactId ? { ...c, leadStage: targetStageName } : c))
+        prev.map(c => targetContactIds.includes(c._id) ? { ...c, ...updateData } : c)
       );
+
+      const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+      for (const id of targetContactIds) {
+        try {
+          if (id && !id.toString().startsWith('contact-')) {
+            await api.put(`/pipeline-contacts/${id}`, updateData);
+          }
+        } catch (err) {
+          console.warn('Move contact stage API sync:', err.message);
+        }
+        logActivity(id, {
+          type: 'contact',
+          title: 'Stage Moved',
+          content: `Moved contact to "${targetStageName}".`,
+          author: authorName
+        });
+      }
+
+      if (selectedKanbanContactIds.includes(contactId)) {
+        setSelectedKanbanContactIds([]);
+      }
     }
     setDraggedContactId(null);
     setDragOverContactColumnId(null);
+  };
+
+  // Contacts Kanban Double Click on Card: multi-select all contacts in that specific stage column
+  const handleContactCardDoubleClick = (contact, stageContacts, stageName, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    // Cancel any scheduled single-click contact detail opening
+    if (contactClickTimerRef.current) {
+      clearTimeout(contactClickTimerRef.current);
+      contactClickTimerRef.current = null;
+    }
+
+    const stageContactIds = (stageContacts || []).map(c => c._id);
+    if (stageContactIds.length === 0) return;
+
+    setSelectedKanbanContactIds(prev => {
+      const allStageSelected = stageContactIds.every(id => prev.includes(id));
+      if (allStageSelected) {
+        // If all cards in this stage were already selected, toggle off / deselect them
+        return prev.filter(id => !stageContactIds.includes(id));
+      } else {
+        // Multi-select all cards of this stage (retaining any already selected cards in other stages)
+        return Array.from(new Set([...prev, ...stageContactIds]));
+      }
+    });
+  };
+
+  // Toggle individual contact checkbox selection
+  const handleToggleContactSelection = (contactId, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (contactClickTimerRef.current) {
+      clearTimeout(contactClickTimerRef.current);
+      contactClickTimerRef.current = null;
+    }
+    setSelectedKanbanContactIds(prev =>
+      prev.includes(contactId) ? prev.filter(id => id !== contactId) : [...prev, contactId]
+    );
+  };
+
+  // Toggle all contacts of a stage from column header
+  const handleToggleContactStageSelection = (stageContacts, e) => {
+    if (e) e.stopPropagation();
+    const stageContactIds = (stageContacts || []).map(c => c._id);
+    if (stageContactIds.length === 0) return;
+    setSelectedKanbanContactIds(prev => {
+      const allStageSelected = stageContactIds.every(id => prev.includes(id));
+      if (allStageSelected) {
+        return prev.filter(id => !stageContactIds.includes(id));
+      } else {
+        return Array.from(new Set([...prev, ...stageContactIds]));
+      }
+    });
+  };
+
+  // Toggle all filtered contacts (for list view)
+  const handleToggleAllFilteredContacts = (e) => {
+    if (e) e.stopPropagation();
+    const filteredIds = filteredContacts.map(c => c._id);
+    if (filteredIds.length === 0) return;
+    setSelectedKanbanContactIds(prev => {
+      const allSelected = filteredIds.every(id => prev.includes(id));
+      if (allSelected) {
+        return prev.filter(id => !filteredIds.includes(id));
+      } else {
+        return Array.from(new Set([...prev, ...filteredIds]));
+      }
+    });
+  };
+
+  // Debounced single click on contact card to avoid conflict with double-click
+  const handleContactCardClick = (contactId, e) => {
+    if (e) e.stopPropagation();
+    if (contactClickTimerRef.current) {
+      clearTimeout(contactClickTimerRef.current);
+      contactClickTimerRef.current = null;
+    }
+    contactClickTimerRef.current = setTimeout(() => {
+      setDetailedContactId(contactId);
+      contactClickTimerRef.current = null;
+    }, 230);
+  };
+
+  // Bulk move all selected contacts to a target stage
+  const handleBulkMoveContactStage = async (targetStage) => {
+    if (!targetStage || selectedKanbanContactIds.length === 0) return;
+    const contactIdsToMove = [...selectedKanbanContactIds];
+    const updateData = { leadStage: targetStage };
+    const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+
+    setContacts(prev =>
+      prev.map(c => contactIdsToMove.includes(c._id) ? { ...c, ...updateData } : c)
+    );
+
+    for (const id of contactIdsToMove) {
+      try {
+        if (id && !id.toString().startsWith('contact-')) {
+          await api.put(`/pipeline-contacts/${id}`, updateData);
+        }
+      } catch (err) {
+        console.warn(`Bulk move contact ${id} API error:`, err.message);
+      }
+      logActivity(id, {
+        type: 'contact',
+        title: 'Stage Moved',
+        content: `Moved contact to stage "${targetStage}" via bulk action.`,
+        author: authorName
+      });
+    }
+
+    setIsBulkMoveContactStageDropdownOpen(false);
+    setSelectedKanbanContactIds([]);
+  };
+
+  // Bulk delete all selected contacts
+  const handleBulkDeleteContacts = async () => {
+    if (!canDelete || selectedKanbanContactIds.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${selectedKanbanContactIds.length} selected contact(s)?`)) {
+      const contactIdsToDelete = [...selectedKanbanContactIds];
+      const contactsToDelete = contacts.filter(c => contactIdsToDelete.includes(c._id));
+
+      let deletedContacts = [];
+      try {
+        deletedContacts = JSON.parse(localStorage.getItem('crm_deleted_contacts') || '[]');
+      } catch (err) { }
+      contactIdsToDelete.forEach(id => deletedContacts.push(id.toString()));
+      contactsToDelete.forEach(c => {
+        if (c.email) deletedContacts.push(c.email.toLowerCase());
+        if (c.firstName) deletedContacts.push(`${c.firstName} ${c.lastName || ''}`.trim().toLowerCase());
+      });
+      try {
+        localStorage.setItem('crm_deleted_contacts', JSON.stringify(Array.from(new Set(deletedContacts))));
+      } catch (err) { }
+
+      setContacts(prev => prev.filter(c => !contactIdsToDelete.includes(c._id)));
+
+      for (const id of contactIdsToDelete) {
+        try {
+          if (id && !id.toString().startsWith('contact-')) {
+            await api.delete(`/pipeline-contacts/${id}`);
+          }
+        } catch (err) {
+          console.warn(`Bulk delete contact ${id} API error:`, err.message);
+        }
+      }
+      setSelectedKanbanContactIds([]);
+    }
+  };
+
+  // Bulk export selected contacts to CSV
+  const handleBulkExportContacts = () => {
+    if (selectedKanbanContactIds.length === 0) return;
+    const contactsToExport = contacts.filter(c => selectedKanbanContactIds.includes(c._id));
+    if (contactsToExport.length === 0) return;
+
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      ['First Name,Last Name,Email,Phone,Company,Lead Stage,Lead Status,Contact Source,Type,Owner,Created Date']
+        .concat(
+          contactsToExport.map(
+            c =>
+              `"${c.firstName || ''}","${c.lastName || ''}","${c.email || ''}","${c.phone || ''}","${c.company || ''}","${c.leadStage || ''}","${c.leadStatus || ''}","${c.contactSource || ''}","${c.contactType || ''}","${c.owner || ''}","${c.createdDate || ''}"`
+          )
+        )
+        .join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `crm_contacts_selected_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleChangeDealStage = async (newStage) => {
@@ -8804,6 +9021,161 @@ function Pipeline() {
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
     link.setAttribute('download', `crm_companies_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Companies Double Click on Card: multi-select all companies (or double-click again to deselect)
+  const handleCompanyDoubleClick = (company, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (companyClickTimerRef.current) {
+      clearTimeout(companyClickTimerRef.current);
+      companyClickTimerRef.current = null;
+    }
+
+    // If company belongs to an industry, select all companies in that industry;
+    // if all in that industry are already selected, toggle all filtered companies
+    const sameIndustryIds = (company && company.industry)
+      ? filteredCompanies.filter(c => (c.industry || '').toLowerCase() === (company.industry || '').toLowerCase()).map(c => c._id)
+      : filteredCompanies.map(c => c._id);
+
+    const targetIds = sameIndustryIds.length > 0 ? sameIndustryIds : filteredCompanies.map(c => c._id);
+    if (targetIds.length === 0) return;
+
+    setSelectedCompanyIds(prev => {
+      const allSelected = targetIds.every(id => prev.includes(id));
+      if (allSelected) {
+        return prev.filter(id => !targetIds.includes(id));
+      } else {
+        return Array.from(new Set([...prev, ...targetIds]));
+      }
+    });
+  };
+
+  // Toggle individual company checkbox selection
+  const handleToggleCompanySelection = (companyId, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (companyClickTimerRef.current) {
+      clearTimeout(companyClickTimerRef.current);
+      companyClickTimerRef.current = null;
+    }
+    setSelectedCompanyIds(prev =>
+      prev.includes(companyId) ? prev.filter(id => id !== companyId) : [...prev, companyId]
+    );
+  };
+
+  // Toggle all filtered companies (for table header or toolbar)
+  const handleToggleAllFilteredCompanies = (e) => {
+    if (e) e.stopPropagation();
+    const filteredIds = filteredCompanies.map(c => c._id);
+    if (filteredIds.length === 0) return;
+    setSelectedCompanyIds(prev => {
+      const allSelected = filteredIds.every(id => prev.includes(id));
+      if (allSelected) {
+        return prev.filter(id => !filteredIds.includes(id));
+      } else {
+        return Array.from(new Set([...prev, ...filteredIds]));
+      }
+    });
+  };
+
+  // Debounced single click on company card/row to open details without double-click conflict
+  const handleCompanyClick = (company, e) => {
+    if (e) e.stopPropagation();
+    if (companyClickTimerRef.current) {
+      clearTimeout(companyClickTimerRef.current);
+      companyClickTimerRef.current = null;
+    }
+    companyClickTimerRef.current = setTimeout(() => {
+      setViewingCompany(company);
+      companyClickTimerRef.current = null;
+    }, 230);
+  };
+
+  // Bulk delete all selected companies
+  const handleBulkDeleteCompanies = async () => {
+    if (!canDelete || selectedCompanyIds.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${selectedCompanyIds.length} selected company(ies)?`)) {
+      const companyIdsToDelete = [...selectedCompanyIds];
+      setCompanies(prev => prev.filter(c => !companyIdsToDelete.includes(c._id)));
+      for (const id of companyIdsToDelete) {
+        try {
+          if (id && !id.toString().startsWith('comp-')) {
+            await api.delete(`/pipeline-companies/${id}`);
+          }
+        } catch (err) {
+          console.warn(`Bulk delete company ${id} API error:`, err.message);
+        }
+      }
+      setSelectedCompanyIds([]);
+    }
+  };
+
+  // Bulk update company industry
+  const handleBulkUpdateCompanyIndustry = async (newIndustry) => {
+    if (!newIndustry || selectedCompanyIds.length === 0) return;
+    const idsToUpdate = [...selectedCompanyIds];
+    setCompanies(prev =>
+      prev.map(c => idsToUpdate.includes(c._id) ? { ...c, industry: newIndustry } : c)
+    );
+    for (const id of idsToUpdate) {
+      try {
+        if (id && !id.toString().startsWith('comp-')) {
+          await api.put(`/pipeline-companies/${id}`, { industry: newIndustry });
+        }
+      } catch (err) {
+        console.warn(`Bulk update company industry ${id} API error:`, err.message);
+      }
+    }
+    setIsBulkCompanyIndustryDropdownOpen(false);
+    setSelectedCompanyIds([]);
+  };
+
+  // Bulk update company owner
+  const handleBulkUpdateCompanyOwner = async (newOwner) => {
+    if (!newOwner || selectedCompanyIds.length === 0) return;
+    const idsToUpdate = [...selectedCompanyIds];
+    setCompanies(prev =>
+      prev.map(c => idsToUpdate.includes(c._id) ? { ...c, owner: newOwner } : c)
+    );
+    for (const id of idsToUpdate) {
+      try {
+        if (id && !id.toString().startsWith('comp-')) {
+          await api.put(`/pipeline-companies/${id}`, { owner: newOwner });
+        }
+      } catch (err) {
+        console.warn(`Bulk update company owner ${id} API error:`, err.message);
+      }
+    }
+    setIsBulkCompanyOwnerDropdownOpen(false);
+    setSelectedCompanyIds([]);
+  };
+
+  // Bulk export selected companies
+  const handleBulkExportCompanies = () => {
+    if (selectedCompanyIds.length === 0) return;
+    const companiesToExport = filteredCompanies.filter(c => selectedCompanyIds.includes(c._id));
+    if (companiesToExport.length === 0) return;
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      ['Company Name,Domain,Owner,Industry,Country,State,City,Postal Code,Created Date']
+        .concat(
+          companiesToExport.map(
+            c => `"${c.name}","${c.domain || ''}","${c.owner || ''}","${c.industry || ''}","${c.country || ''}","${c.state || ''}","${c.city || ''}","${c.postalCode || ''}","${c.createdDate || ''}"`
+          )
+        )
+        .join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `crm_companies_selected_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -11596,7 +11968,7 @@ function Pipeline() {
                                     return stageSelectedCount > 0 ? (
                                       <span className="pipeline-stage-selected-pill" title={`${stageSelectedCount} of ${count} deals selected`}>
                                         <Check size={10} strokeWidth={3} />
-                                        <span>{stageSelectedCount} sel</span>
+                                        <span>{stageSelectedCount}</span>
                                       </span>
                                     ) : null;
                                   })()}
@@ -14143,7 +14515,15 @@ function Pipeline() {
             <div className="pipeline-tab-page-view">
               {/* Top Header */}
               <div className="pipeline-top-header">
-                <h1 className="pipeline-deals-count-title">Contacts</h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h1 className="pipeline-deals-count-title">Contacts</h1>
+                  {selectedKanbanContactIds.length > 0 && (
+                    <span className="pipeline-stage-selected-pill" title={`${selectedKanbanContactIds.length} contact(s) selected`}>
+                      <Check size={10} strokeWidth={3} />
+                      <span>{selectedKanbanContactIds.length}</span>
+                    </span>
+                  )}
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   {/* View Switcher: Table List or Kanban Board */}
                   <div className="pipeline-view-switcher">
@@ -14727,9 +15107,35 @@ function Pipeline() {
                                     <span className={`pipeline-stage-badge ${stage.badgeClass || 'new'}`}>
                                       {stageContacts.length}
                                     </span>
+                                    {(() => {
+                                      const stageSelectedCount = stageContacts.filter(c => selectedKanbanContactIds.includes(c._id)).length;
+                                      return stageSelectedCount > 0 ? (
+                                        <span className="pipeline-stage-selected-pill" title={`${stageSelectedCount} of ${stageContacts.length} contacts selected`}>
+                                          <Check size={10} strokeWidth={3} />
+                                          <span>{stageSelectedCount}</span>
+                                        </span>
+                                      ) : null;
+                                    })()}
                                   </div>
 
                                   <div className="pipeline-col-header-actions" style={{ position: 'relative' }}>
+                                    {(() => {
+                                      const stageSelectedCount = stageContacts.filter(c => selectedKanbanContactIds.includes(c._id)).length;
+                                      const isAllStageSelected = stageContacts.length > 0 && stageSelectedCount === stageContacts.length;
+                                      if (stageContacts.length > 0 && (selectedKanbanContactIds.length > 0 || stageSelectedCount > 0)) {
+                                        return (
+                                          <button
+                                            type="button"
+                                            className={`pipeline-stage-select-all-btn ${isAllStageSelected ? 'all-selected' : ''}`}
+                                            onClick={(e) => handleToggleContactStageSelection(stageContacts, e)}
+                                            title={isAllStageSelected ? "Deselect all contacts in this stage" : "Select all contacts in this stage"}
+                                          >
+                                            {isAllStageSelected ? 'Deselect' : 'Select all'}
+                                          </button>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
                                     <button
                                       type="button"
                                       className="pipeline-col-action-btn more"
@@ -14814,17 +15220,28 @@ function Pipeline() {
                                   const displayName = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || 'Unnamed Contact';
                                   const displayLocation = contact.location || ((contact.company && contact.company !== 'Direct Client') ? contact.company : '');
 
+                                  const isSelected = selectedKanbanContactIds.includes(contact._id);
+
                                   return (
                                     <div
                                       key={contact._id}
-                                      className={`pipeline-card ${activeContactMenuId === contact._id || activeContactStatusDropdownId === contact._id ? 'menu-active' : ''} ${hoveredActivityContactId === contact._id ? 'activity-hovered' : ''} ${draggedContactId === contact._id ? 'dragging' : ''}`}
+                                      className={`pipeline-card ${isSelected ? 'selected' : ''} ${activeContactMenuId === contact._id || activeContactStatusDropdownId === contact._id ? 'menu-active' : ''} ${hoveredActivityContactId === contact._id ? 'activity-hovered' : ''} ${draggedContactId === contact._id ? 'dragging' : ''}`}
                                       draggable={canUpdate}
                                       onDragStart={e => handleContactDragStart(e, contact._id)}
                                       onDragEnd={handleContactDragEnd}
+                                      onDoubleClick={(e) => handleContactCardDoubleClick(contact, stageContacts, stage.name, e)}
+                                      title="Double-click to select all contacts in this stage"
                                     >
                                       {/* 1. Card Top */}
                                       <div className="pipeline-card-top">
-                                        <div className="pipeline-card-person" style={{ cursor: 'pointer', alignItems: 'flex-start', minWidth: 0, overflow: 'hidden', flex: 1 }} onClick={() => setDetailedContactId(contact._id)}>
+                                        <div
+                                          className={`pipeline-card-select-checkbox ${isSelected ? 'selected' : ''} ${selectedKanbanContactIds.length > 0 ? 'visible' : ''}`}
+                                          onClick={(e) => handleToggleContactSelection(contact._id, e)}
+                                          title={isSelected ? "Deselect contact (Double-click card to select all in stage)" : "Select contact (Double-click card to select all in stage)"}
+                                        >
+                                          {isSelected && <Check size={11} strokeWidth={3.5} />}
+                                        </div>
+                                        <div className="pipeline-card-person" style={{ cursor: 'pointer', alignItems: 'flex-start', minWidth: 0, overflow: 'hidden', flex: 1 }} onClick={(e) => handleContactCardClick(contact._id, e)}>
                                           {contact.avatar ? (
                                             <img
                                               src={contact.avatar}
