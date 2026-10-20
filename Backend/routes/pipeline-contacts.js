@@ -51,7 +51,7 @@ function checkAccess(user) {
   const hasRead = hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals' || p.module === 'leads') && p.actions.includes('read'));
   const hasCreate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals' || p.module === 'leads') && p.actions.includes('create'));
   const hasUpdate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals' || p.module === 'leads') && p.actions.includes('update'));
-  const hasDelete = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals' || p.module === 'leads') && p.actions.includes('delete'));
+  const hasDelete = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'contacts' || p.module === 'deals' || p.module === 'leads') && p.actions.includes('delete'));
 
   return { roleName, isSalesHead, isSalesManager, isAdmin, hasFullAccess, hasRead, hasCreate, hasUpdate, hasDelete };
 }
@@ -888,6 +888,53 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ message: 'A contact with this email already exists. Duplicate email is not allowed.' });
     }
     console.error('Create pipeline contact error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Bulk update contacts stage
+router.post('/bulk-stage', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) return res.status(401).json({ message: 'User not found' });
+    const { hasUpdate } = checkAccess(user);
+    if (!hasUpdate) return res.status(403).json({ message: 'Access denied. Update permission required.' });
+
+    const { contactIds, targetStage } = req.body;
+    if (!contactIds || !Array.isArray(contactIds) || !targetStage) {
+      return res.status(400).json({ message: 'contactIds and targetStage are required' });
+    }
+
+    const validIds = contactIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+    await PipelineContact.updateMany(
+      { _id: { $in: validIds } },
+      { $set: { leadStage: targetStage } }
+    );
+    res.json({ success: true, count: validIds.length });
+  } catch (error) {
+    console.error('Bulk move contact stage error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Bulk delete contacts
+router.post('/bulk-delete', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) return res.status(401).json({ message: 'User not found' });
+    const { hasDelete } = checkAccess(user);
+    if (!hasDelete) return res.status(403).json({ message: 'Access denied. Delete permission required.' });
+
+    const { contactIds } = req.body;
+    if (!contactIds || !Array.isArray(contactIds)) {
+      return res.status(400).json({ message: 'contactIds array is required' });
+    }
+
+    const validIds = contactIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+    await PipelineContact.deleteMany({ _id: { $in: validIds } });
+    res.json({ success: true, count: validIds.length });
+  } catch (error) {
+    console.error('Bulk delete contacts error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

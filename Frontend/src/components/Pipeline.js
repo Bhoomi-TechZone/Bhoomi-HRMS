@@ -2476,16 +2476,16 @@ function Pipeline() {
   }, [hasFullAccess, hasPermission]);
 
   const canCreate = useMemo(() => {
-    return isAdmin || hasPermission('pipeline', 'create') || hasPermission('deals', 'create') || hasPermission('contacts', 'create') || hasPermission('companies', 'create') || hasPermission('tasks', 'create');
-  }, [isAdmin, hasPermission]);
+    return isAdmin || hasFullAccess || hasPermission('pipeline', 'create') || hasPermission('deals', 'create') || hasPermission('contacts', 'create') || hasPermission('companies', 'create') || hasPermission('tasks', 'create');
+  }, [isAdmin, hasFullAccess, hasPermission]);
 
   const canUpdate = useMemo(() => {
-    return isAdmin || hasPermission('pipeline', 'update') || hasPermission('deals', 'update') || hasPermission('contacts', 'update') || hasPermission('companies', 'update') || hasPermission('tasks', 'update');
-  }, [isAdmin, hasPermission]);
+    return isAdmin || hasFullAccess || hasPermission('pipeline', 'update') || hasPermission('deals', 'update') || hasPermission('contacts', 'update') || hasPermission('companies', 'update') || hasPermission('tasks', 'update');
+  }, [isAdmin, hasFullAccess, hasPermission]);
 
   const canDelete = useMemo(() => {
-    return isAdmin || hasPermission('pipeline', 'delete') || hasPermission('deals', 'delete') || hasPermission('contacts', 'delete') || hasPermission('companies', 'delete') || hasPermission('tasks', 'delete');
-  }, [isAdmin, hasPermission]);
+    return isAdmin || hasFullAccess || hasPermission('pipeline', 'delete') || hasPermission('deals', 'delete') || hasPermission('contacts', 'delete') || hasPermission('companies', 'delete') || hasPermission('tasks', 'delete');
+  }, [isAdmin, hasFullAccess, hasPermission]);
 
   // Admin Data View Mode ('new' | 'old' | 'all') - defaults to 'new' (hiding old historical pipeline data)
   const [adminDataViewMode, setAdminDataViewMode] = useState(() => {
@@ -2854,6 +2854,10 @@ function Pipeline() {
   const [isCompaniesToolbarMenuOpen, setIsCompaniesToolbarMenuOpen] = useState(false);
   const [isTasksToolbarMenuOpen, setIsTasksToolbarMenuOpen] = useState(false);
   const [activeColMenuId, setActiveColMenuId] = useState(null);
+  const [colMoveSubmenuStageId, setColMoveSubmenuStageId] = useState(null);
+  const [colMoveDealSubmenuStageId, setColMoveDealSubmenuStageId] = useState(null);
+  const [isTopBulkMoveDropdownOpen, setIsTopBulkMoveDropdownOpen] = useState(false);
+  const [isTopDealBulkMoveDropdownOpen, setIsTopDealBulkMoveDropdownOpen] = useState(false);
   const [isDealDetailsMenuOpen, setIsDealDetailsMenuOpen] = useState(false);
   const [isContactDetailsMenuOpen, setIsContactDetailsMenuOpen] = useState(false);
   const [isPipelineDropdownOpen, setIsPipelineDropdownOpen] = useState(false);
@@ -7069,6 +7073,11 @@ function Pipeline() {
       setIsContactAddedByPopoverOpen(false);
       setIsDealAddedByPopoverOpen(false);
       setIsBulkMoveDropdownOpen(false);
+      setIsBulkMoveContactStageDropdownOpen(false);
+      setIsTopBulkMoveDropdownOpen(false);
+      setIsTopDealBulkMoveDropdownOpen(false);
+      setColMoveSubmenuStageId(null);
+      setColMoveDealSubmenuStageId(null);
     };
     const handleClickOutsideCurrency = (e) => {
       if (currencyRef.current && !currencyRef.current.contains(e.target)) {
@@ -7657,15 +7666,18 @@ function Pipeline() {
   };
 
   // Bulk move all selected deals to a target stage
-  const handleBulkMoveStage = async (targetStage) => {
-    if (!targetStage || selectedKanbanDealIds.length === 0) return;
-    const dealIdsToMove = [...selectedKanbanDealIds];
+  const handleBulkMoveStage = async (targetStage, customIds = null) => {
+    const targetIds = Array.isArray(customIds) && customIds.length > 0 ? customIds : selectedKanbanDealIds;
+    if (!targetStage || targetIds.length === 0) return;
+    const dealIdsToMove = [...targetIds];
     const updateData = { pipeline: targetStage, stage: targetStage };
     const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
 
     setDeals(prev =>
       prev.map(d => dealIdsToMove.includes(d._id) ? { ...d, ...updateData } : d)
     );
+    setIsBulkMoveDropdownOpen(false);
+    setSelectedKanbanDealIds([]);
 
     for (const id of dealIdsToMove) {
       try {
@@ -7682,17 +7694,16 @@ function Pipeline() {
         author: authorName
       });
     }
-
-    setIsBulkMoveDropdownOpen(false);
-    setSelectedKanbanDealIds([]);
   };
 
   // Bulk delete all selected deals
-  const handleBulkDeleteDeals = async () => {
-    if (!canDelete || selectedKanbanDealIds.length === 0) return;
-    if (window.confirm(`Are you sure you want to delete ${selectedKanbanDealIds.length} selected deal(s)?`)) {
-      const dealIdsToDelete = [...selectedKanbanDealIds];
+  const handleBulkDeleteDeals = async (customIds = null) => {
+    const targetIds = Array.isArray(customIds) && customIds.length > 0 ? customIds : selectedKanbanDealIds;
+    if (!canDelete || targetIds.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${targetIds.length} selected deal(s)?`)) {
+      const dealIdsToDelete = [...targetIds];
       setDeals(prev => prev.filter(d => !dealIdsToDelete.includes(d._id)));
+      setSelectedKanbanDealIds([]);
       for (const id of dealIdsToDelete) {
         try {
           if (id && !id.toString().startsWith('deal-')) {
@@ -7702,7 +7713,6 @@ function Pipeline() {
           console.warn(`Bulk delete deal ${id} API error:`, err.message);
         }
       }
-      setSelectedKanbanDealIds([]);
     }
   };
 
@@ -8555,21 +8565,29 @@ function Pipeline() {
       );
 
       const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
-      for (const id of targetContactIds) {
-        try {
+
+      try {
+        await api.post('/pipeline-contacts/bulk-stage', {
+          contactIds: targetContactIds,
+          targetStage: targetStageName
+        });
+      } catch (err) {
+        console.warn('Bulk drop move API error, falling back to individual calls:', err.message);
+        for (const id of targetContactIds) {
           if (id && !id.toString().startsWith('contact-')) {
-            await api.put(`/pipeline-contacts/${id}`, updateData);
+            api.put(`/pipeline-contacts/${id}`, updateData).catch(() => {});
           }
-        } catch (err) {
-          console.warn('Move contact stage API sync:', err.message);
         }
+      }
+
+      targetContactIds.slice(0, 50).forEach(id => {
         logActivity(id, {
           type: 'contact',
           title: 'Stage Moved',
           content: `Moved contact to "${targetStageName}".`,
           author: authorName
         });
-      }
+      });
 
       if (selectedKanbanContactIds.includes(contactId)) {
         setSelectedKanbanContactIds([]);
@@ -8665,41 +8683,50 @@ function Pipeline() {
   };
 
   // Bulk move all selected contacts to a target stage
-  const handleBulkMoveContactStage = async (targetStage) => {
-    if (!targetStage || selectedKanbanContactIds.length === 0) return;
-    const contactIdsToMove = [...selectedKanbanContactIds];
+  const handleBulkMoveContactStage = async (targetStage, customIds = null) => {
+    const targetIds = Array.isArray(customIds) && customIds.length > 0 ? customIds : selectedKanbanContactIds;
+    if (!targetStage || targetIds.length === 0) return;
+    const contactIdsToMove = [...targetIds];
     const updateData = { leadStage: targetStage };
     const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
 
+    // Optimistic UI update immediately
     setContacts(prev =>
       prev.map(c => contactIdsToMove.includes(c._id) ? { ...c, ...updateData } : c)
     );
+    setIsBulkMoveContactStageDropdownOpen(false);
+    setSelectedKanbanContactIds([]);
 
-    for (const id of contactIdsToMove) {
-      try {
+    try {
+      await api.post('/pipeline-contacts/bulk-stage', {
+        contactIds: contactIdsToMove,
+        targetStage
+      });
+    } catch (err) {
+      console.warn('Bulk move API error, falling back to individual calls:', err.message);
+      for (const id of contactIdsToMove) {
         if (id && !id.toString().startsWith('contact-')) {
-          await api.put(`/pipeline-contacts/${id}`, updateData);
+          api.put(`/pipeline-contacts/${id}`, updateData).catch(() => {});
         }
-      } catch (err) {
-        console.warn(`Bulk move contact ${id} API error:`, err.message);
       }
+    }
+
+    contactIdsToMove.slice(0, 50).forEach(id => {
       logActivity(id, {
         type: 'contact',
         title: 'Stage Moved',
         content: `Moved contact to stage "${targetStage}" via bulk action.`,
         author: authorName
       });
-    }
-
-    setIsBulkMoveContactStageDropdownOpen(false);
-    setSelectedKanbanContactIds([]);
+    });
   };
 
   // Bulk delete all selected contacts
-  const handleBulkDeleteContacts = async () => {
-    if (!canDelete || selectedKanbanContactIds.length === 0) return;
-    if (window.confirm(`Are you sure you want to delete ${selectedKanbanContactIds.length} selected contact(s)?`)) {
-      const contactIdsToDelete = [...selectedKanbanContactIds];
+  const handleBulkDeleteContacts = async (customIds = null) => {
+    const targetIds = Array.isArray(customIds) && customIds.length > 0 ? customIds : selectedKanbanContactIds;
+    if (!canDelete || targetIds.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${targetIds.length} selected contact(s)?`)) {
+      const contactIdsToDelete = [...targetIds];
       const contactsToDelete = contacts.filter(c => contactIdsToDelete.includes(c._id));
 
       let deletedContacts = [];
@@ -8716,17 +8743,18 @@ function Pipeline() {
       } catch (err) { }
 
       setContacts(prev => prev.filter(c => !contactIdsToDelete.includes(c._id)));
+      setSelectedKanbanContactIds([]);
 
-      for (const id of contactIdsToDelete) {
-        try {
+      try {
+        await api.post('/pipeline-contacts/bulk-delete', { contactIds: contactIdsToDelete });
+      } catch (err) {
+        console.warn('Bulk delete API error, falling back to individual calls:', err.message);
+        for (const id of contactIdsToDelete) {
           if (id && !id.toString().startsWith('contact-')) {
-            await api.delete(`/pipeline-contacts/${id}`);
+            api.delete(`/pipeline-contacts/${id}`).catch(() => {});
           }
-        } catch (err) {
-          console.warn(`Bulk delete contact ${id} API error:`, err.message);
         }
       }
-      setSelectedKanbanContactIds([]);
     }
   };
 
@@ -11388,9 +11416,125 @@ function Pipeline() {
             <>
               {/* Top Header */}
               <div className="pipeline-top-header">
-                <h1 className="pipeline-deals-count-title">
-                  Deals Management
-                </h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <h1 className="pipeline-deals-count-title">
+                    Deals Management
+                  </h1>
+                  {selectedKanbanDealIds.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="pipeline-stage-selected-pill" style={{ padding: '4px 10px', fontSize: '12px' }} title={`${selectedKanbanDealIds.length} deal(s) selected`}>
+                        <Check size={12} strokeWidth={3} />
+                        <span>{selectedKanbanDealIds.length} selected</span>
+                      </span>
+
+                      {canUpdate && (
+                        <div style={{ position: 'relative' }}>
+                          <button
+                            type="button"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              padding: '5px 11px',
+                              borderRadius: '6px',
+                              background: '#e0f2fe',
+                              color: '#0284c7',
+                              border: '1px solid #bae6fd',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: 'pointer'
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsTopDealBulkMoveDropdownOpen(prev => !prev);
+                            }}
+                            title="Move all selected deals to another stage"
+                          >
+                            <ArrowRightLeft size={12} />
+                            <span>Move Stage</span>
+                            <ChevronDown size={11} style={{ transform: isTopDealBulkMoveDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                          </button>
+
+                          {isTopDealBulkMoveDropdownOpen && (
+                            <div
+                              className="pipeline-card-dropdown-menu"
+                              style={{ top: 'calc(100% + 4px)', left: 0, minWidth: '180px', zIndex: 120, boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <div className="pipeline-submenu-header">
+                                <span className="pipeline-submenu-title">Move {selectedKanbanDealIds.length} to:</span>
+                              </div>
+                              {pipelines.map(p => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  className="pipeline-card-menu-item"
+                                  onClick={() => {
+                                    setIsTopDealBulkMoveDropdownOpen(false);
+                                    handleBulkMoveStage(p.name);
+                                  }}
+                                >
+                                  <span className={`pipeline-menu-indicator ${p.badgeClass || 'new'}`} />
+                                  <span>{p.name}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {canDelete && (
+                        <button
+                          type="button"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '5px 11px',
+                            borderRadius: '6px',
+                            background: '#fee2e2',
+                            color: '#ef4444',
+                            border: '1px solid #fecaca',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => handleBulkDeleteDeals()}
+                          title="Delete all selected deals"
+                        >
+                          <Trash2 size={12} />
+                          <span>Delete ({selectedKanbanDealIds.length})</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '5px 9px',
+                          borderRadius: '6px',
+                          background: '#f1f5f9',
+                          color: '#64748b',
+                          border: '1px solid #e2e8f0',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => {
+                          setSelectedKanbanDealIds([]);
+                          setIsTopDealBulkMoveDropdownOpen(false);
+                          setIsBulkMoveDropdownOpen(false);
+                        }}
+                        title="Deselect all deals"
+                      >
+                        <X size={12} />
+                        <span>Deselect</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   {/* View Switcher */}
                   <div className="pipeline-view-switcher">
@@ -12052,6 +12196,74 @@ function Pipeline() {
                                           </button>
                                         </>
                                       )}
+
+                                      {pipelineDeals.length > 0 && (
+                                        <>
+                                          <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                          {canUpdate && (
+                                            <>
+                                              <button
+                                                type="button"
+                                                className="pipeline-card-menu-item"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setColMoveDealSubmenuStageId(colMoveDealSubmenuStageId === pipeline.id ? null : pipeline.id);
+                                                }}
+                                                title={`Move all ${pipelineDeals.length} deals to another stage`}
+                                              >
+                                                <div className="pipeline-card-menu-item-left">
+                                                  <ArrowRightLeft size={13} style={{ color: '#0284c7' }} />
+                                                  <span>Move All Deals ({pipelineDeals.length})</span>
+                                                </div>
+                                                <ChevronRight size={12} style={{ transform: colMoveDealSubmenuStageId === pipeline.id ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                                              </button>
+
+                                              {colMoveDealSubmenuStageId === pipeline.id && (
+                                                <div style={{ background: '#f8fafc', padding: '4px 0', borderRadius: '6px', margin: '2px 0 4px 0', border: '1px solid #e2e8f0' }}>
+                                                  <div style={{ padding: '3px 12px', fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                                    Move {pipelineDeals.length} deals to:
+                                                  </div>
+                                                  {pipelines
+                                                    .filter(p => (p.name || '').toLowerCase().trim() !== (pipeline.name || '').toLowerCase().trim())
+                                                    .map(p => (
+                                                      <button
+                                                        key={p.id}
+                                                        type="button"
+                                                        className="pipeline-card-menu-item"
+                                                        style={{ paddingLeft: '20px', fontSize: '12px' }}
+                                                        onClick={() => {
+                                                          setActiveColMenuId(null);
+                                                          setColMoveDealSubmenuStageId(null);
+                                                          handleBulkMoveStage(p.name, pipelineDeals.map(d => d._id));
+                                                        }}
+                                                      >
+                                                        <span className={`pipeline-menu-indicator ${p.badgeClass || 'new'}`} />
+                                                        <span>{p.name}</span>
+                                                      </button>
+                                                    ))}
+                                                </div>
+                                              )}
+                                            </>
+                                          )}
+                                          {canDelete && (
+                                            <button
+                                              type="button"
+                                              className="pipeline-card-menu-item danger"
+                                              onClick={() => {
+                                                setActiveColMenuId(null);
+                                                setColMoveDealSubmenuStageId(null);
+                                                handleBulkDeleteDeals(pipelineDeals.map(d => d._id));
+                                              }}
+                                              title={`Delete all ${pipelineDeals.length} deals in this stage`}
+                                            >
+                                              <div className="pipeline-card-menu-item-left">
+                                                <Trash2 size={13} />
+                                                <span>Delete All Deals ({pipelineDeals.length})</span>
+                                              </div>
+                                            </button>
+                                          )}
+                                        </>
+                                      )}
                                     </div>
                                   )}
                                 </div>
@@ -12516,7 +12728,7 @@ function Pipeline() {
               )}
 
               {/* Floating Bottom Bulk Action Toolbar for Multi-Selected Cards */}
-              {selectedKanbanDealIds.length > 0 && viewMode === 'kanban' && (
+              {selectedKanbanDealIds.length > 0 && viewMode === 'kanban' && createPortal(
                 <div className="pipeline-kanban-bulk-bar" onClick={e => e.stopPropagation()}>
                   <div className="pipeline-kanban-bulk-info">
                     <div className="pipeline-kanban-bulk-badge">
@@ -12569,13 +12781,25 @@ function Pipeline() {
                       <button
                         type="button"
                         className="pipeline-kanban-bulk-btn danger"
-                        onClick={handleBulkDeleteDeals}
+                        onClick={() => handleBulkDeleteDeals()}
                         title="Delete selected deals"
                       >
                         <Trash2 size={13} />
                         <span>Delete</span>
                       </button>
                     )}
+
+                    {/* Bulk Export */}
+                    <button
+                      type="button"
+                      className="pipeline-kanban-bulk-btn"
+                      style={{ background: 'rgba(255, 255, 255, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}
+                      onClick={handleExport}
+                      title="Export selected deals to CSV"
+                    >
+                      <Download size={13} />
+                      <span>Export</span>
+                    </button>
 
                     {/* Deselect All */}
                     <button
@@ -12591,7 +12815,8 @@ function Pipeline() {
                       <span>Deselect All</span>
                     </button>
                   </div>
-                </div>
+                </div>,
+                document.body
               )}
             </>
           )
@@ -14515,13 +14740,124 @@ function Pipeline() {
             <div className="pipeline-tab-page-view">
               {/* Top Header */}
               <div className="pipeline-top-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <h1 className="pipeline-deals-count-title">Contacts</h1>
                   {selectedKanbanContactIds.length > 0 && (
-                    <span className="pipeline-stage-selected-pill" title={`${selectedKanbanContactIds.length} contact(s) selected`}>
-                      <Check size={10} strokeWidth={3} />
-                      <span>{selectedKanbanContactIds.length}</span>
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="pipeline-stage-selected-pill" style={{ padding: '4px 10px', fontSize: '12px' }} title={`${selectedKanbanContactIds.length} contact(s) selected`}>
+                        <Check size={12} strokeWidth={3} />
+                        <span>{selectedKanbanContactIds.length} selected</span>
+                      </span>
+
+                      {canUpdate && (
+                        <div style={{ position: 'relative' }}>
+                          <button
+                            type="button"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              padding: '5px 11px',
+                              borderRadius: '6px',
+                              background: '#e0f2fe',
+                              color: '#0284c7',
+                              border: '1px solid #bae6fd',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: 'pointer'
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsTopBulkMoveDropdownOpen(prev => !prev);
+                            }}
+                            title="Move all selected contacts to another stage"
+                          >
+                            <ArrowRightLeft size={12} />
+                            <span>Move Stage</span>
+                            <ChevronDown size={11} style={{ transform: isTopBulkMoveDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                          </button>
+
+                          {isTopBulkMoveDropdownOpen && (
+                            <div
+                              className="pipeline-card-dropdown-menu"
+                              style={{ top: 'calc(100% + 4px)', left: 0, minWidth: '180px', zIndex: 120, boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <div className="pipeline-submenu-header">
+                                <span className="pipeline-submenu-title">Move {selectedKanbanContactIds.length} to:</span>
+                              </div>
+                              {effectiveContactStages.map(s => {
+                                const stageName = typeof s === 'string' ? s : (s.name || s.id);
+                                return (
+                                  <button
+                                    key={s.id || stageName}
+                                    type="button"
+                                    className="pipeline-card-menu-item"
+                                    onClick={() => {
+                                      setIsTopBulkMoveDropdownOpen(false);
+                                      handleBulkMoveContactStage(stageName);
+                                    }}
+                                  >
+                                    <span className={`pipeline-menu-indicator ${s.badgeClass || 'new'}`} />
+                                    <span>{stageName}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {canDelete && (
+                        <button
+                          type="button"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '5px 11px',
+                            borderRadius: '6px',
+                            background: '#fee2e2',
+                            color: '#ef4444',
+                            border: '1px solid #fecaca',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => handleBulkDeleteContacts()}
+                          title="Delete all selected contacts"
+                        >
+                          <Trash2 size={12} />
+                          <span>Delete ({selectedKanbanContactIds.length})</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '5px 9px',
+                          borderRadius: '6px',
+                          background: '#f1f5f9',
+                          color: '#64748b',
+                          border: '1px solid #e2e8f0',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => {
+                          setSelectedKanbanContactIds([]);
+                          setIsTopBulkMoveDropdownOpen(false);
+                          setIsBulkMoveContactStageDropdownOpen(false);
+                        }}
+                        title="Deselect all contacts"
+                      >
+                        <X size={12} />
+                        <span>Deselect</span>
+                      </button>
+                    </div>
                   )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -15197,6 +15533,80 @@ function Pipeline() {
                                             </button>
                                           </>
                                         )}
+
+                                        {stageContacts.length > 0 && (
+                                          <>
+                                            <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                            {canUpdate && (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  className="pipeline-card-menu-item"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setColMoveSubmenuStageId(colMoveSubmenuStageId === stage.id ? null : stage.id);
+                                                  }}
+                                                  title={`Move all ${stageContacts.length} contacts to another stage`}
+                                                >
+                                                  <div className="pipeline-card-menu-item-left">
+                                                    <ArrowRightLeft size={13} style={{ color: '#0284c7' }} />
+                                                    <span>Move All Contacts ({stageContacts.length})</span>
+                                                  </div>
+                                                  <ChevronRight size={12} style={{ transform: colMoveSubmenuStageId === stage.id ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                                                </button>
+
+                                                {colMoveSubmenuStageId === stage.id && (
+                                                  <div style={{ background: '#f8fafc', padding: '4px 0', borderRadius: '6px', margin: '2px 0 4px 0', border: '1px solid #e2e8f0' }}>
+                                                    <div style={{ padding: '3px 12px', fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                                      Move {stageContacts.length} contacts to:
+                                                    </div>
+                                                    {effectiveContactStages
+                                                      .filter(s => {
+                                                        const sName = typeof s === 'string' ? s : (s.name || s.id);
+                                                        return (sName || '').toLowerCase().trim() !== (stage.name || '').toLowerCase().trim();
+                                                      })
+                                                      .map(s => {
+                                                        const sName = typeof s === 'string' ? s : (s.name || s.id);
+                                                        return (
+                                                          <button
+                                                            key={s.id || sName}
+                                                            type="button"
+                                                            className="pipeline-card-menu-item"
+                                                            style={{ paddingLeft: '20px', fontSize: '12px' }}
+                                                            onClick={() => {
+                                                              setActiveColMenuId(null);
+                                                              setColMoveSubmenuStageId(null);
+                                                              handleBulkMoveContactStage(sName, stageContacts.map(c => c._id));
+                                                            }}
+                                                          >
+                                                            <span className={`pipeline-menu-indicator ${s.badgeClass || 'new'}`} />
+                                                            <span>{sName}</span>
+                                                          </button>
+                                                        );
+                                                      })}
+                                                  </div>
+                                                )}
+                                              </>
+                                            )}
+                                            {canDelete && (
+                                              <button
+                                                type="button"
+                                                className="pipeline-card-menu-item danger"
+                                                onClick={() => {
+                                                  setActiveColMenuId(null);
+                                                  setColMoveSubmenuStageId(null);
+                                                  handleBulkDeleteContacts(stageContacts.map(c => c._id));
+                                                }}
+                                                title={`Delete all ${stageContacts.length} contacts in this stage`}
+                                              >
+                                                <div className="pipeline-card-menu-item-left">
+                                                  <Trash2 size={13} />
+                                                  <span>Delete All Contacts ({stageContacts.length})</span>
+                                                </div>
+                                              </button>
+                                            )}
+                                          </>
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -15667,6 +16077,101 @@ function Pipeline() {
                   )
                 )}
               </div>
+
+              {/* Floating Bottom Bulk Action Toolbar for Multi-Selected Contacts */}
+              {selectedKanbanContactIds.length > 0 && contactViewMode === 'kanban' && createPortal(
+                <div className="pipeline-kanban-bulk-bar" onClick={e => e.stopPropagation()}>
+                  <div className="pipeline-kanban-bulk-info">
+                    <div className="pipeline-kanban-bulk-badge">
+                      <Check size={14} strokeWidth={3} />
+                      <span>{selectedKanbanContactIds.length} {selectedKanbanContactIds.length === 1 ? 'contact' : 'contacts'} selected</span>
+                    </div>
+                  </div>
+
+                  <div className="pipeline-kanban-bulk-actions">
+                    {/* Bulk Move Stage Dropdown */}
+                    {canUpdate && (
+                      <div style={{ position: 'relative' }}>
+                        <button
+                          type="button"
+                          className="pipeline-kanban-bulk-btn primary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsBulkMoveContactStageDropdownOpen(prev => !prev);
+                          }}
+                          title="Move selected contacts to another stage"
+                        >
+                          <ArrowRightLeft size={13} />
+                          <span>Move Stage</span>
+                          <ChevronDown size={12} style={{ transform: isBulkMoveContactStageDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                        </button>
+
+                        {isBulkMoveContactStageDropdownOpen && (
+                          <div className="pipeline-card-dropdown-menu pipeline-bulk-move-menu" onClick={e => e.stopPropagation()}>
+                            <div className="pipeline-submenu-header">
+                              <span className="pipeline-submenu-title">Move Selected To</span>
+                            </div>
+                            {effectiveContactStages.map(s => {
+                              const stageName = typeof s === 'string' ? s : (s.name || s.id);
+                              return (
+                                <button
+                                  key={s.id || stageName}
+                                  type="button"
+                                  className="pipeline-card-menu-item"
+                                  onClick={() => handleBulkMoveContactStage(stageName)}
+                                >
+                                  <span className={`pipeline-menu-indicator ${s.badgeClass || 'new'}`} />
+                                  <span>{stageName}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Bulk Delete */}
+                    {canDelete && (
+                      <button
+                        type="button"
+                        className="pipeline-kanban-bulk-btn danger"
+                        onClick={() => handleBulkDeleteContacts()}
+                        title="Delete selected contacts"
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete</span>
+                      </button>
+                    )}
+
+                    {/* Bulk Export */}
+                    <button
+                      type="button"
+                      className="pipeline-kanban-bulk-btn"
+                      style={{ background: 'rgba(255, 255, 255, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}
+                      onClick={handleBulkExportContacts}
+                      title="Export selected contacts to CSV"
+                    >
+                      <Download size={13} />
+                      <span>Export</span>
+                    </button>
+
+                    {/* Deselect All */}
+                    <button
+                      type="button"
+                      className="pipeline-kanban-bulk-btn cancel"
+                      onClick={() => {
+                        setSelectedKanbanContactIds([]);
+                        setIsBulkMoveContactStageDropdownOpen(false);
+                      }}
+                      title="Clear selection"
+                    >
+                      <X size={13} />
+                      <span>Deselect All</span>
+                    </button>
+                  </div>
+                </div>,
+                document.body
+              )}
             </div>
           )
         )}

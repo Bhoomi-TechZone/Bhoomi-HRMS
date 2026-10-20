@@ -47,7 +47,7 @@ function checkAccess(user) {
   const hasRead = hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'companies' || p.module === 'deals') && p.actions.includes('read'));
   const hasCreate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'companies' || p.module === 'deals') && p.actions.includes('create'));
   const hasUpdate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'companies' || p.module === 'deals') && p.actions.includes('update'));
-  const hasDelete = isAdmin || permissions.some(p => (p.module === 'pipeline' || p.module === 'companies' || p.module === 'deals') && p.actions.includes('delete'));
+  const hasDelete = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'companies' || p.module === 'deals') && p.actions.includes('delete'));
 
   return { roleName, isSalesHead, isSalesManager, isAdmin, hasFullAccess, hasRead, hasCreate, hasUpdate, hasDelete };
 }
