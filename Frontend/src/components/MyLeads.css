@@ -803,10 +803,18 @@
   display: flex;
   flex-direction: column;
   animation: is-modal-in 0.25s ease;
+  overflow: hidden;
 }
 
 .is-modal-sm {
   max-width: 420px;
+}
+
+.is-modal-wide {
+  max-width: 1040px;
+  width: 92%;
+  border-radius: 14px;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.06);
 }
 
 @keyframes is-modal-in {
@@ -1192,10 +1200,24 @@
    Meta Lead Modal — Professional redesign
    ═══════════════════════════════════════════ */
 
-/* Wider modal for side-by-side layout */
+/* Wider modal for side-by-side layout — Professional CRM View */
 .is-modal-wide {
-  max-width: 860px;
+  max-width: 1040px;
   width: 95%;
+  border-radius: 16px;
+  box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.is-modal-wide .is-modal-header {
+  padding: 18px 26px;
+  background: linear-gradient(to right, #f8fafc, #ffffff);
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.is-modal-wide .is-modal-body {
+  padding: 22px 26px;
+  max-height: calc(88vh - 75px);
 }
 
 /* Header — avatar + name + badges */
@@ -1206,8 +1228,8 @@
 }
 
 .is-mlead-avatar {
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
   background: linear-gradient(135deg, #1e40af, #3b82f6);
   color: #fff;
@@ -1217,11 +1239,12 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.25);
 }
 
 .is-mlead-name {
   margin: 0 0 5px 0;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   color: #0f172a;
 }
@@ -1236,8 +1259,8 @@
 /* Two-column body layout */
 .is-mlead-layout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
+  grid-template-columns: 1.18fr 0.82fr;
+  gap: 28px;
   align-items: start;
 }
 
@@ -1605,8 +1628,11 @@
 
 /* Right panel — activity timeline */
 .is-mlead-right {
-  border-left: 1px solid #e2e8f0;
+  border-left: 1px solid #f1f5f9;
   padding-left: 24px;
+  max-height: calc(88vh - 120px);
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 /* Timeline */

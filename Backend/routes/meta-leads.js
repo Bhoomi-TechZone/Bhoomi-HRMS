@@ -368,6 +368,11 @@ router.get('/', auth, async (req, res) => {
     if (pageId) query.pageId = pageId;
     if (assignedTo && canSeeAllLeads) query.assignedTo = assignedTo;
 
+    // Exclude leads moved to pipeline by default so they only appear in Deals in Pipeline
+    if (req.query.includeMoved !== 'true') {
+      query.movedToPipeline = { $ne: true };
+    }
+
     // Filter by assigned date — match leads whose history has an Assignment Update on that date
     if (assignedDate) {
       const dateStart = new Date(assignedDate);
@@ -787,7 +792,8 @@ router.get('/followups/due', auth, async (req, res) => {
     const query = {
       followUpDate: { $ne: null, $lte: now },
       followUpCompleted: { $ne: true },
-      status: { $nin: ['Converted', 'Closed', 'Not Interested'] }
+      status: { $nin: ['Converted', 'Closed', 'Not Interested'] },
+      movedToPipeline: { $ne: true }
     };
     if (!isAdmin) {
       query.createdTime = { $gte: DATA_CUTOFF_DATE };
@@ -845,7 +851,7 @@ router.get('/:id', auth, async (req, res) => {
  */
 router.patch('/:id', auth, async (req, res) => {
   try {
-    const { status, assignedTo, notes, followUpDate, dealStage } = req.body;
+    const { status, assignedTo, notes, newNote, followUpDate, dealStage } = req.body;
     const lead = await MetaLead.findById(req.params.id);
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
@@ -925,7 +931,22 @@ router.patch('/:id', auth, async (req, res) => {
       historyEntry.details = historyEntry.details || 'Lead reassigned';
       lead.assignedTo = assignedTo || null;
     }
-    if (notes !== undefined) lead.notes = notes;
+    if (newNote && String(newNote).trim()) {
+      const authorUser = req.user?.firstName ? req.user : await User.findById(req.user?._id || req.user?.id);
+      const authorName = `${authorUser?.firstName || ''} ${authorUser?.lastName || ''}`.trim() || authorUser?.email || 'User';
+      const now = new Date();
+      const timeStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const formattedEntry = `[${timeStr} - ${authorName}]: ${String(newNote).trim()}`;
+      lead.notes = lead.notes ? `${lead.notes}\n\n${formattedEntry}` : formattedEntry;
+      lead.history.push({
+        action: 'Note Added',
+        details: String(newNote).trim(),
+        by: req.user._id,
+        date: now
+      });
+    } else if (notes !== undefined) {
+      lead.notes = notes;
+    }
     if (followUpDate !== undefined) {
       lead.followUpDate = followUpDate ? new Date(followUpDate) : null;
       // Reset followUpCompleted when setting a new follow-up date

@@ -4846,6 +4846,52 @@ function Pipeline() {
     return [];
   }, [hoveredDeal, hoveredContact, tasks]);
 
+  // Helper to extract the phone number for a deal from direct fields, relations, or associated CRM contacts
+  const getDealContactPhone = useCallback((deal) => {
+    if (!deal) return '';
+    // 1. Direct deal phone fields
+    if (deal.phone && String(deal.phone).trim()) return String(deal.phone).trim();
+    if (deal.contactPhone && String(deal.contactPhone).trim()) return String(deal.contactPhone).trim();
+    if (deal.phoneNumber && String(deal.phoneNumber).trim()) return String(deal.phoneNumber).trim();
+    if (deal.clientPhone && String(deal.clientPhone).trim()) return String(deal.clientPhone).trim();
+
+    // 2. Populated lead relations
+    if (deal.relatedLead && typeof deal.relatedLead === 'object') {
+      const lp = deal.relatedLead.phone || deal.relatedLead.contactNumber;
+      if (lp && String(lp).trim()) return String(lp).trim();
+    }
+    if (deal.relatedMetaLead && typeof deal.relatedMetaLead === 'object') {
+      const mp = deal.relatedMetaLead.phone;
+      if (mp && String(mp).trim()) return String(mp).trim();
+    }
+
+    // 3. Matched contact in contacts list
+    const targetEmail = (deal.associatedContact || deal.email || '').trim().toLowerCase();
+    const targetName = (deal.clientName || deal.dealName || '').trim().toLowerCase();
+    const targetAssoc = (deal.associatedContact || '').trim().toLowerCase();
+
+    const matchedContact = (contacts || []).find(c => {
+      if (!c) return false;
+      if (deal.contactId && String(c._id) === String(deal.contactId)) return true;
+      if (deal.associatedContactId && String(c._id) === String(deal.associatedContactId)) return true;
+      const cEmail = (c.email || '').trim().toLowerCase();
+      if (targetEmail && cEmail && cEmail === targetEmail) return true;
+      if (targetAssoc && cEmail && cEmail === targetAssoc) return true;
+      const cFullName = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+      if (targetName && cFullName && cFullName === targetName) return true;
+      if (targetAssoc && cFullName && cFullName === targetAssoc) return true;
+      return false;
+    });
+
+    if (matchedContact && matchedContact.phone && String(matchedContact.phone).trim()) {
+      const cCode = matchedContact.countryCode ? `${matchedContact.countryCode} ` : '';
+      const rawP = String(matchedContact.phone).trim();
+      return rawP.startsWith('+') ? rawP : `${cCode}${rawP}`.trim();
+    }
+
+    return '';
+  }, [contacts]);
+
   const matchedContactForDeal = useMemo(() => {
     if (!detailedDeal) return null;
     const directMatch = contacts.find(
@@ -4877,14 +4923,14 @@ function Pipeline() {
       lastName: lName,
       email: (contactEmail && contactEmail.includes('@')) ? contactEmail : (detailedDeal.email || `${fName.toLowerCase()}@example.com`),
       countryCode: '+91',
-      phone: detailedDeal.phone || '+91 8218880152',
+      phone: getDealContactPhone(detailedDeal) || detailedDeal.phone || '',
       contactSource: 'Direct Reference',
       leadStage: 'Lead',
       leadStatus: 'New',
       owner: detailedDeal.salesOwner || 'Tejaswi Yadav',
       company: detailedDeal.associatedCompany || ''
     };
-  }, [contacts, detailedDeal]);
+  }, [contacts, detailedDeal, getDealContactPhone]);
 
   const matchedCompanyForDeal = useMemo(() => {
     if (!detailedDeal) return null;
@@ -12499,44 +12545,52 @@ function Pipeline() {
                                     <span className="pipeline-card-val">{deal.salesOwner}</span>
                                   </div>
 
-                                  {(deal.associatedContact || deal.email) && (
-                                    <div className="pipeline-card-field">
-                                      <span className="pipeline-card-label">Contact</span>
-                                      <span
-                                        className="pipeline-card-val"
-                                        style={{
-                                          color: '#0284c7',
-                                          fontWeight: 600,
-                                          cursor: 'pointer',
-                                          textDecoration: 'none',
-                                          display: 'inline-block'
-                                        }}
-                                        onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                                        onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          const targetEmail = (deal.associatedContact || deal.email || '').trim().toLowerCase();
-                                          const targetName = (deal.clientName || '').trim().toLowerCase();
-                                          const matched = contacts.find(c => {
-                                            if (deal.contactId && c._id === deal.contactId) return true;
-                                            const ce = (c.email || '').trim().toLowerCase();
-                                            const cn = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
-                                            return (ce && ce === targetEmail) || (cn && (cn === targetEmail || cn === targetName));
-                                          });
-                                          if (matched) {
-                                            setActiveTab('contacts');
-                                            setDetailedContactId(matched._id);
-                                          } else {
-                                            setActiveTab('contacts');
-                                            setDetailedContactId(null);
-                                          }
-                                        }}
-                                        title="Click to view contact details"
-                                      >
-                                        {deal.associatedContact || deal.email}
-                                      </span>
-                                    </div>
-                                  )}
+                                  {(() => {
+                                    const dealPhone = getDealContactPhone(deal);
+                                    const displayContact = dealPhone || deal.associatedContact || deal.email;
+                                    if (!displayContact) return null;
+
+                                    return (
+                                      <div className="pipeline-card-field">
+                                        <span className="pipeline-card-label">Contact</span>
+                                        <span
+                                          className="pipeline-card-val"
+                                          style={{
+                                            color: '#0284c7',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            textDecoration: 'none',
+                                            display: 'inline-block'
+                                          }}
+                                          onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                                          onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const targetEmail = (deal.associatedContact || deal.email || '').trim().toLowerCase();
+                                            const targetName = (deal.clientName || '').trim().toLowerCase();
+                                            const matched = contacts.find(c => {
+                                              if (deal.contactId && String(c._id) === String(deal.contactId)) return true;
+                                              if (deal.associatedContactId && String(c._id) === String(deal.associatedContactId)) return true;
+                                              const ce = (c.email || '').trim().toLowerCase();
+                                              const cn = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+                                              const cp = (c.phone || '').trim();
+                                              return (dealPhone && cp && cp === dealPhone) || (ce && ce === targetEmail) || (cn && (cn === targetEmail || cn === targetName));
+                                            });
+                                            if (matched) {
+                                              setActiveTab('contacts');
+                                              setDetailedContactId(matched._id);
+                                            } else {
+                                              setActiveTab('contacts');
+                                              setDetailedContactId(null);
+                                            }
+                                          }}
+                                          title={dealPhone ? `Phone: ${dealPhone} (Click to view contact)` : 'Click to view contact details'}
+                                        >
+                                          {displayContact}
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
 
                                 {/* Card Bottom Actions */}

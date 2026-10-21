@@ -126,6 +126,7 @@ function MyLeads() {
   const [updating, setUpdating] = useState(false);
   const [showConversionModal, setShowConversionModal] = useState(false);
   const [pendingConversion, setPendingConversion] = useState(null);
+  const [isRequirementExpanded, setIsRequirementExpanded] = useState(false);
 
   // ── Add Lead Modal states ──────────────────────────────────────────────────
   const [showAddLeadModal, setShowAddLeadModal] = useState(false);
@@ -212,10 +213,6 @@ function MyLeads() {
   const [movingToPipeline, setMovingToPipeline] = useState(false);
   const [movePipelineSuccessInfo, setMovePipelineSuccessInfo] = useState(null);
   const [bulkMovingToPipeline, setBulkMovingToPipeline] = useState(false);
-  // ── Unmove from Pipeline Modal state ───────────────────────────────────────
-  const [showUnmovePipelineModal, setShowUnmovePipelineModal] = useState(false);
-  const [leadToUnmove, setLeadToUnmove] = useState(null);
-  const [unmovingFromPipeline, setUnmovingFromPipeline] = useState(false);
   // ── Multi Assign & Range Selection ───────────────────────────────────────
   const [multiAssignMode, setMultiAssignMode] = useState(false);
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
@@ -588,19 +585,24 @@ function MyLeads() {
   // ── Normalise meta leads into a unified shape ─────────────────────────────
   // Each entry gets _type:'meta' so we know which API to call on update
   const allLeads = useMemo(() => {
-    const regular = leads.map(l => ({ ...l, _type: 'regular', contactNumber: l.phone || l.contactNumber || '' }));
-    const meta = metaLeads.map(m => ({
-      ...m,
-      _type: 'meta',
-      // map meta fields → common display fields
-      leadName: m.name || '',
-      contactNumber: m.phone || '',
-      company: m.businessCategory || '',
-      product: m.websiteType || '',
-      source: `Meta · ${m.pageName || 'Facebook'}`,
-      createdAt: m.createdTime,
-      assignedTo: m.assignedTo,
-    }));
+    // Exclude leads moved to pipeline so they only appear in Deals in Pipeline
+    const regular = leads
+      .filter(l => !l.movedToPipeline)
+      .map(l => ({ ...l, _type: 'regular', contactNumber: l.phone || l.contactNumber || '' }));
+    const meta = metaLeads
+      .filter(m => !m.movedToPipeline)
+      .map(m => ({
+        ...m,
+        _type: 'meta',
+        // map meta fields → common display fields
+        leadName: m.name || '',
+        contactNumber: m.phone || '',
+        company: m.businessCategory || '',
+        product: m.websiteType || '',
+        source: `Meta · ${m.pageName || 'Facebook'}`,
+        createdAt: m.createdTime,
+        assignedTo: m.assignedTo,
+      }));
     let merged = [...regular, ...meta];
 
     // Only Admin can see old leads data. Sales Head and other roles can only see new leads from cutoff date onwards.
@@ -822,7 +824,7 @@ function MyLeads() {
     });
   }, [allLeads, searchTerm, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy, hasFullAccess, user?._id, user?.id]);
 
-  const isAnyModalOpen = showDetailsModal || showStatusModal || showNoteModal || showHistoryModal || showMetaModal || showConversionModal || showUploadModal || showMultiAssignModal || showMovePipelineModal || showUnmovePipelineModal;
+  const isAnyModalOpen = showDetailsModal || showStatusModal || showNoteModal || showHistoryModal || showMetaModal || showConversionModal || showUploadModal || showMultiAssignModal || showMovePipelineModal;
 
   // ── Follow-up reminder polling for the currently visible page data ───────
   const checkFollowUps = useCallback(async () => {
@@ -1363,16 +1365,39 @@ function MyLeads() {
     if (!selectedLead || !newNote.trim()) return;
     setUpdating(true);
     try {
-      const res = await api.put(`/leads/${selectedLead._id}`, { newNote });
-      setLeads(leads.map(l => l._id === selectedLead._id ? res.data : l));
-      setShowNoteModal(false); setNewNote('');
+      if (selectedLead._type === 'meta') {
+        const res = await api.patch(`/meta-leads/${selectedLead._id}`, { newNote: newNote.trim() });
+        const updated = res.data?.lead || res.data;
+        if (updated) {
+          setMetaLeads(prev => prev.map(l => l._id === selectedLead._id ? { ...l, ...updated, notes: updated.notes } : l));
+          setSelectedLead(prev => ({ ...prev, ...updated, notes: updated.notes }));
+          setMetaEditForm(prev => ({ ...prev, notes: updated.notes }));
+          if (metaSelected && metaSelected._id === updated._id) {
+            setMetaSelected(prev => ({ ...prev, ...updated, notes: updated.notes }));
+          }
+        }
+      } else {
+        const res = await api.put(`/leads/${selectedLead._id}`, { newNote: newNote.trim() });
+        const updated = res.data;
+        if (updated) {
+          setLeads(prev => prev.map(l => l._id === selectedLead._id ? { ...l, ...updated, notes: updated.notes } : l));
+          setSelectedLead(prev => ({ ...prev, ...updated, notes: updated.notes }));
+          setLeadEditForm(prev => ({ ...prev, notes: updated.notes }));
+        }
+      }
+      setShowNoteModal(false);
+      setNewNote('');
     } catch (err) {
-      alert('Failed to add note');
-    } finally { setUpdating(false); }
+      console.error('Failed to add note:', err);
+      alert(err.response?.data?.message || 'Failed to add note');
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const openRegularLead = (lead, editMode = false) => {
     setActiveFollowUpPicker(null);
+    setIsRequirementExpanded(false);
     setSelectedLead(lead);
     setLeadEditForm({
       assignedTo: lead.assignedTo?._id || lead.assignedTo || '',
@@ -1895,28 +1920,15 @@ function MyLeads() {
       };
 
       if (movePipelinePayload.leadType === 'meta') {
-        setMetaLeads(prev => prev.map(m => m._id === targetLeadId ? {
-          ...m,
-          movedToPipeline: true,
-          pipelineContactId: contactId || m.pipelineContactId,
-          pipelineDealId: dealId || m.pipelineDealId,
-          history: [...(m.history || []), historyEntry]
-        } : m));
+        setMetaLeads(prev => prev.filter(m => m._id !== targetLeadId));
       } else {
-        setLeads(prev => prev.map(l => l._id === targetLeadId ? {
-          ...l,
-          movedToPipeline: true,
-          pipelineContactId: contactId || l.pipelineContactId,
-          pipelineDealId: dealId || l.pipelineDealId,
-          history: [...(l.history || []), historyEntry]
-        } : l));
+        setLeads(prev => prev.filter(l => l._id !== targetLeadId));
       }
 
       setShowMovePipelineModal(false);
       setMovePipelineSuccessInfo({
         contactName: `${movePipelinePayload.firstName} ${movePipelinePayload.lastName}`.trim(),
-        stage: 'New Lead',
-        isUnmoved: false
+        stage: 'New Lead'
       });
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to move lead to pipeline');
@@ -1947,29 +1959,13 @@ function MyLeads() {
       const res = await api.post('/pipeline-contacts/bulk-move-leads', { leads: leadsToMove });
 
       const movedSet = new Set(selectedArr);
-      const historyEntry = {
-        action: 'Moved to Pipeline',
-        details: `Lead moved in bulk to Deals under "New Lead" stage by ${user?.firstName || 'User'}`,
-        date: new Date()
-      };
-
-      setLeads(prev => prev.map(l => movedSet.has(`regular-${l._id}`) ? {
-        ...l,
-        movedToPipeline: true,
-        history: [...(l.history || []), historyEntry]
-      } : l));
-
-      setMetaLeads(prev => prev.map(m => movedSet.has(`meta-${m._id}`) ? {
-        ...m,
-        movedToPipeline: true,
-        history: [...(m.history || []), historyEntry]
-      } : m));
+      setLeads(prev => prev.filter(l => !movedSet.has(`regular-${l._id}`)));
+      setMetaLeads(prev => prev.filter(m => !movedSet.has(`meta-${m._id}`)));
 
       const movedCount = res.data?.count || selectedLeadIds.size;
       setMovePipelineSuccessInfo({
         contactName: `${movedCount} Lead(s)`,
-        stage: 'New Lead',
-        isUnmoved: false
+        stage: 'New Lead'
       });
 
       setSelectedLeadIds(new Set());
@@ -1979,56 +1975,6 @@ function MyLeads() {
       alert(err.response?.data?.message || 'Failed to move selected leads to pipeline.');
     } finally {
       setBulkMovingToPipeline(false);
-    }
-  };
-
-  const handleOpenUnmovePipeline = (lead) => {
-    setLeadToUnmove(lead);
-    setShowUnmovePipelineModal(true);
-  };
-
-  const confirmUnmoveFromPipeline = async () => {
-    if (!leadToUnmove) return;
-    setUnmovingFromPipeline(true);
-    try {
-      await api.post('/pipeline-contacts/unmove-lead', {
-        leadId: leadToUnmove._id,
-        leadType: leadToUnmove._type || 'regular',
-        contactId: leadToUnmove.pipelineContactId
-      });
-
-      const targetLeadId = leadToUnmove._id;
-      const historyEntry = {
-        action: 'Unmoved from Pipeline',
-        details: `Lead was unmoved from Pipeline Contacts (Meta Lead stage) by ${user?.firstName || 'User'}`,
-        date: new Date()
-      };
-
-      if (leadToUnmove._type === 'meta') {
-        setMetaLeads(prev => prev.map(m => m._id === targetLeadId ? {
-          ...m,
-          movedToPipeline: false,
-          pipelineContactId: null,
-          history: [...(m.history || []), historyEntry]
-        } : m));
-      } else {
-        setLeads(prev => prev.map(l => l._id === targetLeadId ? {
-          ...l,
-          movedToPipeline: false,
-          pipelineContactId: null,
-          history: [...(l.history || []), historyEntry]
-        } : l));
-      }
-
-      setShowUnmovePipelineModal(false);
-      setMovePipelineSuccessInfo({
-        contactName: leadToUnmove.leadName || leadToUnmove.name || leadToUnmove.company || 'Lead',
-        isUnmoved: true
-      });
-    } catch (err) {
-      alert(err.response?.data?.message || 'Failed to unmove lead from pipeline');
-    } finally {
-      setUnmovingFromPipeline(false);
     }
   };
 
@@ -3376,82 +3322,68 @@ function MyLeads() {
           </div>
         )}
 
-        {/* Success Alert Banner for Move / Unmove from Pipeline */}
+        {/* Success Alert Banner for Move to Pipeline */}
         {movePipelineSuccessInfo && (
           <div style={{
             margin: '0 16px 14px 16px',
             padding: '12px 18px',
-            background: movePipelineSuccessInfo.isUnmoved ? '#f0fdf4' : '#f5f3ff',
-            border: `1px solid ${movePipelineSuccessInfo.isUnmoved ? '#bbf7d0' : '#ddd6fe'}`,
+            background: '#f5f3ff',
+            border: '1px solid #ddd6fe',
             borderRadius: '12px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            boxShadow: movePipelineSuccessInfo.isUnmoved ? '0 4px 12px rgba(16, 185, 129, 0.08)' : '0 4px 12px rgba(124, 58, 237, 0.08)'
+            boxShadow: '0 4px 12px rgba(124, 58, 237, 0.08)'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{
                 width: '28px',
                 height: '28px',
                 borderRadius: '50%',
-                background: movePipelineSuccessInfo.isUnmoved ? '#10b981' : '#7c3aed',
+                background: '#7c3aed',
                 color: '#fff',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0
               }}>
-                {movePipelineSuccessInfo.isUnmoved ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                )}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
               </div>
               <div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: movePipelineSuccessInfo.isUnmoved ? '#065f46' : '#4c1d95' }}>
-                  {movePipelineSuccessInfo.isUnmoved ? 'Lead successfully unmoved from Pipeline Contacts!' : 'Lead successfully moved to Pipeline Contacts!'}
+                <div style={{ fontSize: '13px', fontWeight: 700, color: '#4c1d95' }}>
+                  Lead successfully moved to Pipeline Deals!
                 </div>
-                <div style={{ fontSize: '11.5px', color: movePipelineSuccessInfo.isUnmoved ? '#047857' : '#6d28d9', marginTop: '1px' }}>
-                  {movePipelineSuccessInfo.isUnmoved ? (
-                    <>
-                      <strong>{movePipelineSuccessInfo.contactName}</strong> has been removed from Pipeline Contacts. All activity tracking in Leads and Contacts history has been preserved.
-                    </>
-                  ) : (
-                    <>
-                      <strong>{movePipelineSuccessInfo.contactName}</strong> is now live inside <strong>{movePipelineSuccessInfo.stage}</strong> stage with all contact details.
-                    </>
-                  )}
+                <div style={{ fontSize: '11.5px', color: '#6d28d9', marginTop: '1px' }}>
+                  <strong>{movePipelineSuccessInfo.contactName}</strong> is now live inside <strong>{movePipelineSuccessInfo.stage || 'New Lead'}</strong> stage under Deals in Pipeline and removed from Leads table.
                 </div>
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {!movePipelineSuccessInfo.isUnmoved && (
-                <a
-                  href="/pipeline/crm/overview?tab=contacts"
-                  style={{
-                    padding: '6px 13px',
-                    background: '#7c3aed',
-                    color: '#fff',
-                    textDecoration: 'none',
-                    borderRadius: '8px',
-                    fontSize: '11.5px',
-                    fontWeight: 600,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <span>View in Contacts</span>
-                  <span>→</span>
-                </a>
-              )}
+              <a
+                href="/pipeline/crm/overview?tab=deals"
+                style={{
+                  padding: '6px 13px',
+                  background: '#7c3aed',
+                  color: '#fff',
+                  textDecoration: 'none',
+                  borderRadius: '8px',
+                  fontSize: '11.5px',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <span>View in Deals → New Lead</span>
+                <span>→</span>
+              </a>
               <button
                 type="button"
                 onClick={() => setMovePipelineSuccessInfo(null)}
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: movePipelineSuccessInfo.isUnmoved ? '#059669' : '#7c3aed',
+                  color: '#7c3aed',
                   fontSize: '18px',
                   cursor: 'pointer',
                   padding: '2px 6px',
@@ -4013,38 +3945,21 @@ function MyLeads() {
                                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
                               </button>
 
-                              {/* 2. Move / Unmove Pipeline button — restricted to Sales Head, Sales Manager, Admin */}
+                              {/* 2. Move to Pipeline Deals button — restricted to Sales Head, Sales Manager, Admin */}
                               {canMoveToPipeline && (
-                                lead.movedToPipeline ? (
-                                  <button
-                                    className="ist-action-btn"
-                                    title="Moved to Pipeline Deals — Click to Unmove"
-                                    onClick={() => handleOpenUnmovePipeline(lead)}
-                                    onMouseEnter={e => e.currentTarget.style.background = '#ecfdf5'}
-                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                    style={{ position: 'relative' }}
-                                  >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
-                                      <polyline points="1 4 1 10 7 10" />
-                                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                                    </svg>
-                                    <span style={{ position: 'absolute', top: '1px', right: '1px', width: '5px', height: '5px', borderRadius: '50%', background: '#10b981' }} />
-                                  </button>
-                                ) : (
-                                  <button
-                                    className="ist-action-btn"
-                                    title="Move to Pipeline Deals (New Lead stage)"
-                                    onClick={() => handleOpenMoveToPipeline(lead)}
-                                    onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
-                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                  >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <rect x="3" y="3" width="5" height="18" rx="1" />
-                                      <rect x="10" y="3" width="5" height="11" rx="1" />
-                                      <rect x="17" y="3" width="5" height="15" rx="1" />
-                                    </svg>
-                                  </button>
-                                )
+                                <button
+                                  className="ist-action-btn"
+                                  title="Move to Pipeline Deals (New Lead stage)"
+                                  onClick={() => handleOpenMoveToPipeline(lead)}
+                                  onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
+                                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="3" width="5" height="18" rx="1" />
+                                    <rect x="10" y="3" width="5" height="11" rx="1" />
+                                    <rect x="17" y="3" width="5" height="15" rx="1" />
+                                  </svg>
+                                </button>
                               )}
 
                               {/* 3. Delete — only with canDelete */}
@@ -4060,7 +3975,7 @@ function MyLeads() {
                                 </button>
                               )}
 
-                              {/* 4. Three dots (...) for rest of options (Edit, Move/Unmove, Note, History) */}
+                              {/* 4. Three dots (...) for rest of options (Edit, Move, Note, History) */}
                               <div ref={openActionMenuDrop === compositeId ? actionMenuDropRef : null} style={{ display: 'inline-block' }}>
                                 <button
                                   className="ist-action-btn"
@@ -4131,40 +4046,8 @@ function MyLeads() {
                                       </button>
                                     )}
 
-                                    {/* Move / Unmove Pipeline in Dropdown — restricted to Sales Head, Sales Manager, Admin */}
+                                    {/* Move to Deals in Dropdown — restricted to Sales Head, Sales Manager, Admin */}
                                     {canMoveToPipeline && (
-                                      lead.movedToPipeline ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setOpenActionMenuDrop(null);
-                                            handleOpenUnmovePipeline(lead);
-                                          }}
-                                          style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '8px',
-                                            width: '100%',
-                                            textAlign: 'left',
-                                            padding: '7px 10px',
-                                            borderRadius: '6px',
-                                            border: 'none',
-                                            background: 'transparent',
-                                            color: '#059669',
-                                            fontSize: '11.5px',
-                                            fontWeight: 600,
-                                            cursor: 'pointer'
-                                          }}
-                                          onMouseEnter={e => e.currentTarget.style.background = '#ecfdf5'}
-                                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                        >
-                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                            <polyline points="1 4 1 10 7 10" />
-                                            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                                          </svg>
-                                          <span>Unmove from Pipeline</span>
-                                        </button>
-                                      ) : (
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -4194,43 +4077,40 @@ function MyLeads() {
                                             <rect x="10" y="3" width="5" height="11" rx="1" />
                                             <rect x="17" y="3" width="5" height="15" rx="1" />
                                           </svg>
-                                          <span>Move to Deals (New Lead)</span>
+                                          <span>Move to Deal</span>
                                         </button>
-                                      )
                                     )}
 
-                                    {/* Note — for regular CRM leads */}
-                                    {lead._type !== 'meta' && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setOpenActionMenuDrop(null);
-                                          setSelectedLead(lead);
-                                          setNewNote('');
-                                          setShowNoteModal(true);
-                                        }}
-                                        style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          gap: '8px',
-                                          width: '100%',
-                                          textAlign: 'left',
-                                          padding: '7px 10px',
-                                          borderRadius: '6px',
-                                          border: 'none',
-                                          background: 'transparent',
-                                          color: '#334155',
-                                          fontSize: '11.5px',
-                                          fontWeight: 500,
-                                          cursor: 'pointer'
-                                        }}
-                                        onMouseEnter={e => e.currentTarget.style.background = '#fef3c7'}
-                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                      >
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
-                                        <span>Add Note</span>
-                                      </button>
-                                    )}
+                                    {/* Note — for all leads */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionMenuDrop(null);
+                                        setSelectedLead(lead);
+                                        setNewNote('');
+                                        setShowNoteModal(true);
+                                      }}
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        width: '100%',
+                                        textAlign: 'left',
+                                        padding: '7px 10px',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        background: 'transparent',
+                                        color: '#334155',
+                                        fontSize: '11.5px',
+                                        fontWeight: 500,
+                                        cursor: 'pointer'
+                                      }}
+                                      onMouseEnter={e => e.currentTarget.style.background = '#fef3c7'}
+                                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                    >
+                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+                                      <span>Add Note</span>
+                                    </button>
 
                                     {/* History — for all leads */}
                                     <button
@@ -4454,7 +4334,67 @@ function MyLeads() {
                         </div>
 
                         <div className="is-mlead-field" style={{ gridColumn: '1 / -1' }}>
-                          <label className="is-mlead-field-lbl">Requirement</label>
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: '6px',
+                              cursor: !isEditing ? 'pointer' : 'default',
+                              userSelect: 'none'
+                            }}
+                            onClick={() => {
+                              if (!isEditing && leadEditForm.requirement) {
+                                setIsRequirementExpanded(prev => !prev);
+                              }
+                            }}
+                          >
+                            <label className="is-mlead-field-lbl" style={{ margin: 0, cursor: !isEditing ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>Requirement</span>
+                              {leadEditForm.requirement && !isEditing && (
+                                <span style={{ fontSize: '11px', fontWeight: 500, color: '#64748b' }}>
+                                  ({isRequirementExpanded ? 'Expanded' : 'Collapsed'})
+                                </span>
+                              )}
+                            </label>
+
+                            {!isEditing && leadEditForm.requirement && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsRequirementExpanded(prev => !prev);
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  background: isRequirementExpanded ? '#e0f2fe' : '#f1f5f9',
+                                  color: isRequirementExpanded ? '#0369a1' : '#475569',
+                                  border: `1px solid ${isRequirementExpanded ? '#bae6fd' : '#e2e8f0'}`,
+                                  borderRadius: '6px',
+                                  padding: '3px 8px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                title={isRequirementExpanded ? 'Close / Collapse requirement' : 'View full requirement'}
+                              >
+                                <span>{isRequirementExpanded ? 'Close' : 'View'}</span>
+                                {isRequirementExpanded ? (
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="18 15 12 9 6 15" />
+                                  </svg>
+                                ) : (
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="6 9 12 15 18 9" />
+                                  </svg>
+                                )}
+                              </button>
+                            )}
+                          </div>
+
                           {isEditing ? (
                             <textarea
                               className="is-form-textarea"
@@ -4465,7 +4405,49 @@ function MyLeads() {
                               style={{ minHeight: '120px', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}
                             />
                           ) : (
-                            <div className="is-mlead-val-textarea">{leadEditForm.requirement || '—'}</div>
+                            <div
+                              className="is-mlead-val-textarea"
+                              style={{
+                                maxHeight: isRequirementExpanded ? '300px' : '54px',
+                                minHeight: '44px',
+                                overflowY: isRequirementExpanded ? 'auto' : 'hidden',
+                                textOverflow: isRequirementExpanded ? 'initial' : 'ellipsis',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                lineHeight: '1.5',
+                                fontSize: '12.5px',
+                                color: leadEditForm.requirement ? '#334155' : '#94a3b8',
+                                background: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '8px',
+                                padding: '8px 12px',
+                                transition: 'max-height 0.25s ease-in-out',
+                                position: 'relative',
+                                cursor: !isRequirementExpanded && leadEditForm.requirement ? 'pointer' : 'default'
+                              }}
+                              onClick={() => {
+                                if (!isRequirementExpanded && leadEditForm.requirement) {
+                                  setIsRequirementExpanded(true);
+                                }
+                              }}
+                              title={!isRequirementExpanded && leadEditForm.requirement ? 'Click to expand requirement' : undefined}
+                            >
+                              {leadEditForm.requirement || '—'}
+                              {!isRequirementExpanded && leadEditForm.requirement && leadEditForm.requirement.length > 80 && (
+                                <div
+                                  style={{
+                                    position: 'absolute',
+                                    bottom: 0,
+                                    left: 0,
+                                    right: 0,
+                                    height: '24px',
+                                    background: 'linear-gradient(to bottom, rgba(248, 250, 252, 0), rgba(248, 250, 252, 0.95))',
+                                    pointerEvents: 'none',
+                                    borderRadius: '0 0 8px 8px'
+                                  }}
+                                />
+                              )}
+                            </div>
                           )}
                         </div>
 
@@ -4585,12 +4567,60 @@ function MyLeads() {
                         )}
                       </div>
 
-                      <div className="is-mlead-field" style={{ marginTop: 10 }}>
-                        <label className="is-mlead-field-lbl">Notes</label>
+                      <div className="is-mlead-field" style={{ marginTop: 14 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                          <label className="is-mlead-field-lbl" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+                            <span>Notes & Remarks</span>
+                          </label>
+                          {!isEditing && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewNote('');
+                                setShowNoteModal(true);
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: '#fef3c7',
+                                color: '#b45309',
+                                border: '1px solid #fde68a',
+                                borderRadius: '6px',
+                                padding: '3px 8px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                              }}
+                              title="Add a new note to this lead"
+                            >
+                              <span>+ Add Note</span>
+                            </button>
+                          )}
+                        </div>
                         {isEditing ? (
-                          <textarea className="is-form-textarea" rows={3} placeholder="Add notes..." value={leadEditForm.notes} onChange={e => setLeadEditForm(p => ({ ...p, notes: e.target.value }))} disabled={!canUpdate} />
+                          <textarea className="is-form-textarea" rows={4} placeholder="Add or edit notes..." value={leadEditForm.notes} onChange={e => setLeadEditForm(p => ({ ...p, notes: e.target.value }))} disabled={!canUpdate} />
                         ) : (
-                          <div className="is-mlead-val-textarea" style={{ minHeight: '80px' }}>{leadEditForm.notes || '—'}</div>
+                          <div
+                            className="is-mlead-val-textarea"
+                            style={{
+                              minHeight: '80px',
+                              maxHeight: '220px',
+                              overflowY: 'auto',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              lineHeight: 1.6,
+                              fontSize: '12.5px',
+                              color: leadEditForm.notes ? '#334155' : '#94a3b8',
+                              background: '#f8fafc',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: '8px',
+                              padding: '10px 12px'
+                            }}
+                          >
+                            {leadEditForm.notes || 'No notes added yet.'}
+                          </div>
                         )}
                       </div>
 
@@ -4673,16 +4703,44 @@ function MyLeads() {
       )}
 
       {showNoteModal && selectedLead && (
-        <div className="is-modal-overlay" onClick={() => setShowNoteModal(false)}>
-          <div className="is-modal is-modal-sm" onClick={e => e.stopPropagation()}>
-            <div className="is-modal-header"><h2>Add Note</h2><button className="is-modal-close" onClick={() => setShowNoteModal(false)}>×</button></div>
-            <div className="is-modal-body">
-              <label className="is-form-label">Lead: <strong>{selectedLead.leadName || selectedLead.name || selectedLead.company}</strong></label>
-              <textarea className="is-form-textarea" placeholder="Enter your note here..." value={newNote} onChange={e => setNewNote(e.target.value)} />
+        <div className="is-modal-overlay" style={{ zIndex: 2200 }} onClick={() => setShowNoteModal(false)}>
+          <div className="is-modal is-modal-sm" style={{ borderRadius: '14px', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+            <div className="is-modal-header" style={{ borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+                <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>Add Note</h2>
+              </div>
+              <button className="is-modal-close" onClick={() => setShowNoteModal(false)}>×</button>
             </div>
-            <div className="is-modal-footer">
-              <button className="is-btn is-btn-primary" onClick={handleNoteSave} disabled={updating || !newNote.trim()}>{updating ? 'Saving...' : 'Add Note'}</button>
-              <button className="is-btn is-btn-secondary" onClick={() => setShowNoteModal(false)}>Cancel</button>
+            <div className="is-modal-body" style={{ padding: '16px 20px' }}>
+              <label className="is-form-label" style={{ marginBottom: '8px', display: 'block', fontSize: '13px', color: '#475569' }}>
+                Lead: <strong style={{ color: '#0f172a' }}>{selectedLead.leadName || selectedLead.name || selectedLead.company}</strong>
+              </label>
+              <textarea
+                className="is-form-textarea"
+                rows={4}
+                autoFocus
+                placeholder="Type your notes or remarks here..."
+                value={newNote}
+                onChange={e => setNewNote(e.target.value)}
+                style={{
+                  width: '100%',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  padding: '10px 12px',
+                  fontSize: '13px',
+                  lineHeight: 1.5,
+                  resize: 'vertical'
+                }}
+              />
+            </div>
+            <div className="is-modal-footer" style={{ borderTop: '1px solid #f1f5f9', background: '#f8fafc', padding: '12px 20px' }}>
+              <button className="is-btn is-btn-primary" onClick={handleNoteSave} disabled={updating || !newNote.trim()}>
+                {updating ? 'Saving Note…' : 'Save Note'}
+              </button>
+              <button className="is-btn is-btn-secondary" onClick={() => setShowNoteModal(false)}>
+                Cancel
+              </button>
             </div>
           </div>
         </div>
@@ -4814,12 +4872,61 @@ function MyLeads() {
                           </div>
                         )}
                       </div>
-                      <div className="is-mlead-field" style={{ marginTop: 10 }}>
-                        <label className="is-mlead-field-lbl">Notes</label>
+                      <div className="is-mlead-field" style={{ marginTop: 14 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                          <label className="is-mlead-field-lbl" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+                            <span>Notes & Remarks</span>
+                          </label>
+                          {!isEditing && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedLead({ ...metaSelected, _type: 'meta' });
+                                setNewNote('');
+                                setShowNoteModal(true);
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: '#fef3c7',
+                                color: '#b45309',
+                                border: '1px solid #fde68a',
+                                borderRadius: '6px',
+                                padding: '3px 8px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                cursor: 'pointer'
+                              }}
+                              title="Add a new note to this lead"
+                            >
+                              <span>+ Add Note</span>
+                            </button>
+                          )}
+                        </div>
                         {isEditing ? (
-                          <textarea className="is-form-textarea" rows={3} placeholder="Add notes..." value={metaEditForm.notes} onChange={e => setMetaEditForm(p => ({ ...p, notes: e.target.value }))} />
+                          <textarea className="is-form-textarea" rows={4} placeholder="Add notes..." value={metaEditForm.notes} onChange={e => setMetaEditForm(p => ({ ...p, notes: e.target.value }))} />
                         ) : (
-                          <div className="is-mlead-val-textarea" style={{ minHeight: '80px' }}>{metaEditForm.notes || '—'}</div>
+                          <div
+                            className="is-mlead-val-textarea"
+                            style={{
+                              minHeight: '80px',
+                              maxHeight: '220px',
+                              overflowY: 'auto',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              lineHeight: 1.6,
+                              fontSize: '12.5px',
+                              color: metaEditForm.notes ? '#334155' : '#94a3b8',
+                              background: '#f8fafc',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: '8px',
+                              padding: '10px 12px'
+                            }}
+                          >
+                            {metaEditForm.notes || 'No notes added yet.'}
+                          </div>
                         )}
                       </div>
                       <div className="is-mlead-form-actions">
@@ -5160,228 +5267,6 @@ function MyLeads() {
         </div>
       )}
 
-      {/* ── Unmove Lead from Pipeline Modal ───────────────────────────────────── */}
-      {showUnmovePipelineModal && leadToUnmove && (
-        <div
-          onClick={() => { if (!unmovingFromPipeline) setShowUnmovePipelineModal(false); }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.45)',
-            backdropFilter: 'blur(3px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '16px'
-          }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              width: '100%',
-              maxWidth: '480px',
-              background: '#fff',
-              borderRadius: '16px',
-              border: '1px solid #e2e8f0',
-              boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              animation: 'modalSlideUp 0.2s ease-out'
-            }}
-          >
-            {/* Header */}
-            <div style={{
-              padding: '16px 20px',
-              borderBottom: '1px solid #f1f5f9',
-              background: '#fff7ed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  background: '#f97316',
-                  color: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 4px 10px rgba(249, 115, 22, 0.25)'
-                }}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="1 4 1 10 7 10" />
-                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#7c2d12' }}>
-                    Unmove Lead from Pipeline
-                  </h3>
-                  <div style={{ fontSize: '11.5px', color: '#c2410c', marginTop: '1px' }}>
-                    Remove from <strong>Pipeline Deals (New Lead stage)</strong>
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="is-modal-close"
-                onClick={() => { if (!unmovingFromPipeline) setShowUnmovePipelineModal(false); }}
-                style={{ fontSize: '20px', color: '#9a3412' }}
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Body */}
-            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', background: '#fff' }}>
-              <div style={{
-                background: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                borderRadius: '12px',
-                padding: '14px 16px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
-                      {leadToUnmove.leadName || leadToUnmove.name || leadToUnmove.company || 'Lead Contact'}
-                    </div>
-                    {leadToUnmove.company && (leadToUnmove.leadName || leadToUnmove.name) && (
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>
-                        {leadToUnmove.company}
-                      </div>
-                    )}
-                  </div>
-                  <span style={{
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    padding: '3px 9px',
-                    borderRadius: '999px',
-                    background: '#ecfdf5',
-                    color: '#059669',
-                    border: '1px solid #a7f3d0'
-                  }}>
-                    Currently In Pipeline
-                  </span>
-                </div>
-
-                <div style={{ height: '1px', background: '#e2e8f0' }} />
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
-                  <div>
-                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Email</span>
-                    <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155', wordBreak: 'break-all' }}>
-                      {leadToUnmove.email || '—'}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Phone</span>
-                    <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155' }}>
-                      {leadToUnmove.phone || leadToUnmove.contactNumber || '—'}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Lead Status</span>
-                    <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#2563eb' }}>
-                      {leadToUnmove.status || 'New'}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Type</span>
-                    <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#334155' }}>
-                      {leadToUnmove._type === 'meta' ? 'Meta Lead' : 'CRM Lead'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{
-                background: '#eff6ff',
-                border: '1px solid #bfdbfe',
-                borderRadius: '10px',
-                padding: '10px 14px',
-                fontSize: '11.5px',
-                color: '#1e40af',
-                lineHeight: 1.45
-              }}>
-                ℹ️ <strong>Audit & History Preserved:</strong> This action removes the contact card from the active Pipeline Contacts board, updates this lead to unmoved, and adds an audit record in the history of both Leads and Pipeline Contacts.
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div style={{
-              padding: '12px 20px',
-              borderTop: '1px solid #f1f5f9',
-              background: '#fafafa',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'flex-end',
-              gap: '10px'
-            }}>
-              <button
-                type="button"
-                onClick={() => setShowUnmovePipelineModal(false)}
-                disabled={unmovingFromPipeline}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  border: '1px solid #e2e8f0',
-                  background: '#fff',
-                  color: '#475569',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmUnmoveFromPipeline}
-                disabled={unmovingFromPipeline}
-                style={{
-                  padding: '8px 18px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-                  color: '#fff',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: unmovingFromPipeline ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  boxShadow: '0 4px 12px rgba(249, 115, 22, 0.3)',
-                  opacity: unmovingFromPipeline ? 0.75 : 1
-                }}
-              >
-                {unmovingFromPipeline ? (
-                  <>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ animation: 'spin 1s linear infinite' }}>
-                      <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
-                    </svg>
-                    <span>Unmoving…</span>
-                  </>
-                ) : (
-                  <>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="1 4 1 10 7 10" />
-                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                    </svg>
-                    <span>Unmove from Pipeline</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
 
 

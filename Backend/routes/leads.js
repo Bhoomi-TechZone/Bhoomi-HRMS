@@ -103,6 +103,11 @@ router.get('/', auth, async (req, res) => {
       query.source = req.query.source;
     }
 
+    // Exclude leads moved to pipeline by default so they only appear in Deals in Pipeline
+    if (req.query.includeMoved !== 'true') {
+      query.movedToPipeline = { $ne: true };
+    }
+
     const leads = await Lead.find(query)
       .populate('assignedTo', 'firstName lastName email employeeId')
       .populate('createdBy', 'firstName lastName email')
@@ -351,15 +356,31 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. You can only update your assigned or created leads.' });
     }
 
-    // For read-only users without assignment/update permission, restrict updates to status/followup/type only
+    // For read-only users without assignment/update permission, restrict updates to status/followup/type/notes only
     if (!hasUpdatePermission && !canAssignOrManage) {
       if (!hasReadPermission) {
         return res.status(403).json({ message: 'Access denied' });
       }
-      // Restrict the update to status + nextFollowUp + leadType only
-      const { status, nextFollowUp, leadType } = req.body;
-      if (!status && leadType === undefined) {
-        return res.status(403).json({ message: 'Read-only users can only update lead status or type' });
+      // Restrict the update to status + nextFollowUp + leadType + notes/newNote only
+      const { status, nextFollowUp, leadType, newNote, notes } = req.body;
+      if (!status && leadType === undefined && !newNote && notes === undefined) {
+        return res.status(403).json({ message: 'Read-only users can only update lead status, type, or notes' });
+      }
+
+      if (newNote && String(newNote).trim()) {
+        const authorName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'User';
+        const now = new Date();
+        const timeStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        const formattedEntry = `[${timeStr} - ${authorName}]: ${String(newNote).trim()}`;
+        lead.notes = lead.notes ? `${lead.notes}\n\n${formattedEntry}` : formattedEntry;
+        lead.history.push({
+          action: 'Note Added',
+          details: String(newNote).trim(),
+          by: req.user.id,
+          date: now
+        });
+      } else if (notes !== undefined) {
+        lead.notes = notes ? String(notes).trim() : '';
       }
 
       if (status) {
@@ -448,12 +469,30 @@ router.put('/:id', auth, async (req, res) => {
       budget,
       requirements,
       notes,
+      newNote,
       nextFollowUp,
       followUpNotes,
       lostReason,
       dealStage,
       leadType
     } = req.body;
+
+    // Handle newNote or notes
+    if (newNote && String(newNote).trim()) {
+      const authorName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'User';
+      const now = new Date();
+      const timeStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const formattedEntry = `[${timeStr} - ${authorName}]: ${String(newNote).trim()}`;
+      lead.notes = lead.notes ? `${lead.notes}\n\n${formattedEntry}` : formattedEntry;
+      lead.history.push({
+        action: 'Note Added',
+        details: String(newNote).trim(),
+        by: req.user.id,
+        date: now
+      });
+    } else if (notes !== undefined) {
+      lead.notes = notes ? String(notes).trim() : '';
+    }
 
     // Update fields
     if (name) lead.name = name.trim();
@@ -466,7 +505,6 @@ router.put('/:id', auth, async (req, res) => {
     if (budget !== undefined) lead.budget = budget ? parseFloat(budget) : 0;
     if (requirements !== undefined) lead.requirements = requirements ? requirements.trim() : '';
     if (requirement !== undefined) { lead.requirement = requirement ? requirement.trim() : ''; lead.requirements = requirement ? requirement.trim() : lead.requirements; }
-    if (notes !== undefined) lead.notes = notes ? notes.trim() : '';
     if (followUpNotes !== undefined) lead.followUpNotes = followUpNotes ? followUpNotes.trim() : '';
 
     // Handle nextFollowUp date - convert from string if provided
@@ -724,7 +762,8 @@ router.get('/followups/due', auth, async (req, res) => {
     const query = {
       nextFollowUp: { $ne: null, $lte: now },
       followUpCompleted: { $ne: true },
-      status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost'] }
+      status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost'] },
+      movedToPipeline: { $ne: true }
     };
 
     if (!isAdmin) {

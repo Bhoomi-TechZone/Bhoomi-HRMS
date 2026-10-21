@@ -4,6 +4,8 @@ const mongoose = require('mongoose');
 const Deal = require('../models/Deal');
 const Client = require('../models/Client');
 const User = require('../models/User');
+const Lead = require('../models/Lead');
+const MetaLead = require('../models/MetaLead');
 const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
 const { notifyFollowUpScheduled, parseFollowUpDateTime } = require('../services/followupNotificationService');
@@ -211,6 +213,8 @@ router.get('/', auth, async (req, res) => {
       const deals = await Deal.find(query)
         .populate('assignedTo', 'firstName lastName email officialEmail employeeId designation department phone alternatePhone isActive role')
         .populate('createdBy', 'firstName lastName email')
+        .populate('relatedLead', 'phone contactNumber')
+        .populate('relatedMetaLead', 'phone')
         .sort({ createdAt: -1 });
 
       const sanitizedDeals = (!hasFullAccess && Array.isArray(deals))
@@ -260,7 +264,9 @@ router.get('/:id', auth, async (req, res) => {
     try {
       deal = await Deal.findById(req.params.id)
         .populate('assignedTo', 'firstName lastName email officialEmail employeeId designation department phone alternatePhone isActive role')
-        .populate('createdBy', 'firstName lastName email');
+        .populate('createdBy', 'firstName lastName email')
+        .populate('relatedLead', 'phone contactNumber')
+        .populate('relatedMetaLead', 'phone');
     } catch (e) {
       deal = await Deal.findById(req.params.id);
     }

@@ -392,6 +392,7 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
     } else if (leadId) {
       deal.relatedLead = leadId;
     }
+    deal.createdAt = new Date();
     deal.activities.push({
       type: 'note',
       title: 'Lead moved to Pipeline Deals',
