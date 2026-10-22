@@ -138,24 +138,130 @@ router.get('/balance', auth, async (req, res) => {
   }
 });
 
+// Helper to identify HR or Admin roles
+function isHrOrAdminUser(user) {
+  const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+  const designation = (user?.designation || '').toString().toLowerCase().trim();
+  return (
+    roleName === 'admin' ||
+    roleName === 'super admin' ||
+    roleName === 'director' ||
+    roleName === 'hr' ||
+    roleName === 'hr manager' ||
+    roleName === 'hr admin' ||
+    roleName === 'hrmanager' ||
+    roleName === 'hradmin' ||
+    roleName.includes('hr manager') ||
+    roleName.includes('hr admin') ||
+    designation === 'admin' ||
+    designation === 'hr' ||
+    designation === 'hr manager' ||
+    designation === 'hr admin'
+  );
+}
+
+// Helper to identify Sales Head or Sales Manager roles
+function isSalesHeadOrManagerUser(user) {
+  const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+  const designation = (user?.designation || '').toString().toLowerCase().trim();
+  return (
+    roleName === 'sales head' ||
+    roleName === 'saleshead' ||
+    roleName === 'head of sales' ||
+    roleName.includes('sales head') ||
+    roleName === 'sales manager' ||
+    roleName === 'salesmanager' ||
+    roleName.includes('sales manager') ||
+    roleName === 'manager of sales' ||
+    designation.includes('sales head') ||
+    designation.includes('sales manager')
+  );
+}
+
+// Helper to check if an employee belongs to Sales or Email Marketing department / team
+function isSalesOrEmailMarketingEmployee(user) {
+  if (!user) return false;
+  const dept = (user.department || '').toString().toLowerCase().trim();
+  const desig = (user.designation || '').toString().toLowerCase().trim();
+  const roleName = (user.role?.name || user.role || '').toString().toLowerCase().trim();
+
+  return (
+    dept.includes('sales') ||
+    dept.includes('email marketing') ||
+    dept.includes('marketing') ||
+    dept.includes('business development') ||
+    dept.includes('bde') ||
+    desig.includes('sales') ||
+    desig.includes('email marketing') ||
+    desig.includes('marketing') ||
+    desig.includes('bde') ||
+    roleName.includes('sales') ||
+    roleName.includes('email marketing') ||
+    roleName.includes('marketing') ||
+    roleName.includes('bde') ||
+    roleName.includes('business development')
+  );
+}
+
+// Helper to build scoped leave query based on user role
+async function getScopedLeaveQuery(userId, requestedEmployeeId = null) {
+  const user = await User.findById(userId).populate('role');
+  if (!user) return { query: { _id: null }, user: null, isHrOrAdmin: false, isSalesHeadOrManager: false };
+
+  const isHrOrAdmin = isHrOrAdminUser(user);
+  const isSalesHeadOrManager = isSalesHeadOrManagerUser(user);
+
+  let query = {};
+
+  if (isHrOrAdmin) {
+    // Hr, Hr Manager, Hr Admin, and Admin can see all leaves across the organisation
+    if (requestedEmployeeId) {
+      query.employee = requestedEmployeeId;
+    }
+  } else if (isSalesHeadOrManager) {
+    // Sales Head and Sales Manager can see leaves of their team (Sales & Email Marketing departments) + own leaves
+    const smRoles = await Role.find({
+      name: { $regex: /sales|email\s*marketing|marketing|business\s*development|bde/i }
+    }).select('_id');
+    const smRoleIds = smRoles.map(r => r._id);
+
+    const teamUsers = await User.find({
+      $or: [
+        { department: { $regex: /sales|email\s*marketing|marketing|business\s*development|bde/i } },
+        { designation: { $regex: /sales|email\s*marketing|marketing|bde/i } },
+        { role: { $in: smRoleIds } }
+      ]
+    }).select('_id');
+
+    const teamUserIds = teamUsers.map(u => String(u._id));
+    if (!teamUserIds.includes(String(user._id))) {
+      teamUserIds.push(String(user._id));
+    }
+
+    if (requestedEmployeeId && teamUserIds.includes(String(requestedEmployeeId))) {
+      query.employee = requestedEmployeeId;
+    } else {
+      query.employee = { $in: teamUserIds };
+    }
+  } else {
+    // Regular employees with permissions can ONLY view their own leaves
+    query.employee = user._id;
+  }
+
+  return { query, user, isHrOrAdmin, isSalesHeadOrManager };
+}
+
 // Get all leaves
 router.get('/', auth, async (req, res) => {
   try {
-    let query = {};
-    // Fetch user to ensure role is populated
-    const user = await User.findById(req.user._id || req.user.userId).populate('role');
-    const restrictedRoles = ['Developer', 'Sales'];
-    const isRestrictedRole = restrictedRoles.includes(user?.role?.name);
-    const fullAccessRoles = ['Admin', 'HR', 'Manager', 'HR Manager', 'Team Leader'];
-    const hasFullAccess = !isRestrictedRole && fullAccessRoles.includes(user?.role?.name);
+    const { query } = await getScopedLeaveQuery(req.user._id || req.user.userId, req.query.employeeId);
 
-    if (req.query.employeeId && hasFullAccess) {
-      query.employee = req.query.employeeId;
-    } else if (!hasFullAccess) {
-      query.employee = user._id;
-    }
+    const leaves = await Leave.find(query)
+      .populate('employee', 'firstName lastName employeeId department designation')
+      .populate('approvedBy', 'firstName lastName')
+      .populate('timeline.by', 'firstName lastName')
+      .sort({ createdAt: -1 });
 
-    const leaves = await Leave.find(query).populate('employee', 'firstName lastName employeeId').populate('approvedBy', 'firstName lastName').populate('timeline.by', 'firstName lastName').sort({ createdAt: -1 });
     res.json(leaves);
   } catch (error) {
     console.error('Error fetching leaves:', error);
@@ -220,17 +326,7 @@ router.delete('/holidays/:id', auth, checkPermission('leaves', 'delete'), async 
 // Export Leaves to Excel
 router.get('/export/excel', auth, async (req, res) => {
   try {
-    let query = {};
-
-    const hasFullAccess = req.user.role.permissions.find(
-      p => p.module === 'leaves' && p.actions.includes('update')
-    );
-
-    if (req.query.employeeId && hasFullAccess) {
-      query.employee = req.query.employeeId;
-    } else if (!hasFullAccess) {
-      query.employee = req.user._id;
-    }
+    const { query } = await getScopedLeaveQuery(req.user._id || req.user.userId, req.query.employeeId);
 
     const leaves = await Leave.find(query)
       .populate('employee', 'firstName lastName employeeId')
@@ -268,17 +364,7 @@ router.get('/export/excel', auth, async (req, res) => {
 // Export Leaves to PDF
 router.get('/export/pdf', auth, async (req, res) => {
   try {
-    let query = {};
-
-    const hasFullAccess = req.user.role.permissions.find(
-      p => p.module === 'leaves' && p.actions.includes('update')
-    );
-
-    if (req.query.employeeId && hasFullAccess) {
-      query.employee = req.query.employeeId;
-    } else if (!hasFullAccess) {
-      query.employee = req.user._id;
-    }
+    const { query } = await getScopedLeaveQuery(req.user._id || req.user.userId, req.query.employeeId);
 
     const leaves = await Leave.find(query)
       .populate('employee', 'firstName lastName employeeId')
@@ -304,7 +390,7 @@ router.get('/export/pdf', auth, async (req, res) => {
       doc.moveDown(0.5);
 
       doc.fontSize(10).fillColor('#000');
-      doc.text(`Employee: ${leave.employee ? `${leave.employee.firstName} ${leave.employee.lastName} (${leave.employee.employeeId})` : 'N/A'}`);
+      doc.text(`Employee: ${leave.employee ? `${leave.employee.firstName} ${leave.employee.lastName}` : 'N/A'}`);
       doc.text(`Leave Type: ${leave.leaveType}`);
       doc.text(`Period: ${new Date(leave.startDate).toLocaleDateString()} - ${new Date(leave.endDate).toLocaleDateString()}`);
       doc.text(`Reason: ${leave.reason}`);
@@ -332,17 +418,7 @@ router.get('/export/pdf', auth, async (req, res) => {
 // Export Leaves to Word
 router.get('/export/word', auth, async (req, res) => {
   try {
-    let query = {};
-
-    const hasFullAccess = req.user.role.permissions.find(
-      p => p.module === 'leaves' && p.actions.includes('update')
-    );
-
-    if (req.query.employeeId && hasFullAccess) {
-      query.employee = req.query.employeeId;
-    } else if (!hasFullAccess) {
-      query.employee = req.user._id;
-    }
+    const { query } = await getScopedLeaveQuery(req.user._id || req.user.userId, req.query.employeeId);
 
     const leaves = await Leave.find(query)
       .populate('employee', 'firstName lastName employeeId')
@@ -450,24 +526,72 @@ router.post('/', auth, checkPermission('leaves', 'create'), handleUploadAttachme
 
     await leave.populate('employee', 'firstName lastName employeeId');
 
-    // Notify Admins, HRs, Managers, and Team Leaders
+    // Notify appropriate roles based on applicant's department
     try {
-      const notifyRoles = await Role.find({ name: { $in: ['Admin', 'HR', 'HR Manager', 'Director', 'Manager', 'Team Leader'] } }).select('_id');
-      const roleIds = notifyRoles.map(r => r._id);
-      
-      const authorizedUsers = await User.find({ role: { $in: roleIds }, isActive: true }).select('_id');
+      const applicant = await User.findById(req.user._id).populate('role');
+      const isSalesApplicant = isSalesOrEmailMarketingEmployee(applicant);
+
+      // Base roles: Admin, HR, HR Manager, HR Admin, Director
+      const baseRoles = await Role.find({
+        name: { $regex: /^(admin|super admin|director|hr|hr manager|hr admin)$/i }
+      }).select('_id');
+      const baseRoleIds = baseRoles.map(r => r._id);
+
+      let notifyUserQuery = {};
+      if (isSalesApplicant) {
+        // Sales employee applied:
+        // - Sales Head & Sales Manager MUST receive the notification
+        // - Team Leader MUST NOT receive the notification
+        const shmRoles = await Role.find({
+          name: { $regex: /sales\s*head|head\s*of\s*sales|sales\s*manager|manager\s*of\s*sales|email\s*marketing\s*manager|marketing\s*manager|email\s*marketing\s*head/i }
+        }).select('_id');
+        const shmRoleIds = shmRoles.map(r => r._id);
+
+        notifyUserQuery = {
+          isActive: true,
+          $or: [
+            { role: { $in: [...baseRoleIds, ...shmRoleIds] } },
+            { designation: { $regex: /sales\s*head|head\s*of\s*sales|sales\s*manager|email\s*marketing\s*manager|marketing\s*manager|email\s*marketing\s*head/i } }
+          ]
+        };
+      } else {
+        // Non-sales applicant: base roles + managers / team leaders
+        const otherRoles = await Role.find({
+          name: { $in: ['Manager', 'Team Leader'] }
+        }).select('_id');
+        const otherRoleIds = otherRoles.map(r => r._id);
+
+        notifyUserQuery = {
+          isActive: true,
+          role: { $in: [...baseRoleIds, ...otherRoleIds] }
+        };
+      }
+
+      const authorizedUsers = await User.find(notifyUserQuery).populate('role', 'name').select('_id role designation');
       const io = req.app.get('socketio');
-      
+      const applicantName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'Employee';
+
       Promise.all(
         authorizedUsers
-          .filter(u => String(u._id) !== String(req.user._id))
-          .map(u => 
+          .filter(u => {
+            if (String(u._id) === String(req.user._id)) return false;
+            // Ensure Team Leader strictly does NOT receive notification if sales/marketing applicant
+            if (isSalesApplicant) {
+              const rName = (u.role?.name || '').toLowerCase().trim();
+              const desig = (u.designation || '').toLowerCase().trim();
+              if (rName === 'team leader' || rName.includes('team leader') || desig === 'team leader' || desig.includes('team leader')) {
+                return false;
+              }
+            }
+            return true;
+          })
+          .map(u =>
             sendNotification(
-              io, 
-              u._id, 
-              'Leave Applied', 
-              `${req.user.firstName} ${req.user.lastName || ''}`.trim() + ` applied for ${req.body.leaveType || 'a'} leave.`, 
-              'Leave', 
+              io,
+              u._id,
+              'Leave Applied',
+              `${applicantName} applied for ${req.body.leaveType || 'a'} leave.`,
+              'Leave',
               '/leaves'
             )
           )
@@ -483,24 +607,19 @@ router.post('/', auth, checkPermission('leaves', 'create'), handleUploadAttachme
   }
 });
 
-// Update leave (approve/reject)
+// Update leave (approve/reject or employee editing own leave)
 router.put('/:id', auth, handleUploadAttachment, async (req, res) => {
   try {
     const { status, rejectionReason, adminResponse, leaveType, leaveCategory, durationType, startDate, endDate, reason, description } = req.body;
 
-    const currentUserRoleName = req.user?.role?.name;
-    const canUpdateLeaves = req.user?.role?.permissions?.some(
-      p => p.module === 'leaves' && p.actions.includes('update')
-    );
-
-    if (!canUpdateLeaves && currentUserRoleName !== 'Admin') {
-      return res.status(403).json({ message: 'Access denied: No update permission for leaves' });
-    }
+    const user = await User.findById(req.user._id || req.user.userId).populate('role');
+    const isHrOrAdmin = isHrOrAdminUser(user);
+    const roleName = (user?.role?.name || '').toLowerCase().trim();
 
     const existingLeave = await Leave.findById(req.params.id)
       .populate({
         path: 'employee',
-        select: 'role',
+        select: 'role firstName lastName email department designation',
         populate: { path: 'role', select: 'name' }
       });
 
@@ -509,13 +628,13 @@ router.put('/:id', auth, handleUploadAttachment, async (req, res) => {
     }
 
     const currentUserId = String(req.user?._id || req.user?.userId || '');
-    const leaveEmployeeId = String(existingLeave.employee?._id || '');
+    const leaveEmployeeId = String(existingLeave.employee?._id || existingLeave.employee || '');
     const isOwnLeave = currentUserId && leaveEmployeeId && currentUserId === leaveEmployeeId;
 
     // CASE 1: Employee is editing their own leave request
     if (isOwnLeave && !status) {
-      if (existingLeave.status !== 'pending') {
-        return res.status(400).json({ message: 'Only pending leaves can be edited' });
+      if (existingLeave.status === 'approved') {
+        return res.status(400).json({ message: 'Approved leaves cannot be edited' });
       }
 
       const updateData = {};
@@ -532,31 +651,45 @@ router.put('/:id', auth, handleUploadAttachment, async (req, res) => {
         updateData.attachmentFilePath = req.file.path;
       }
 
+      // If re-editing a rejected leave, reset status to pending
+      if (existingLeave.status === 'rejected') {
+        updateData.status = 'pending';
+        updateData.rejectionReason = '';
+      }
+
       const leave = await Leave.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true })
-        .populate('employee', 'firstName lastName employeeId')
+        .populate('employee', 'firstName lastName employeeId department designation')
         .populate('approvedBy', 'firstName lastName');
 
       return res.json(leave);
     }
 
-    // CASE 2: Responding to a leave (Admin/HR/Manager/users with update permission)
-    // Team Leaders can view all leaves but CANNOT change leave status
-    if (currentUserRoleName === 'Team Leader' && status) {
-      return res.status(403).json({ message: 'Access denied: Team Leaders cannot change leave status' });
+    // If attempting to edit someone else's leave details without changing status
+    if (!status && !isOwnLeave) {
+      return res.status(403).json({ message: 'Access denied: You can only edit your own leave requests' });
     }
 
-    // Non-Admin users can manage others, but never their own leave status
-    if (currentUserRoleName !== 'Admin' && isOwnLeave && status) {
-      return res.status(403).json({ message: 'Access denied: You cannot change status of your own leave' });
-    }
-
-    const updateQuery = { $set: {} };
-    const timelineEvents = [];
-
+    // CASE 2: Changing status of a leave (approve/reject)
     if (status) {
+      // ONLY HR, HR Manager, HR Admin, and Admin can approve or reject leaves
+      if (!isHrOrAdmin) {
+        return res.status(403).json({
+          message: 'Access denied: Only HR, HR Manager, HR Admin, and Admin can approve or reject leaves'
+        });
+      }
+
+      // Non-Admin users cannot approve/reject their own leave
+      if (roleName !== 'admin' && roleName !== 'super admin' && roleName !== 'director' && isOwnLeave) {
+        return res.status(403).json({ message: 'Access denied: You cannot change status of your own leave' });
+      }
+
+      const updateQuery = { $set: {} };
+      const timelineEvents = [];
+
       updateQuery.$set.status = status;
       updateQuery.$set.approvedBy = req.user._id;
       updateQuery.$set.approvedAt = new Date();
+
       if (status !== existingLeave.status) {
         timelineEvents.push({
           type: 'status_change',
@@ -564,54 +697,52 @@ router.put('/:id', auth, handleUploadAttachment, async (req, res) => {
           by: req.user._id
         });
       }
-    }
 
-    if (status === 'rejected' && rejectionReason) {
-      updateQuery.$set.rejectionReason = rejectionReason;
-      if (status !== existingLeave.status) {
-        timelineEvents.push({
-          type: 'message',
-          message: `Rejection Reason: ${rejectionReason}`,
-          by: req.user._id
-        });
+      if (status === 'rejected' && rejectionReason) {
+        updateQuery.$set.rejectionReason = rejectionReason;
+        if (status !== existingLeave.status) {
+          timelineEvents.push({
+            type: 'message',
+            message: `Rejection Reason: ${rejectionReason}`,
+            by: req.user._id
+          });
+        }
       }
-    }
 
-    if (adminResponse) {
-      updateQuery.$set.adminResponse = adminResponse;
-      if (!existingLeave.adminResponse || existingLeave.adminResponse !== adminResponse) {
-        timelineEvents.push({
-          type: 'message',
-          message: adminResponse,
-          by: req.user._id
-        });
+      if (adminResponse) {
+        updateQuery.$set.adminResponse = adminResponse;
+        if (!existingLeave.adminResponse || existingLeave.adminResponse !== adminResponse) {
+          timelineEvents.push({
+            type: 'message',
+            message: adminResponse,
+            by: req.user._id
+          });
+        }
       }
-    }
 
-    if (timelineEvents.length > 0) {
-      updateQuery.$push = { timeline: { $each: timelineEvents } };
-    }
+      if (timelineEvents.length > 0) {
+        updateQuery.$push = { timeline: { $each: timelineEvents } };
+      }
 
-    const leave = await Leave.findByIdAndUpdate(
-      req.params.id,
-      updateQuery,
-      { new: true, runValidators: true }
-    )
-      .populate('employee', 'firstName lastName employeeId')
-      .populate('approvedBy', 'firstName lastName')
-      .populate('timeline.by', 'firstName lastName');
+      const leave = await Leave.findByIdAndUpdate(
+        req.params.id,
+        updateQuery,
+        { new: true, runValidators: true }
+      )
+        .populate('employee', 'firstName lastName employeeId department designation')
+        .populate('approvedBy', 'firstName lastName')
+        .populate('timeline.by', 'firstName lastName');
 
-    if (!leave) {
-      return res.status(404).json({ message: 'Leave not found' });
-    }
+      if (!leave) {
+        return res.status(404).json({ message: 'Leave not found' });
+      }
 
-    // Notifications for Leave Status Update
-    if (status) {
+      // Notifications for Leave Status Update
       try {
         const io = req.app.get('socketio');
-        
+
         // Notify the employee
-        if (String(leave.employee._id) !== String(req.user._id)) {
+        if (String(leave.employee?._id) !== String(req.user._id)) {
           sendNotification(
             io,
             leave.employee._id,
@@ -623,18 +754,17 @@ router.put('/:id', auth, handleUploadAttachment, async (req, res) => {
         }
 
         // Notify Admins and HR
-        const roles = await Role.find({ name: { $in: ['Admin', 'HR', 'HR Manager'] } }).select('_id');
-        if (roles && roles.length > 0) {
-          const roleIds = roles.map(r => r._id);
-          const adminsAndHr = await User.find({ role: { $in: roleIds }, isActive: true }).select('_id');
+        const hrRoles = await Role.find({ name: { $regex: /^(admin|super admin|director|hr|hr manager|hr admin)$/i } }).select('_id');
+        if (hrRoles && hrRoles.length > 0) {
+          const hrRoleIds = hrRoles.map(r => r._id);
+          const adminsAndHr = await User.find({ role: { $in: hrRoleIds }, isActive: true }).select('_id');
           adminsAndHr.forEach(adminHr => {
-            // Don't notify the person who made the change
-            if (String(adminHr._id) !== String(req.user._id)) {
+            if (String(adminHr._id) !== String(req.user._id) && String(adminHr._id) !== String(leave.employee?._id)) {
               sendNotification(
                 io,
                 adminHr._id,
                 'Leave Status Updated',
-                `${req.user.firstName} ${status} leave for ${leave.employee.firstName}.`,
+                `${req.user.firstName} ${status} leave for ${leave.employee?.firstName || 'employee'}.`,
                 'Leave',
                 '/leaves?id=' + leave._id
               );
@@ -644,9 +774,11 @@ router.put('/:id', auth, handleUploadAttachment, async (req, res) => {
       } catch (notifyErr) {
         console.error('Error sending leave update notifications:', notifyErr);
       }
+
+      return res.json(leave);
     }
 
-    res.json(leave);
+    return res.status(400).json({ message: 'Invalid update request' });
   } catch (error) {
     console.error('Error updating leave:', error);
     res.status(500).json({ message: 'Error updating leave' });

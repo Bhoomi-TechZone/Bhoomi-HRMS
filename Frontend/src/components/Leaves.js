@@ -234,7 +234,7 @@ const CustomDropdown = ({ label, options, value, onChange, isOpen, onToggle }) =
 
 function Leaves() {
   const { user, hasPermission } = useAuth();
-  const isRoleAdmin = user?.role?.name === 'Admin';
+  const isRoleAdmin = ['Admin', 'Super Admin', 'Director'].includes(user?.role?.name);
 
   const [{ tab: activeTab, status: filterStatus, search: searchQuery, page: currentPage }, setQueryState] = useContextualQueryState({
     ref: 'sidebar',
@@ -294,11 +294,31 @@ function Leaves() {
     isOptional: false
   });
 
+  const userRoleName = String(user?.role?.name || user?.roleName || '').trim().toLowerCase();
+  const userDesignation = String(user?.designation || '').trim().toLowerCase();
+
+  const isHrOrAdmin = ['admin', 'super admin', 'director', 'hr', 'hr manager', 'hr admin'].some(
+    keyword => userRoleName === keyword || userDesignation === keyword
+  );
+
+  const isSalesHeadOrManager = [
+    'sales head',
+    'head of sales',
+    'sales manager',
+    'sales lead',
+    'email marketing manager',
+    'marketing manager',
+    'email marketing head'
+  ].some(target => userRoleName.includes(target) || userDesignation.includes(target));
+
   const hasUpdatePermission = hasPermission('leaves', 'update');
   const hasDeletePermission = hasPermission('leaves', 'delete');
-  const isTeamLeader = user?.role?.name === 'Team Leader';
-  const canViewAllLeaves = ['Admin', 'HR', 'Manager', 'HR Manager', 'Team Leader'].includes(user?.role?.name) || hasUpdatePermission;
-  const canRespond = (['Admin', 'HR', 'Manager', 'HR Manager'].includes(user?.role?.name) || hasUpdatePermission) && !isTeamLeader;
+  const isTeamLeader = userRoleName === 'team leader' || userDesignation === 'team leader';
+
+  // Only HR/Admin and Sales Head/Manager can view other employees' leaves (Backend restricts to sales & marketing team)
+  const canViewAllLeaves = isHrOrAdmin || isSalesHeadOrManager;
+  // STRICT: Only HR, HR Manager, HR Admin, and Admin can approve or reject leaves
+  const canRespond = isHrOrAdmin;
 
   // Reset to page 1 when tab changes
   useEffect(() => { setCurrentPage(1); }, [activeTab]);
@@ -531,6 +551,15 @@ function Leaves() {
   };
 
   const handleEditLeave = (leave) => {
+    const isOwner = String(user?._id || user?.userId || user?.id) === String(leave.employee?._id || leave.employee);
+    if (!isOwner) {
+      alert('You can only edit your own leave requests.');
+      return;
+    }
+    if (leave.status === 'approved') {
+      alert('Approved leave requests cannot be edited.');
+      return;
+    }
     setEditingLeave(leave);
     setAttachmentFile(null);
     setFormData({
@@ -582,6 +611,10 @@ function Leaves() {
   };
 
   const handleRespond = (leave) => {
+    if (!canRespond) {
+      alert('Only HR, HR Manager, HR Admin, and Admin can approve or reject leaves.');
+      return;
+    }
     setSelectedLeave(leave);
     setResponseData({
       status: leave.status,
@@ -592,6 +625,10 @@ function Leaves() {
 
   const handleResponseSubmit = async (e) => {
     e.preventDefault();
+    if (!canRespond) {
+      alert('Only HR, HR Manager, HR Admin, and Admin can approve or reject leaves.');
+      return;
+    }
     try {
       await api.put(`/leaves/${selectedLeave._id}`, responseData);
       setShowResponseModal(false);
@@ -618,6 +655,10 @@ function Leaves() {
   };
 
   const handleQuickStatusChange = async (leave, newStatus) => {
+    if (!canRespond) {
+      alert('Only HR, HR Manager, HR Admin, and Admin can change leave status.');
+      return;
+    }
     if (newStatus === leave.status) return;
     try {
       await api.put(`/leaves/${leave._id}`, { status: newStatus });
@@ -1706,7 +1747,9 @@ function Leaves() {
                   </tr>
                 </thead>
                 <tbody>
-                  {currentItems.map((leave, index) => (
+                  {currentItems.map((leave, index) => {
+                    const isOwnLeave = String(user?._id || user?.userId || user?.id) === String(leave.employee?._id || leave.employee);
+                    return (
                     <tr key={leave._id} style={{ borderBottom: index < currentItems.length - 1 ? "1px solid #f8fafc" : "none" }}>
                       <td data-label="S.No" style={{ padding: "12px 16px", minWidth: "50px", color: "#64748b", fontSize: "12px", fontWeight: 500 }}>
                         {indexOfFirstItem + index + 1}
@@ -1885,7 +1928,7 @@ function Leaves() {
                       </td>
                       <td data-label="Status" style={{ padding: "12px 16px", minWidth: "100px" }}>
                         <div style={{ position: 'relative' }}>
-                          {(canRespond && (isRoleAdmin || String(leave.employee?._id || leave.employee) !== String(user?._id || user?.userId || user?.id))) ? (
+                          {(canRespond && (isRoleAdmin || !isOwnLeave)) ? (
                             <div
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2040,8 +2083,8 @@ function Leaves() {
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
                           </button>
 
-                          {/* Respond Button */}
-                          {canRespond && !(user?._id === leave.employee?._id) && (
+                          {/* Respond Button: Only HR/Admin and not own leave */}
+                          {canRespond && !isOwnLeave && (
                             <button
                               className="ist-action-btn"
                               title="Respond"
@@ -2053,8 +2096,8 @@ function Leaves() {
                             </button>
                           )}
 
-                          {/* Edit Button */}
-                          {user?._id === leave.employee?._id && leave.status === 'pending' && (
+                          {/* Edit Button: Only own leave and only if NOT approved */}
+                          {isOwnLeave && leave.status !== 'approved' && (
                             <button
                               className="ist-action-btn"
                               title="Edit"
@@ -2067,7 +2110,7 @@ function Leaves() {
                           )}
 
                           {/* Delete Button */}
-                          {hasDeletePermission && (isRoleAdmin || user?._id === leave.employee?._id) && leave.status === 'pending' && (
+                          {hasDeletePermission && (isRoleAdmin || isOwnLeave) && leave.status === 'pending' && (
                             <button
                               className="ist-action-btn"
                               title="Delete"
@@ -2081,7 +2124,8 @@ function Leaves() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

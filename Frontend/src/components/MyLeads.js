@@ -616,24 +616,37 @@ function MyLeads() {
     return merged;
   }, [leads, metaLeads, isAdmin]);
 
-  // ── Active employees for assignment (Sales Head/Admin can assign to anyone) ───────────
+  // ── Active employees for assignment (Only active employees with Sales / Sales Head role) ───────────
   const salesEmployees = useMemo(() => {
-    const currentUserId = user?._id || user?.id;
     return employees.filter(emp => {
+      if (!emp) return false;
+
       // Must be active
-      if (emp.isActive === false || emp.status === 'Inactive') return false;
+      if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive' || emp.status === 'Suspended' || emp.status === 'Terminated') {
+        return false;
+      }
 
-      // Do not show current user in the assignment list
-      if (currentUserId && String(emp._id) === String(currentUserId)) return false;
+      const roleName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
+      const department = (emp.department || '').toLowerCase().trim();
+      const designation = (emp.designation || '').toLowerCase().trim();
 
-      // Sales Head and Admin can assign leads to anyone in the organisation
-      if (hasFullAccess) return true;
+      // Only employees which have sales or sales head role / designation
+      const isSalesOrSalesHead =
+        roleName === 'sales' ||
+        roleName === 'sales head' ||
+        roleName === 'saleshead' ||
+        roleName === 'head of sales' ||
+        roleName.includes('sales') ||
+        roleName.includes('business development') ||
+        roleName.includes('bde') ||
+        department === 'sales' ||
+        department.includes('sales') ||
+        designation.includes('sales') ||
+        designation.includes('bde');
 
-      // Other roles can only assign to sales employees
-      const r = (emp.role?.name || emp.role || '').toLowerCase();
-      return r.includes('sales');
+      return isSalesOrSalesHead;
     });
-  }, [employees, user?._id, user?.id, hasFullAccess]);
+  }, [employees]);
 
   // ── Sales and Marketing employees (for filtering) ────────────────────────
   const filterEmployees = useMemo(() =>

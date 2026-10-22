@@ -114,10 +114,25 @@ function Leads() {
       console.log('Fetching sales employees...');
       const response = await axios.get('/employees');
       console.log('All employees response:', response.data);
-      // Filter only employees with Sales role
+      // Filter only active employees with Sales or Sales Head role
       const salesEmps = response.data.filter(emp => {
-        console.log(`Checking employee: ${emp.firstName} ${emp.lastName}, Role:`, emp.role?.name);
-        return emp.role?.name === 'Sales';
+        if (!emp || emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive') return false;
+        const roleName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
+        const department = (emp.department || '').toLowerCase().trim();
+        const designation = (emp.designation || '').toLowerCase().trim();
+        return (
+          roleName === 'sales' ||
+          roleName === 'sales head' ||
+          roleName === 'saleshead' ||
+          roleName === 'head of sales' ||
+          roleName.includes('sales') ||
+          roleName.includes('business development') ||
+          roleName.includes('bde') ||
+          department === 'sales' ||
+          department.includes('sales') ||
+          designation.includes('sales') ||
+          designation.includes('bde')
+        );
       });
       console.log('Filtered sales employees:', salesEmps);
       setSalesEmployees(salesEmps);
