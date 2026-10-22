@@ -648,13 +648,8 @@ function MyLeads() {
     });
   }, [employees]);
 
-  // ── Sales and Marketing employees (for filtering) ────────────────────────
-  const filterEmployees = useMemo(() =>
-    employees.filter(emp =>
-      emp.role?.name?.toLowerCase().includes('sales') ||
-      emp.role?.name?.toLowerCase().includes('marketing')
-    ),
-    [employees]);
+  // ── Sales employees (for filtering) ────────────────────────
+  const filterEmployees = salesEmployees;
 
   // ── Base dataset for stats: for sales and regular employees only their assigned or created leads ──────────
   const statsLeads = useMemo(() => {
@@ -2884,7 +2879,7 @@ function MyLeads() {
       {/* Table Card */}
       <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'visible', boxShadow: '0 1px 2px rgba(15,23,42,0.04)', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {/* Filter Bar */}
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', background: '#fafafa', borderRadius: '14px 14px 0 0', position: 'relative', zIndex: 10 }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', background: '#fafafa', borderRadius: '14px 14px 0 0', position: 'relative', zIndex: openFilterDrop ? 100 : 20 }}>
           {/* Search */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '8px 12px', flex: '1', minWidth: '220px', maxWidth: '320px', transition: 'all 0.2s' }}
             onFocus={e => {
@@ -2914,7 +2909,7 @@ function MyLeads() {
               const label = filterStatus || 'All Statuses';
               const isActive = !!filterStatus;
               return (
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative', zIndex: openFilterDrop === 'status' ? 101 : 'auto' }}>
                   <button
                     onClick={() => { setOpenFilterDrop(p => p === 'status' ? null : 'status'); setFilterEmpSearch(''); }}
                     style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 9px', border: `1px solid ${isActive ? '#3b775e' : '#e2e8f0'}`, borderRadius: '8px', fontSize: '11px', color: isActive ? '#3b775e' : '#475569', background: isActive ? '#f0fdf4' : '#fff', cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 500, transition: 'all 0.15s', whiteSpace: 'nowrap' }}
@@ -2947,7 +2942,7 @@ function MyLeads() {
               const label = filterSource || 'All Sources';
               const isActive = !!filterSource;
               return (
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative', zIndex: openFilterDrop === 'source' ? 101 : 'auto' }}>
                   <button
                     onClick={() => { setOpenFilterDrop(p => p === 'source' ? null : 'source'); setFilterEmpSearch(''); }}
                     style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 9px', border: `1px solid ${isActive ? '#3b775e' : '#e2e8f0'}`, borderRadius: '8px', fontSize: '11px', color: isActive ? '#3b775e' : '#475569', background: isActive ? '#f0fdf4' : '#fff', cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 500, transition: 'all 0.15s', whiteSpace: 'nowrap' }}
@@ -2975,7 +2970,7 @@ function MyLeads() {
               );
             })()}
 
-            {/* Employees — multi-column grid card (hidden for regular employees) */}
+            {/* Employees — single-column refined card (hidden for regular employees) */}
             {hasFullAccess && (() => {
               const selectedEmp = filterEmployees.find(e => e._id === filterEmployee);
               const label = selectedEmp ? `${selectedEmp.firstName} ${selectedEmp.lastName}` : 'All Employees';
@@ -2985,7 +2980,7 @@ function MyLeads() {
                 return name.includes(filterEmpSearch.toLowerCase());
               });
               return (
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative', zIndex: openFilterDrop === 'employee' ? 101 : 'auto' }}>
                   <button
                     onClick={() => { setOpenFilterDrop(p => p === 'employee' ? null : 'employee'); setFilterEmpSearch(''); }}
                     style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 9px', border: `1px solid ${isActive ? '#3b775e' : '#e2e8f0'}`, borderRadius: '8px', fontSize: '11px', color: isActive ? '#3b775e' : '#475569', background: isActive ? '#f0fdf4' : '#fff', cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 500, transition: 'all 0.15s', whiteSpace: 'nowrap' }}
@@ -2994,19 +2989,31 @@ function MyLeads() {
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                   </button>
                   {openFilterDrop === 'employee' && (
-                    <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 1000, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '14px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '12px', width: '520px', maxWidth: '90vw' }}>
-                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a', marginBottom: '10px', padding: '0 2px' }}>All Employees</div>
+                    <div style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 6px)',
+                      left: 0,
+                      zIndex: 1000,
+                      background: '#fff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '14px',
+                      boxShadow: '0 10px 35px rgba(15,23,42,0.15)',
+                      padding: '12px',
+                      width: '280px',
+                      maxWidth: '90vw'
+                    }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', padding: '0 2px' }}>Sales Employees</div>
                       <input
                         autoFocus
-                        placeholder="Search employees..."
+                        placeholder="Search sales employees..."
                         value={filterEmpSearch}
                         onChange={e => setFilterEmpSearch(e.target.value)}
-                        style={{ width: '100%', padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px', outline: 'none', marginBottom: '10px', boxSizing: 'border-box', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
+                        style={{ width: '100%', padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px', outline: 'none', marginBottom: '8px', boxSizing: 'border-box', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
                       />
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', maxHeight: '260px', overflowY: 'auto' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '250px', overflowY: 'auto' }}>
                         <button
                           onClick={() => { setFilterEmployee(''); setOpenFilterDrop(null); setFilterEmpSearch(''); }}
-                          style={{ padding: '7px 8px', borderRadius: '8px', border: 'none', background: !filterEmployee ? '#f0fdf4' : 'transparent', color: !filterEmployee ? '#15803d' : '#475569', fontSize: '11.5px', fontWeight: !filterEmployee ? 700 : 400, cursor: 'pointer', textAlign: 'left', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.12s' }}
+                          style={{ padding: '7px 10px', borderRadius: '8px', border: 'none', background: !filterEmployee ? '#f0fdf4' : 'transparent', color: !filterEmployee ? '#15803d' : '#475569', fontSize: '12px', fontWeight: !filterEmployee ? 700 : 400, cursor: 'pointer', textAlign: 'left', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.12s' }}
                           onMouseEnter={e => { if (filterEmployee) e.currentTarget.style.background = '#f0fdf4'; }}
                           onMouseLeave={e => { if (filterEmployee) e.currentTarget.style.background = 'transparent'; }}
                         >All Employees</button>
@@ -3017,12 +3024,35 @@ function MyLeads() {
                             <button
                               key={emp._id}
                               onClick={() => { setFilterEmployee(emp._id); setOpenFilterDrop(null); setFilterEmpSearch(''); }}
-                              style={{ padding: '7px 8px', borderRadius: '8px', border: 'none', background: active ? '#f0fdf4' : 'transparent', color: active ? '#15803d' : '#475569', fontSize: '11.5px', fontWeight: active ? 700 : 400, cursor: 'pointer', textAlign: 'left', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.12s' }}
+                              style={{
+                                padding: '7px 10px',
+                                borderRadius: '8px',
+                                border: 'none',
+                                background: active ? '#f0fdf4' : 'transparent',
+                                color: active ? '#15803d' : '#475569',
+                                fontSize: '12px',
+                                fontWeight: active ? 700 : 400,
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                fontFamily: "'Inter','Poppins','Segoe UI',sans-serif",
+                                transition: 'background 0.12s',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between'
+                              }}
                               onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#f8fafc'; }}
                               onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
-                            >{name}</button>
+                            >
+                              <span>{name}</span>
+                              {emp.designation && <span style={{ fontSize: '10px', color: '#94a3b8' }}>{emp.designation}</span>}
+                            </button>
                           );
                         })}
+                        {filteredEmps.length === 0 && (
+                          <div style={{ padding: '12px 8px', fontSize: '11.5px', color: '#94a3b8', textAlign: 'center' }}>
+                            No sales employees found
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -3041,7 +3071,7 @@ function MyLeads() {
                     : 'Any Date';
               const isActive = !!filterDate || !!filterEndDate;
               return (
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative', zIndex: openFilterDrop === 'date' ? 101 : 'auto' }}>
                   <button
                     onClick={() => { setOpenFilterDrop(p => p === 'date' ? null : 'date'); setFilterEmpSearch(''); }}
                     style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 9px', border: `1px solid ${isActive ? '#3b775e' : '#e2e8f0'}`, borderRadius: '8px', fontSize: '11px', color: isActive ? '#3b775e' : '#475569', background: isActive ? '#f0fdf4' : '#fff', cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 500, transition: 'all 0.15s', whiteSpace: 'nowrap' }}
@@ -3090,7 +3120,7 @@ function MyLeads() {
             {(() => {
               const label = sortBy === 'oldest' ? 'Oldest First' : 'Newest First';
               return (
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative', zIndex: openFilterDrop === 'sort' ? 101 : 'auto' }}>
                   <button
                     onClick={() => { setOpenFilterDrop(p => p === 'sort' ? null : 'sort'); setFilterEmpSearch(''); }}
                     style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 9px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '11px', color: '#475569', background: '#fff', cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 500, transition: 'all 0.15s', whiteSpace: 'nowrap' }}
@@ -3423,7 +3453,7 @@ function MyLeads() {
             </div>
           ) : (
             <table className="ist-tbl" style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 5 }}>
                 <tr style={{ boxShadow: '0 1px 0 #f1f5f9' }}>
                   {multiAssignMode && (
                     <th style={{ width: '52px', textAlign: 'center', padding: '0 6px', position: 'relative' }}>
