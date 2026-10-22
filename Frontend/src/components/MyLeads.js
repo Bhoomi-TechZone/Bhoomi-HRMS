@@ -65,12 +65,18 @@ function MyLeads() {
   const isSalesHead =
     roleNormalized.includes('sales head') ||
     roleNormalized === 'saleshead' ||
-    roleNormalized === 'head of sales';
+    roleNormalized === 'head of sales' ||
+    designationLower.includes('sales head') ||
+    designationLower === 'saleshead' ||
+    designationLower === 'head of sales';
 
   const isSalesManager =
     roleNormalized.includes('sales manager') ||
     roleNormalized.includes('salesmanager') ||
-    roleNormalized === 'manager of sales';
+    roleNormalized === 'manager of sales' ||
+    designationLower.includes('sales manager') ||
+    designationLower.includes('salesmanager') ||
+    designationLower === 'manager of sales';
 
   // Only Admin, Sales Head, and Sales Manager have full company visibility across sales executives
   // Standard roles (Sales Executives, Employees, etc.) only see their own created or assigned leads
@@ -184,7 +190,10 @@ function MyLeads() {
   const [uploadRows, setUploadRows] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [uploadedFileName, setUploadedFileName] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
+  const modalFileInputRef = useRef(null);
   // ── Assign dropdown for Excel leads ──────────────────────────────────────
   const [openAssignDropdown, setOpenAssignDropdown] = useState(null); // leadId
   const [assignDropPos, setAssignDropPos] = useState({ top: 0, left: 0 });
@@ -2029,40 +2038,148 @@ function MyLeads() {
 
   // ── Excel Upload handlers ─────────────────────────────────────────────────
 
-  // Canonical field names used in the import template and normaliser
+  // Canonical field names used in the import template, guide and normaliser
   const IMPORT_FIELDS = [
-    { key: 'name', label: 'Client Name', aliases: ['name', 'client', 'client_name', 'clientname', 'lead_name', 'leadname', 'contact_person', 'person', 'full_name', 'customer'] },
-    { key: 'company', label: 'Company', aliases: ['company', 'company_name', 'companyname', 'organisation', 'organization', 'firm', 'business'] },
-    { key: 'phone', label: 'Phone', aliases: ['phone', 'mobile', 'contact', 'phone_number', 'contact_number', 'phone_no', 'mobileno', 'phoneno', 'number', 'mob'] },
-    { key: 'email', label: 'Email', aliases: ['email', 'email_address', 'email_id', 'emailid', 'mail'] },
-    { key: 'country', label: 'Country', aliases: ['country', 'nation', 'location'] },
-    { key: 'industry', label: 'Industry', aliases: ['industry', 'sector', 'vertical', 'domain'] },
-    { key: 'requirements', label: 'Requirement', aliases: ['requirement', 'requirements', 'product', 'service', 'req', 'need', 'needs', 'description'] },
-    { key: 'source', label: 'Source', aliases: ['source', 'lead_source', 'leadsource'] },
-    { key: 'budget', label: 'Budget', aliases: ['budget', 'amount', 'value'] },
-    { key: 'notes', label: 'Notes', aliases: ['notes', 'note', 'remarks', 'comment', 'comments'] },
-    { key: 'date', label: 'Date', aliases: ['date', 'lead_date', 'enquiry_date', 'created_date', 'entry_date'] },
-    { key: 'leadType', label: 'Lead Type', aliases: ['leadtype', 'lead_type', 'type', 'priority'] },
+    {
+      key: 'name',
+      label: 'Client Name',
+      required: true,
+      example: 'Rahul Sharma',
+      desc: 'Full name or contact person for this lead.',
+      aliases: ['client_name', 'name', 'client', 'clientname', 'lead_name', 'leadname', 'contact_person', 'person', 'full_name', 'customer']
+    },
+    {
+      key: 'phone',
+      label: 'Phone',
+      required: true,
+      example: '9876543210',
+      desc: 'Mobile or phone number with or without country code.',
+      aliases: ['phone', 'mobile', 'contact', 'phone_number', 'contact_number', 'phone_no', 'mobileno', 'phoneno', 'number', 'mob']
+    },
+    {
+      key: 'email',
+      label: 'Email',
+      required: false,
+      example: 'rahul.sharma@techcorp.com',
+      desc: 'Valid business or personal email address.',
+      aliases: ['email', 'email_address', 'email_id', 'emailid', 'mail']
+    },
+    {
+      key: 'company',
+      label: 'Company',
+      required: false,
+      example: 'TechCorp Solutions Ltd',
+      desc: 'Company, organization, firm or business name.',
+      aliases: ['company', 'company_name', 'companyname', 'organisation', 'organization', 'firm', 'business']
+    },
+    {
+      key: 'country',
+      label: 'Country / Location',
+      required: false,
+      example: 'India / Maharashtra',
+      desc: 'Country, state, region, or city of the client.',
+      aliases: ['country', 'nation', 'location', 'state', 'city']
+    },
+    {
+      key: 'industry',
+      label: 'Industry',
+      required: false,
+      example: 'Information Technology',
+      desc: 'Client industry sector (e.g. IT, Healthcare, Manufacturing).',
+      aliases: ['industry', 'sector', 'vertical', 'domain']
+    },
+    {
+      key: 'requirements',
+      label: 'Requirement',
+      required: false,
+      example: 'HRMS Software & Payroll Automation',
+      desc: 'Product, service or software need details.',
+      aliases: ['requirement', 'requirements', 'product', 'service', 'req', 'need', 'needs', 'description']
+    },
+    {
+      key: 'source',
+      label: 'Source',
+      required: false,
+      example: 'Website / IndiaMART / LinkedIn',
+      desc: 'Lead generation channel (Defaults to "Excel Import" if blank).',
+      aliases: ['source', 'lead_source', 'leadsource', 'channel']
+    },
+    {
+      key: 'leadType',
+      label: 'Lead Type',
+      required: false,
+      example: 'Hot, Warm, or Cold',
+      desc: 'Lead temperature / priority.',
+      aliases: ['leadtype', 'lead_type', 'type', 'priority']
+    },
+    {
+      key: 'budget',
+      label: 'Budget',
+      required: false,
+      example: '85000',
+      desc: 'Estimated budget or deal value.',
+      aliases: ['budget', 'amount', 'value', 'deal_value']
+    },
+    {
+      key: 'notes',
+      label: 'Notes / Remarks',
+      required: false,
+      example: 'Interested in demo next week',
+      desc: 'Any special discussion notes or remarks.',
+      aliases: ['notes', 'note', 'remarks', 'comment', 'comments']
+    },
+    {
+      key: 'date',
+      label: 'Date',
+      required: false,
+      example: '22/10/2026',
+      desc: 'Lead creation date (Defaults to current date if blank).',
+      aliases: ['date', 'lead_date', 'enquiry_date', 'created_date', 'entry_date']
+    },
   ];
 
-  const handleDownloadTemplate = () => {
-    const headers = IMPORT_FIELDS.map(f => f.label);
-    const example = [
-      'John Smith', 'Acme Corp', '9876543210', 'john@acme.com',
-      'India', 'IT', 'ERP Software', 'Excel Import',
-      '50000', 'Interested in demo', '06/06/2026', 'Hot'
-    ];
-    const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    // Set column widths
-    ws['!cols'] = headers.map(() => ({ wch: 18 }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Leads Template');
-    XLSX.writeFile(wb, 'leads_import_template.xlsx');
+  const handleDownloadTemplateXlsx = () => {
+    try {
+      const headers = IMPORT_FIELDS.map(f => f.label);
+      const ws = XLSX.utils.aoa_to_sheet([headers]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 5, 18) }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Leads Template');
+      XLSX.writeFile(wb, 'leads_template.xlsx');
+    } catch (err) {
+      console.error('Error downloading XLSX template:', err);
+      alert('Could not download Excel template. Please try again.');
+    }
   };
 
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0];
+  const handleDownloadTemplateCsv = () => {
+    try {
+      const headers = IMPORT_FIELDS.map(f => f.label);
+      const ws = XLSX.utils.aoa_to_sheet([headers]);
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'leads_template.csv');
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error downloading CSV template:', err);
+      alert('Could not download CSV template. Please try again.');
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    handleDownloadTemplateXlsx();
+  };
+
+  const processFile = (file) => {
     if (!file) return;
+    setUploadedFileName(file.name);
     setUploadError('');
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -2070,12 +2187,14 @@ function MyLeads() {
         const wb = XLSX.read(evt.target.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
-        if (!json.length) { setUploadError('No data found in the file.'); return; }
+        if (!json.length) {
+          setUploadError('No data found in the selected file.');
+          return;
+        }
 
         const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
         const normalise = (row) => {
-          // Clean all keys: lowercase, non-alphanumeric → _
           const r = {};
           Object.keys(row).forEach(k => {
             const clean = k.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
@@ -2087,7 +2206,6 @@ function MyLeads() {
               const v = r[k];
               if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
             }
-            // Partial match fallback
             for (const k of keys) {
               for (const rKey of Object.keys(r)) {
                 if (rKey.includes(k) || k.includes(rKey)) {
@@ -2104,7 +2222,6 @@ function MyLeads() {
             result[f.key] = get(...f.aliases);
           });
 
-          // Defaults
           result.source = result.source || 'Excel Import';
           result.date = result.date || today;
           result.name = result.name || '—';
@@ -2112,27 +2229,36 @@ function MyLeads() {
           return result;
         };
 
-        setUploadRows(json.map(normalise));
+        const parsed = json.map(normalise);
+        setUploadRows(parsed);
         setShowUploadModal(true);
       } catch (err) {
-        setUploadError('Failed to parse file. Please use a valid .xlsx or .csv file.');
+        setUploadError('Failed to parse file. Please use a valid .xlsx, .xls, or .csv file.');
       }
     };
     reader.readAsBinaryString(file);
+  };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processFile(file);
+    }
     e.target.value = '';
   };
 
   const handleUploadSubmit = async () => {
     if (!uploadRows.length) return;
     setUploading(true);
+    setUploadError('');
     try {
-      const res = await api.post('/leads/bulk-import', { leads: uploadRows });
-      alert(`Import complete! ${res.data.imported} leads imported.${res.data.errors?.length ? ` ${res.data.errors.length} rows had errors.` : ''}`);
+      await api.post('/leads/bulk-import', { leads: uploadRows });
       setShowUploadModal(false);
       setUploadRows([]);
+      setUploadedFileName('');
       fetchAll();
     } catch (err) {
-      setUploadError(err.response?.data?.message || 'Import failed');
+      setUploadError(err.response?.data?.message || 'Import failed. Please verify your file.');
     } finally {
       setUploading(false);
     }
@@ -2625,8 +2751,11 @@ function MyLeads() {
               />
               <button
                 className="leads-upload-btn"
-                onClick={() => { setUploadError(''); fileInputRef.current?.click(); }}
-                title="Upload Excel to import leads"
+                onClick={() => {
+                  setUploadError('');
+                  setShowUploadModal(true);
+                }}
+                title="Import Leads from Excel or CSV"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -5313,93 +5442,797 @@ function MyLeads() {
 
 
 
-      {/* ── Excel Upload Preview Modal ────────────────────────────────────── */}
+      {/* ── Professional Excel & CSV Upload & Data Preview Modal ───────────────── */}
       {showUploadModal && (
-        <div onClick={() => { if (!uploading) { setShowUploadModal(false); setUploadRows([]); } }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '20px' }}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ width: '100%', maxWidth: '1000px', background: '#fff', borderRadius: '18px', border: '1px solid #e2e8f0', boxShadow: '0 24px 48px rgba(15,23,42,0.18)', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+        <div
+          onClick={() => {
+            if (!uploading) {
+              setShowUploadModal(false);
+              setUploadRows([]);
+              setUploadedFileName('');
+            }
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.68)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2100,
+            padding: '16px',
+            fontFamily: "'Inter', 'Poppins', 'Segoe UI', sans-serif",
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '96vw',
+              maxWidth: '1280px',
+              height: '92vh',
+              maxHeight: '94vh',
+              background: '#ffffff',
+              borderRadius: '22px',
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 25px 70px -15px rgba(15, 23, 42, 0.35)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+            }}
+          >
+            {/* ── Dedicated Spinner Loader Overlay during Import ── */}
+            {uploading && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'rgba(255, 255, 255, 0.93)',
+                  backdropFilter: 'blur(6px)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 100,
+                  borderRadius: '22px',
+                  padding: '24px',
+                  textAlign: 'center',
+                }}
+              >
+                <style>{`
+                  @keyframes importModalPulse {
+                    0%, 100% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.08); opacity: 0.85; }
+                  }
+                  @keyframes importModalRotate {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                  }
+                `}</style>
 
-            {/* Header */}
-            <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: '17px', fontWeight: 800, color: '#0f172a' }}>Import Leads from Excel</div>
-                <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '3px' }}>{uploadRows.length} rows found — review before importing</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button onClick={handleDownloadTemplate}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 13px', borderRadius: '8px', border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#15803d', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-                  Download Template
-                </button>
-                <button onClick={() => { setShowUploadModal(false); setUploadRows([]); }}
-                  style={{ background: 'transparent', border: 'none', fontSize: '22px', color: '#94a3b8', cursor: 'pointer', lineHeight: 1 }}>×</button>
-              </div>
-            </div>
-
-            {/* Column name guide */}
-            <div style={{ padding: '12px 22px', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                📋 Required / Accepted Column Names in your Excel file:
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {IMPORT_FIELDS.map(f => (
-                  <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '7px', padding: '4px 9px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#0f172a' }}>{f.label}</span>
-                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>({f.aliases.slice(0, 3).join(', ')})</span>
+                {/* Animated Rotating Spinner */}
+                <div style={{ position: 'relative', width: '82px', height: '82px', marginBottom: '22px' }}>
+                  <div
+                    style={{
+                      width: '82px',
+                      height: '82px',
+                      borderRadius: '50%',
+                      border: '6px solid #e2e8f0',
+                      borderTopColor: '#16a34a',
+                      borderRightColor: '#10b981',
+                      animation: 'importModalRotate 0.85s cubic-bezier(0.5, 0.1, 0.4, 0.9) infinite',
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#16a34a',
+                      animation: 'importModalPulse 1.8s ease-in-out infinite',
+                    }}
+                  >
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
                   </div>
-                ))}
+                </div>
+
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+                  Importing {uploadRows.length} Leads...
+                </div>
+                <div style={{ fontSize: '13.5px', color: '#64748b', marginTop: '8px', maxWidth: '420px', lineHeight: 1.5 }}>
+                  Please wait while records are being validated and added to the database.
+                </div>
+
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginTop: '18px', padding: '6px 14px', borderRadius: '20px', background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#059669', fontSize: '12px', fontWeight: 700 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" style={{ animation: 'importModalRotate 1s linear infinite' }}>
+                    <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
+                  </svg>
+                  <span>Processing import, please do not close this window</span>
+                </div>
+              </div>
+            )}
+
+            {/* Hidden file input */}
+            <input
+              ref={modalFileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              style={{ display: 'none' }}
+              onChange={handleFileSelect}
+            />
+
+            {/* ── Modal Header ── */}
+            <div
+              style={{
+                padding: '18px 28px',
+                borderBottom: '1px solid #f1f5f9',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '14px',
+                background: 'linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%)',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div
+                  style={{
+                    width: '44px',
+                    height: '44px',
+                    borderRadius: '13px',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#fff',
+                    boxShadow: '0 8px 18px -4px rgba(16, 185, 129, 0.38)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="8" y1="13" x2="16" y2="13" />
+                    <line x1="8" y1="17" x2="16" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
+                  </svg>
+                </div>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span>Import Leads from Excel & CSV</span>
+                    {uploadRows.length > 0 && (
+                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>
+                        {uploadRows.length} Leads Loaded
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                    {uploadRows.length > 0
+                      ? 'Review all parsed leads below before confirming import.'
+                      : 'Upload your spreadsheet or download blank field templates.'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Template Download Buttons & Close */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={handleDownloadTemplateCsv}
+                  title="Download blank CSV template with field headers"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px 14px',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#334155',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                  }}
+                  onMouseOver={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#94a3b8'; }}
+                  onMouseOut={e => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <path d="M8 13h2" />
+                    <path d="M8 17h4" />
+                  </svg>
+                  <span>Template <strong>CSV</strong></span>
+                </button>
+
+                <button
+                  onClick={handleDownloadTemplateXlsx}
+                  title="Download blank Excel (.xlsx) template with field headers"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px 14px',
+                    borderRadius: '10px',
+                    border: '1px solid #16a34a',
+                    background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: '0 4px 14px rgba(22, 163, 74, 0.28)',
+                  }}
+                  onMouseOver={e => { e.currentTarget.style.opacity = '0.92'; }}
+                  onMouseOut={e => { e.currentTarget.style.opacity = '1'; }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="8" y1="13" x2="16" y2="17" />
+                    <line x1="16" y1="13" x2="8" y2="17" />
+                  </svg>
+                  <span>Template <strong>XLSX</strong></span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (!uploading) {
+                      setShowUploadModal(false);
+                      setUploadRows([]);
+                      setUploadedFileName('');
+                    }
+                  }}
+                  disabled={uploading}
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: '#f1f5f9',
+                    border: 'none',
+                    borderRadius: '9px',
+                    color: '#64748b',
+                    cursor: uploading ? 'not-allowed' : 'pointer',
+                    marginLeft: '4px',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseOver={e => { if (!uploading) { e.currentTarget.style.background = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; } }}
+                  onMouseOut={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#64748b'; }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
               </div>
             </div>
 
-            {/* Preview table */}
-            <div style={{ overflowY: 'auto', flex: 1 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}>
-                <thead>
-                  <tr style={{ background: '#fafafa', position: 'sticky', top: 0 }}>
-                    {['#', 'Client Name', 'Company', 'Phone', 'Email', 'Country', 'Industry', 'Requirement', 'Source', 'Lead Type', 'Budget', 'Notes'].map(h => (
-                      <th key={h} style={{ padding: '9px 12px', fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'left', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {uploadRows.map((row, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #f8fafc' }}>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#94a3b8' }}>{i + 1}</td>
-                      <td style={{ padding: '8px 12px', fontSize: '11.5px', fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap' }}>{row.name || <span style={{ color: '#94a3b8' }}>—</span>}</td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#475569' }}>{row.company || <span style={{ color: '#94a3b8' }}>—</span>}</td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#475569', whiteSpace: 'nowrap' }}>{row.phone || '—'}</td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#475569', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.email || '—'}</td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#475569' }}>{row.country || '—'}</td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#475569' }}>{row.industry || '—'}</td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#475569', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.requirements || '—'}</td>
-                      <td style={{ padding: '8px 12px' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 9px', borderRadius: '999px', fontSize: '10.5px', fontWeight: 600, background: '#f0fdf4', color: '#15803d', whiteSpace: 'nowrap' }}>
-                          {row.source || 'Excel Import'}
+            {/* ── Scrollable Body: Full Data Preview or Spacious Dropzone ── */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+              {/* ── File Status Bar (when file is uploaded) ── */}
+              {uploadRows.length > 0 ? (
+                <div
+                  style={{
+                    border: '1.5px solid #a7f3d0',
+                    borderRadius: '14px',
+                    padding: '14px 20px',
+                    background: '#f0fdf4',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '16px',
+                    flexWrap: 'wrap',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <div
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '11px',
+                        background: '#dcfce7',
+                        color: '#15803d',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        border: '1px solid #bbf7d0',
+                      }}
+                    >
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                        <polyline points="22 4 12 14.01 9 11.01" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '14.5px', fontWeight: 800, color: '#166534', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span>{uploadedFileName || 'Uploaded Spreadsheet'}</span>
+                        <span style={{ fontSize: '11.5px', fontWeight: 700, background: '#16a34a', color: '#fff', padding: '2px 9px', borderRadius: '10px' }}>
+                          ✓ {uploadRows.length} Leads Ready to Import
                         </span>
-                      </td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#475569' }}>{row.leadType || '—'}</td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#475569' }}>{row.budget || '—'}</td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#475569', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.notes || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
+                        All imported columns and rows are previewed below. Click <strong>Import {uploadRows.length} Leads</strong> in the footer to proceed.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      onClick={() => modalFileInputRef.current?.click()}
+                      disabled={uploading}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: '9px',
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                        color: '#475569',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: uploading ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 21h5v-5" /></svg>
+                      Change File
+                    </button>
+                    <button
+                      onClick={() => {
+                        setUploadRows([]);
+                        setUploadedFileName('');
+                      }}
+                      disabled={uploading}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: '9px',
+                        border: '1px solid #fecaca',
+                        background: '#fef2f2',
+                        color: '#dc2626',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: uploading ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* ── Spacious Drag & Drop Upload Zone (when no file selected) ── */
+                <div
+                  onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) processFile(file);
+                  }}
+                  onClick={() => modalFileInputRef.current?.click()}
+                  style={{
+                    flex: 1,
+                    minHeight: '380px',
+                    border: isDragOver ? '2.5px dashed #10b981' : '2px dashed #cbd5e1',
+                    borderRadius: '18px',
+                    padding: '40px 24px',
+                    background: isDragOver ? '#ecfdf5' : 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textAlign: 'center',
+                    gap: '16px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  {/* ── Professional Uploader SVG Icon Image ── */}
+                  <div
+                    style={{
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.08) translateY(-4px)'}
+                    onMouseLeave={e => e.currentTarget.style.transform = 'scale(1) translateY(0)'}
+                    title="Click to browse and upload file"
+                  >
+                    <svg width="128" height="106" viewBox="0 0 128 106" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <linearGradient id="cloudBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor="#ffffff" />
+                          <stop offset="100%" stopColor="#f0fdf4" />
+                        </linearGradient>
+                        <linearGradient id="arrowGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#10b981" />
+                          <stop offset="100%" stopColor="#047857" />
+                        </linearGradient>
+                        <linearGradient id="excelGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor="#107c41" />
+                          <stop offset="100%" stopColor="#15803d" />
+                        </linearGradient>
+                        <linearGradient id="csvGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" stopColor="#0284c7" />
+                          <stop offset="100%" stopColor="#0369a1" />
+                        </linearGradient>
+                        <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+                          <feDropShadow dx="0" dy="8" stdDeviation="10" floodColor="#10b981" floodOpacity="0.16" />
+                        </filter>
+                        <filter id="arrowShadow" x="-20%" y="-20%" width="140%" height="140%">
+                          <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="#047857" floodOpacity="0.32" />
+                        </filter>
+                      </defs>
+
+                      {/* Ambient Glow */}
+                      <circle cx="64" cy="53" r="46" fill="#dcfce7" opacity="0.65" />
+
+                      {/* Floating Left Card (Excel Sheet Preview) */}
+                      <g transform="rotate(-10 32 36)">
+                        <rect x="20" y="18" width="34" height="42" rx="6" fill="#ffffff" stroke="#86efac" strokeWidth="1.5" filter="url(#softShadow)" />
+                        <rect x="24" y="22" width="13" height="10" rx="3" fill="url(#excelGrad)" />
+                        <text x="30.5" y="29.5" fill="#ffffff" fontSize="7" fontWeight="900" textAnchor="middle" fontFamily="system-ui, sans-serif">X</text>
+                        <line x1="24" y1="36" x2="48" y2="36" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" />
+                        <line x1="24" y1="41" x2="44" y2="41" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" />
+                        <line x1="24" y1="46" x2="48" y2="46" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" />
+                        <line x1="24" y1="51" x2="38" y2="51" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" />
+                      </g>
+
+                      {/* Floating Right Card (CSV File Preview) */}
+                      <g transform="rotate(12 96 36)">
+                        <rect x="74" y="18" width="34" height="42" rx="6" fill="#ffffff" stroke="#7dd3fc" strokeWidth="1.5" filter="url(#softShadow)" />
+                        <rect x="78" y="22" width="15" height="10" rx="3" fill="url(#csvGrad)" />
+                        <text x="85.5" y="29.5" fill="#ffffff" fontSize="6" fontWeight="900" textAnchor="middle" fontFamily="system-ui, sans-serif">CSV</text>
+                        <line x1="78" y1="36" x2="102" y2="36" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" />
+                        <line x1="78" y1="41" x2="98" y2="41" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" />
+                        <line x1="78" y1="46" x2="102" y2="46" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" />
+                        <line x1="78" y1="51" x2="92" y2="51" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" />
+                      </g>
+
+                      {/* Main Cloud Base */}
+                      <path
+                        d="M92 74H36C26.06 74 18 65.94 18 56C18 46.84 24.87 39.28 33.91 38.15C36.19 25.83 46.88 16.5 59.8 16.5C71.36 16.5 81.21 24.02 84.66 34.48C86.13 34.16 87.67 34 89.24 34C98.49 34 106 41.51 106 50.76C106 51.62 105.93 52.46 105.8 53.28C108.97 55.43 111 59.07 111 63.2C111 69.16 106.16 74 100.2 74H92Z"
+                        fill="url(#cloudBgGrad)"
+                        stroke="#6ee7b7"
+                        strokeWidth="2.2"
+                        filter="url(#softShadow)"
+                      />
+
+                      {/* Upward Upload Arrow with Circle Badge */}
+                      <g filter="url(#arrowShadow)">
+                        <circle cx="64" cy="58" r="20" fill="url(#arrowGrad)" />
+                        <path
+                          d="M64 67V49M64 49L57 56M64 49L71 56"
+                          stroke="#ffffff"
+                          strokeWidth="3.2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </g>
+
+                      {/* Sparkles / Accents */}
+                      <path d="M22 16L23.5 20L27.5 21.5L23.5 23L22 27L20.5 23L16.5 21.5L20.5 20L22 16Z" fill="#10b981" opacity="0.8" />
+                      <path d="M106 14L107.2 17.5L110.5 18.7L107.2 19.9L106 23.4L104.8 19.9L101.5 18.7L104.8 17.5L106 14Z" fill="#3b82f6" opacity="0.8" />
+                      <circle cx="64" cy="11" r="2" fill="#10b981" opacity="0.6" />
+                    </svg>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
+                      Drag & Drop Your Leads File Here
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', maxWidth: '440px', lineHeight: 1.5 }}>
+                      Supports Microsoft Excel (<strong>.xlsx</strong>, <strong>.xls</strong>) and CSV (<strong>.csv</strong>) files. Column headers are automatically detected.
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginTop: '4px', fontSize: '12px', color: '#64748b' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>
+                      Automatic column mapping
+                    </span>
+                    <span>•</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>
+                      Live data preview before import
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Full Height Preview of All Uploaded Leads ── */}
+              {uploadRows.length > 0 && (
+                <div
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '16px',
+                    overflow: 'hidden',
+                    background: '#ffffff',
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+                    minHeight: '300px',
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: '12px 20px',
+                      background: '#f8fafc',
+                      borderBottom: '1px solid #e2e8f0',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '8px',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.3">
+                        <line x1="8" y1="6" x2="21" y2="6" />
+                        <line x1="8" y1="12" x2="21" y2="12" />
+                        <line x1="8" y1="18" x2="21" y2="18" />
+                        <line x1="3" y1="6" x2="3.01" y2="6" />
+                        <line x1="3" y1="12" x2="3.01" y2="12" />
+                        <line x1="3" y1="18" x2="3.01" y2="18" />
+                      </svg>
+                      <span style={{ fontSize: '13.5px', fontWeight: 800, color: '#0f172a' }}>
+                        All Imported Data Preview ({uploadRows.length} Leads)
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                      Scroll horizontally or vertically to inspect all columns & rows
+                    </span>
+                  </div>
+
+                  <div style={{ flex: 1, overflow: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px', minWidth: '1100px' }}>
+                      <thead>
+                        <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 2, borderBottom: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: '50px' }}>#</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Client Name</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Phone</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Email</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Company</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Country</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Industry</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Requirement</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Source</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Lead Type</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Budget</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Notes</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {uploadRows.map((row, idx) => (
+                          <tr
+                            key={idx}
+                            style={{
+                              borderBottom: idx === uploadRows.length - 1 ? 'none' : '1px solid #f1f5f9',
+                              background: idx % 2 === 0 ? '#ffffff' : '#fafbfc',
+                              transition: 'background 0.1s',
+                            }}
+                          >
+                            <td style={{ padding: '10px 14px', color: '#94a3b8', fontWeight: 700 }}>{idx + 1}</td>
+                            <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                              {row.name && row.name !== '—' ? (
+                                row.name
+                              ) : (
+                                <span style={{ display: 'inline-flex', padding: '2px 7px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', fontSize: '11px', fontWeight: 700 }}>
+                                  Missing Name
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: row.phone ? '#166534' : '#94a3b8', fontFamily: 'monospace', whiteSpace: 'nowrap', fontWeight: 600 }}>
+                              {row.phone || '—'}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#2563eb', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {row.email || '—'}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#334155', whiteSpace: 'nowrap' }}>{row.company || '—'}</td>
+                            <td style={{ padding: '10px 14px', color: '#334155', whiteSpace: 'nowrap' }}>{row.country || '—'}</td>
+                            <td style={{ padding: '10px 14px', color: '#334155', whiteSpace: 'nowrap' }}>{row.industry || '—'}</td>
+                            <td style={{ padding: '10px 14px', color: '#334155', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {row.requirements || '—'}
+                            </td>
+                            <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                              <span style={{ display: 'inline-flex', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#15803d' }}>
+                                {row.source || 'Excel Import'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  background: row.leadType === 'Hot' ? '#fee2e2' : row.leadType === 'Warm' ? '#ffedd5' : '#f1f5f9',
+                                  color: row.leadType === 'Hot' ? '#dc2626' : row.leadType === 'Warm' ? '#c2410c' : '#475569',
+                                }}
+                              >
+                                {row.leadType || '—'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#334155', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                              {row.budget ? `₹${row.budget}` : '—'}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#64748b', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {row.notes || '—'}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                              {row.date || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
             </div>
 
-            {/* Footer */}
+            {/* Error Notification Banner */}
             {uploadError && (
-              <div style={{ padding: '10px 22px', background: '#fef2f2', borderTop: '1px solid #fecaca', fontSize: '12px', color: '#dc2626', fontWeight: 600 }}>{uploadError}</div>
+              <div
+                style={{
+                  padding: '12px 28px',
+                  background: '#fef2f2',
+                  borderTop: '1px solid #fecaca',
+                  fontSize: '12px',
+                  color: '#dc2626',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span>{uploadError}</span>
+              </div>
             )}
-            <div style={{ padding: '14px 22px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button onClick={() => { setShowUploadModal(false); setUploadRows([]); }} disabled={uploading}
-                style={{ padding: '9px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: '12px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}>
-                Cancel
-              </button>
-              <button onClick={handleUploadSubmit} disabled={uploading || !uploadRows.length}
-                style={{ padding: '9px 16px', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg, #3b775e 0%, #56a07a 100%)', color: '#fff', fontSize: '12px', fontWeight: 700, cursor: uploading ? 'not-allowed' : 'pointer', opacity: uploading ? 0.6 : 1, fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}>
-                {uploading ? 'Importing…' : `Import ${uploadRows.length} Leads`}
-              </button>
+
+            {/* ── Modal Footer ── */}
+            <div
+              style={{
+                padding: '16px 28px',
+                borderTop: '1px solid #f1f5f9',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                background: '#fafbfc',
+                flexWrap: 'wrap',
+                gap: '12px',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ fontSize: '12.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.3">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                {uploadRows.length > 0 ? (
+                  <span>Ready to import <strong style={{ color: '#0f172a' }}>{uploadRows.length}</strong> lead record(s)</span>
+                ) : (
+                  <span>Upload your Excel or CSV file above to begin import</span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    if (!uploading) {
+                      setShowUploadModal(false);
+                      setUploadRows([]);
+                      setUploadedFileName('');
+                    }
+                  }}
+                  disabled={uploading}
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: '11px',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#475569',
+                    fontSize: '12.5px',
+                    fontWeight: 700,
+                    cursor: uploading ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+
+                {uploadRows.length > 0 ? (
+                  <button
+                    onClick={handleUploadSubmit}
+                    disabled={uploading || !uploadRows.length}
+                    style={{
+                      padding: '10px 24px',
+                      borderRadius: '11px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                      color: '#ffffff',
+                      fontSize: '12.5px',
+                      fontWeight: 700,
+                      cursor: uploading ? 'not-allowed' : 'pointer',
+                      opacity: uploading ? 0.75 : 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: '0 4px 14px rgba(22, 163, 74, 0.3)',
+                    }}
+                  >
+                    {uploading ? (
+                      <>
+                        <svg style={{ animation: 'importModalRotate 0.85s linear infinite' }} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+                          <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
+                        </svg>
+                        <span>Importing Leads…</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        <span>Import {uploadRows.length} Leads</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => modalFileInputRef.current?.click()}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: '11px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #3b775e 0%, #56a07a 100%)',
+                      color: '#ffffff',
+                      fontSize: '12.5px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '7px',
+                      boxShadow: '0 4px 12px rgba(59, 119, 94, 0.25)',
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                    <span>Upload Leads File</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

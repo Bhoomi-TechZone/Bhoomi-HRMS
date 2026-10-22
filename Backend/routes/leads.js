@@ -25,12 +25,18 @@ function getLeadRoleAccess(user) {
   const isSalesHead =
     roleNormalized.includes('sales head') ||
     roleNormalized === 'saleshead' ||
-    roleNormalized === 'head of sales';
+    roleNormalized === 'head of sales' ||
+    designation.includes('sales head') ||
+    designation === 'saleshead' ||
+    designation === 'head of sales';
 
   const isSalesManager =
     roleNormalized.includes('sales manager') ||
     roleNormalized.includes('salesmanager') ||
-    roleNormalized === 'manager of sales';
+    roleNormalized === 'manager of sales' ||
+    designation.includes('sales manager') ||
+    designation.includes('salesmanager') ||
+    designation === 'manager of sales';
 
   const isAdmin =
     roleNormalized === 'admin' ||
