@@ -122,7 +122,7 @@ router.post('/add-manual', auth, checkPermission('leads', 'create'), async (req,
   }
 });
 
-// Bulk import leads from Excel (marketing role)
+// Bulk import leads from Excel (marketing role) with duplicate prevention
 router.post('/import-excel', auth, checkPermission('leads', 'create'), async (req, res) => {
   try {
     const { leads: leadsData } = req.body;
@@ -131,20 +131,62 @@ router.post('/import-excel', auth, checkPermission('leads', 'create'), async (re
       return res.status(400).json({ message: 'No leads data provided' });
     }
 
+    const extractCoreDigits = (val) => {
+      if (!val) return '';
+      const digits = String(val).replace(/\D/g, '');
+      return digits.length >= 10 ? digits.slice(-10) : digits;
+    };
+
+    const incomingCorePhones = leadsData
+      .map(r => extractCoreDigits(r.phone))
+      .filter(d => d.length >= 7);
+
+    const existingPhoneSet = new Set();
+    if (incomingCorePhones.length > 0) {
+      const dbLeads = await Lead.find({
+        $or: [
+          { phone: { $in: leadsData.map(r => String(r.phone || '').trim()).filter(Boolean) } },
+          { phone: { $regex: new RegExp(`(${incomingCorePhones.map(d => d.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')).join('|')})$`) } }
+        ]
+      }).select('phone').lean();
+
+      dbLeads.forEach(l => {
+        const c = extractCoreDigits(l.phone);
+        if (c && c.length >= 7) existingPhoneSet.add(c);
+      });
+    }
+
     const created = [];
+    const duplicates = [];
     const errors = [];
+    const seenInBatch = new Set();
 
     for (let i = 0; i < leadsData.length; i++) {
       const row = leadsData[i];
+      const rowNum = i + 1;
       try {
-        // Validate required fields
-        if (!row.name || !row.email) {
+        const rawPhone = row.phone ? String(row.phone).trim() : '';
+        const corePhone = extractCoreDigits(rawPhone);
+
+        if (!rawPhone || corePhone.length < 7) {
           errors.push({ 
-            row: i + 1, 
-            reason: 'Missing required fields: name and email are required' 
+            row: rowNum, 
+            reason: 'Phone number is required and must contain at least 7 digits' 
           });
           continue;
         }
+
+        if (seenInBatch.has(corePhone) || existingPhoneSet.has(corePhone)) {
+          duplicates.push({
+            row: rowNum,
+            phone: rawPhone,
+            name: row.name || '—',
+            reason: 'Duplicate lead: phone already exists in CRM or earlier in this file'
+          });
+          continue;
+        }
+
+        seenInBatch.add(corePhone);
         
         let normalizedLeadType = null;
         if (row.leadType) {
@@ -157,15 +199,19 @@ router.post('/import-excel', auth, checkPermission('leads', 'create'), async (re
           }
         }
 
+        const clientName = (row.name && String(row.name).trim() !== '—')
+          ? String(row.name).trim()
+          : (row.company ? String(row.company).trim() : '');
+
         const leadData = {
-          name: String(row.name).trim(),
-          email: String(row.email).toLowerCase().trim(),
-          phone: row.phone ? String(row.phone).trim() : '',
+          name: clientName,
+          email: row.email ? String(row.email).toLowerCase().trim() : '',
+          phone: rawPhone,
           company: row.company ? String(row.company).trim() : '',
           country: row.country ? String(row.country).trim() : '',
           industry: row.industry ? String(row.industry).trim() : '',
           date: row.date ? new Date(row.date) : new Date(),
-          addedOn: new Date(), // System timestamp
+          addedOn: new Date(),
           source: row.source || 'Email Marketing',
           leadType: normalizedLeadType,
           requirement: row.requirement ? String(row.requirement).trim() : '',
@@ -178,14 +224,18 @@ router.post('/import-excel', auth, checkPermission('leads', 'create'), async (re
         const lead = new Lead(leadData);
         await lead.save();
         created.push(lead._id);
+        existingPhoneSet.add(corePhone);
       } catch (err) {
-        errors.push({ row: i + 1, reason: err.message });
+        errors.push({ row: rowNum, reason: err.message });
       }
     }
 
     res.status(201).json({ 
+      success: true,
       imported: created.length, 
+      duplicatesCount: duplicates.length,
       failed: errors.length,
+      duplicates,
       errors 
     });
   } catch (error) {

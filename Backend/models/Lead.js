@@ -3,12 +3,12 @@ const mongoose = require('mongoose');
 const leadSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: true,
+    default: '',
     trim: true
   },
   email: {
     type: String,
-    required: true,
+    default: '',
     lowercase: true,
     trim: true
   },
@@ -138,5 +138,6 @@ const leadSchema = new mongoose.Schema({
 
 leadSchema.index({ status: 1, createdAt: -1 });
 leadSchema.index({ assignedTo: 1, status: 1 });
+leadSchema.index({ phone: 1 });
 
 module.exports = mongoose.model('Lead', leadSchema);

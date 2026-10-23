@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Lead = require('../models/Lead');
+const MetaLead = require('../models/MetaLead');
+const WebsiteLead = require('../models/WebsiteLead');
 const Deal = require('../models/Deal');
 const Client = require('../models/Client');
 const User = require('../models/User');
@@ -252,7 +254,38 @@ router.post('/', auth, checkPermission('leads', 'create'), async (req, res) => {
   }
 });
 
-// Bulk import leads from Excel upload
+// Clean and normalize any phone input from spreadsheet or database
+function cleanPhoneNumber(val) {
+  if (val === undefined || val === null) return '';
+  let str = String(val).trim();
+  if (!str) return '';
+
+  // 1. Handle scientific notation (e.g. 8.21888E+09 or 9.18218880283e+11)
+  if (/^[0-9.]+[eE][+-]?[0-9]+$/.test(str)) {
+    try {
+      str = BigInt(Math.floor(Number(str))).toString();
+    } catch (e) {
+      str = Number(str).toFixed(0);
+    }
+  }
+
+  // 2. Remove trailing .0 from Excel float numbers (e.g. 8218880283.0 -> 8218880283)
+  if (str.endsWith('.0')) {
+    str = str.slice(0, -2);
+  }
+
+  // 3. Remove all non-digit characters
+  return str.replace(/\D/g, '');
+}
+
+// Helper to extract core phone digits (strips country codes and symbols, takes last 10 digits)
+function extractCorePhoneDigits(val) {
+  const digits = cleanPhoneNumber(val);
+  if (!digits) return '';
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
+// Bulk import leads from Excel/CSV upload with professional duplicate prevention
 router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req, res) => {
   try {
     const { leads: leadsData } = req.body;
@@ -260,19 +293,97 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
       return res.status(400).json({ message: 'No leads data provided' });
     }
 
-    const created = [];
-    const errors = [];
+    // ── 1. Query all existing phone numbers in CRM database for exhaustive duplicate prevention ────
+    const existingPhoneSet = new Set();
+    const existingPhoneDetails = new Map();
 
+    const [existingLeads, existingMetaLeads, existingWebsiteLeads] = await Promise.all([
+      Lead.find({ phone: { $exists: true, $ne: '' } }).select('name phone company email').lean(),
+      MetaLead.find({ phone: { $exists: true, $ne: '' } }).select('name phone').lean(),
+      WebsiteLead.find({ phone: { $exists: true, $ne: '' } }).select('name phone').lean()
+    ]);
+
+    const indexRecord = (rec) => {
+      if (!rec || !rec.phone) return;
+      const digits = cleanPhoneNumber(rec.phone);
+      const core = extractCorePhoneDigits(rec.phone);
+      const label = rec.name || rec.company || 'Existing Lead';
+
+      if (digits && digits.length >= 7) {
+        existingPhoneSet.add(digits);
+        if (!existingPhoneDetails.has(digits)) {
+          existingPhoneDetails.set(digits, label);
+        }
+      }
+      if (core && core.length >= 7) {
+        existingPhoneSet.add(core);
+        if (!existingPhoneDetails.has(core)) {
+          existingPhoneDetails.set(core, label);
+        }
+      }
+    };
+
+    (existingLeads || []).forEach(indexRecord);
+    (existingMetaLeads || []).forEach(indexRecord);
+    (existingWebsiteLeads || []).forEach(indexRecord);
+
+    const created = [];
+    const duplicates = [];
+    const errors = [];
+    const seenInBatch = new Set();
+
+    // ── 2. Process each lead record ──────────────────────────────────────────
     for (let i = 0; i < leadsData.length; i++) {
       const row = leadsData[i];
+      const rowNum = i + 1;
+
       try {
-        // Skip rows that don't have at least a name or phone
-        if (!row.name || row.name === '—') {
-          if (!row.phone && !row.company) {
-            errors.push({ row: i + 1, reason: 'Missing required data: need at least name, phone, or company' });
-            continue;
-          }
+        const rawPhone = row.phone !== undefined && row.phone !== null ? String(row.phone).trim() : '';
+        const digits = cleanPhoneNumber(rawPhone);
+        const corePhone = extractCorePhoneDigits(rawPhone);
+
+        // Phone is STRICTLY REQUIRED (must have at least 7 valid digits)
+        if (!rawPhone || !digits || digits.length < 7) {
+          errors.push({
+            row: rowNum,
+            phone: rawPhone || '—',
+            name: row.name || '—',
+            reason: 'Phone number is required and must contain at least 7 digits'
+          });
+          continue;
         }
+
+        // Duplicate Check 1: Duplicate within the uploaded file batch
+        if (seenInBatch.has(digits) || seenInBatch.has(corePhone)) {
+          duplicates.push({
+            row: rowNum,
+            phone: rawPhone,
+            name: row.name || '—',
+            reason: `Duplicate phone: "${rawPhone}" already appears earlier in this uploaded file`
+          });
+          continue;
+        }
+
+        // Duplicate Check 2: Already exists anywhere in CRM database
+        if (existingPhoneSet.has(digits) || existingPhoneSet.has(corePhone)) {
+          const matchedName = existingPhoneDetails.get(corePhone) || existingPhoneDetails.get(digits) || 'Existing Lead';
+          duplicates.push({
+            row: rowNum,
+            phone: rawPhone,
+            name: row.name || '—',
+            reason: `Duplicate lead: phone "${rawPhone}" already exists in CRM (${matchedName})`
+          });
+          continue;
+        }
+
+        // Mark as seen in this import batch (both full digits and core 10 digits)
+        seenInBatch.add(digits);
+        seenInBatch.add(corePhone);
+
+        // Client Name is OPTIONAL: clean it up, or fall back to company or empty string
+        const clientName = (row.name && String(row.name).trim() !== '—')
+          ? String(row.name).trim()
+          : (row.company ? String(row.company).trim() : '');
 
         let normalizedLeadType = null;
         if (row.leadType) {
@@ -285,10 +396,16 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
           }
         }
 
+        // Clean phone representation for storage (remove trailing .0 or scientific notation)
+        let phoneToSave = rawPhone;
+        if (/^[0-9.]+[eE][+-]?[0-9]+$/.test(rawPhone) || rawPhone.endsWith('.0')) {
+          phoneToSave = digits;
+        }
+
         const leadData = {
-          name: row.name && row.name !== '—' ? String(row.name).trim() : (row.company ? String(row.company).trim() : 'Unknown Lead'),
-          email: row.email ? String(row.email).toLowerCase().trim() : `noemail_${Date.now()}_${i}@placeholder.com`,
-          phone: row.phone ? String(row.phone).trim() : 'N/A',
+          name: clientName,
+          email: row.email ? String(row.email).toLowerCase().trim() : '',
+          phone: phoneToSave,
           company: row.company ? String(row.company).trim() : '',
           country: row.country ? String(row.country).trim() : '',
           industry: row.industry ? String(row.industry).trim() : '',
@@ -304,24 +421,44 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
           createdBy: req.user.id,
           history: [{
             action: 'Lead Imported',
-            details: 'Lead imported via Excel upload',
+            details: 'Lead imported via spreadsheet upload (Deduplicated)',
             by: req.user.id,
             date: new Date()
           }]
         };
+
         if (row.assignedTo) {
           const assignedUser = await User.findById(row.assignedTo);
           if (assignedUser) leadData.assignedTo = row.assignedTo;
         }
+
         const lead = new Lead(leadData);
         await lead.save();
         created.push(lead._id);
+
+        // Keep local cache updated for subsequent rows
+        existingPhoneSet.add(digits);
+        existingPhoneSet.add(corePhone);
+        existingPhoneDetails.set(corePhone, clientName || 'Imported Lead');
       } catch (err) {
-        errors.push({ row: i + 1, reason: err.message });
+        errors.push({ row: rowNum, reason: err.message });
       }
     }
 
-    res.status(201).json({ imported: created.length, errors });
+    const message = created.length > 0
+      ? `Successfully imported ${created.length} new lead${created.length > 1 ? 's' : ''}.${duplicates.length > 0 ? ` ${duplicates.length} duplicate lead${duplicates.length > 1 ? 's were' : ' was'} safely skipped.` : ''}`
+      : `No new leads imported. ${duplicates.length > 0 ? `${duplicates.length} duplicate lead(s) were skipped.` : 'Please verify your file.'}`;
+
+    res.status(200).json({
+      success: true,
+      imported: created.length,
+      duplicatesCount: duplicates.length,
+      errorsCount: errors.length,
+      totalProcessed: leadsData.length,
+      duplicates,
+      errors,
+      message
+    });
   } catch (error) {
     console.error('Bulk import error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -628,6 +765,26 @@ router.put('/:id', auth, async (req, res) => {
     res.json(updatedLead);
   } catch (error) {
     console.error('Update lead error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Bulk delete leads
+router.post('/bulk-delete', auth, checkPermission('leads', 'delete'), async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: 'No lead IDs provided for deletion' });
+    }
+
+    const result = await Lead.deleteMany({ _id: { $in: ids } });
+    res.json({
+      success: true,
+      message: `Successfully deleted ${result.deletedCount} lead(s)`,
+      count: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Bulk delete leads error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

@@ -87,16 +87,25 @@ function MyLeads() {
   const canAssignLeads = hasFullAccess;
   const isSales = roleNameLower.includes('sales');
 
-  // Move to Pipeline: ONLY Sales Head, Sales Manager, and Admin can move leads to pipeline
-  // Sales role and Sales Executive role must NOT have access and must NOT see the button
-  const isSalesExecutive = (
-    roleNormalized.includes('executive') ||
-    roleNormalized === 'sales' ||
-    roleNormalized === 'sales executive' ||
-    roleNormalized.includes('sales rep') ||
-    (isSales && !isSalesHead && !isSalesManager && !isAdmin)
-  );
-  const canMoveToPipeline = (isAdmin || isSalesHead || isSalesManager) && !isSalesExecutive;
+  // Move to Pipeline:
+  // 1. Sales Head, Sales Manager, and Admin can move ANY lead to pipeline
+  // 2. Users (including Sales Executives and regular employees) can move leads that are assigned to them (or created by them)
+  const hasGlobalMoveToPipeline = isAdmin || isSalesHead || isSalesManager;
+  const canMoveToPipeline = true; // Enables bulk toolbar & selection mode for users
+
+  const canUserMoveLeadToPipeline = (lead) => {
+    if (!lead || !user) return false;
+    if (hasGlobalMoveToPipeline) return true;
+    const uid = String(user._id || user.id || '');
+    if (!uid) return false;
+
+    const isAssigned = Array.isArray(lead.assignedTo)
+      ? lead.assignedTo.some(a => String(a?._id || a || '') === uid)
+      : String(lead.assignedTo?._id || lead.assignedTo || '') === uid;
+    const isCreator = String(lead.createdBy?._id || lead.createdBy || '') === uid;
+
+    return isAssigned || isCreator;
+  };
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const [leads, setLeads] = useState([]);          // regular leads
@@ -222,6 +231,7 @@ function MyLeads() {
   const [movingToPipeline, setMovingToPipeline] = useState(false);
   const [movePipelineSuccessInfo, setMovePipelineSuccessInfo] = useState(null);
   const [bulkMovingToPipeline, setBulkMovingToPipeline] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   // ── Multi Assign & Range Selection ───────────────────────────────────────
   const [multiAssignMode, setMultiAssignMode] = useState(false);
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
@@ -1995,6 +2005,75 @@ function MyLeads() {
     }
   };
 
+  // ── Bulk Delete selected leads handler (permission-checked, deletes ONLY selected) ──
+  const handleBulkDelete = async () => {
+    if (!canDelete) {
+      alert('You do not have permission to delete leads.');
+      return;
+    }
+
+    if (selectedLeadIds.size === 0) {
+      alert('Please select at least one lead to delete.');
+      return;
+    }
+
+    const count = selectedLeadIds.size;
+    const confirmMsg = `⚠️ Delete ${count} Selected Lead${count > 1 ? 's' : ''}?\n\n` +
+      `Are you sure you want to permanently delete ONLY the ${count} selected lead(s)?\n` +
+      `All other leads will remain untouched.\n\n` +
+      `This action cannot be undone. Click OK to proceed with deletion.`;
+
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    setBulkDeleting(true);
+    try {
+      const selectedArr = Array.from(selectedLeadIds);
+      const regularIds = [];
+      const metaIds = [];
+
+      selectedArr.forEach(compositeId => {
+        if (compositeId.startsWith('meta-')) {
+          metaIds.push(compositeId.replace('meta-', ''));
+        } else if (compositeId.startsWith('regular-')) {
+          regularIds.push(compositeId.replace('regular-', ''));
+        } else {
+          regularIds.push(compositeId);
+        }
+      });
+
+      const promises = [];
+      if (regularIds.length > 0) {
+        promises.push(api.post('/leads/bulk-delete', { ids: regularIds }));
+      }
+      if (metaIds.length > 0) {
+        promises.push(api.post('/meta-leads/bulk-delete', { ids: metaIds }));
+      }
+
+      await Promise.all(promises);
+
+      // Optimistically remove only the deleted leads from local state
+      const deletedSet = new Set(selectedArr);
+      setLeads(prev => prev.filter(l => !deletedSet.has(`regular-${l._id}`) && !regularIds.includes(l._id)));
+      setMetaLeads(prev => prev.filter(m => !deletedSet.has(`meta-${m._id}`) && !metaIds.includes(m._id)));
+
+      // Reset selection
+      setSelectedLeadIds(new Set());
+      setMultiAssignMode(false);
+
+      // Refresh stats & data
+      fetchAll();
+
+      alert(`✅ Successfully deleted ${count} selected lead${count > 1 ? 's' : ''}.`);
+    } catch (err) {
+      console.error('Bulk delete error:', err);
+      alert(err.response?.data?.message || 'Failed to delete selected leads.');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   // ── Multi Assign handler ──────────────────────────────────────────────────
   const handleMultiAssign = async () => {
     if (!multiAssignEmployee) { alert('Please select an employee to assign.'); return; }
@@ -2043,18 +2122,18 @@ function MyLeads() {
     {
       key: 'name',
       label: 'Client Name',
-      required: true,
+      required: false,
       example: 'Rahul Sharma',
       desc: 'Full name or contact person for this lead.',
-      aliases: ['client_name', 'name', 'client', 'clientname', 'lead_name', 'leadname', 'contact_person', 'person', 'full_name', 'customer']
+      aliases: ['client_name', 'name', 'client', 'clientname', 'client_name_optional', 'lead_name', 'leadname', 'contact_person', 'person', 'full_name', 'customer']
     },
     {
       key: 'phone',
-      label: 'Phone',
+      label: 'Phone *',
       required: true,
       example: '9876543210',
-      desc: 'Mobile or phone number with or without country code.',
-      aliases: ['phone', 'mobile', 'contact', 'phone_number', 'contact_number', 'phone_no', 'mobileno', 'phoneno', 'number', 'mob']
+      desc: 'Mobile or phone number (Required). Must be unique to prevent duplicates.',
+      aliases: ['phone', 'phone_*', 'phone_required', 'mobile', 'contact', 'phone_number', 'contact_number', 'phone_no', 'mobileno', 'phoneno', 'number', 'mob']
     },
     {
       key: 'email',
@@ -2138,11 +2217,61 @@ function MyLeads() {
     },
   ];
 
+  const uploadStats = useMemo(() => {
+    let ready = 0;
+    let duplicateCrm = 0;
+    let duplicateFile = 0;
+    let invalidPhone = 0;
+    uploadRows.forEach(r => {
+      if (r._status === 'ready') ready++;
+      else if (r._status === 'duplicate_crm') duplicateCrm++;
+      else if (r._status === 'duplicate_file') duplicateFile++;
+      else if (r._status === 'invalid') invalidPhone++;
+    });
+    return {
+      total: uploadRows.length,
+      ready,
+      duplicateCrm,
+      duplicateFile,
+      totalDuplicates: duplicateCrm + duplicateFile,
+      invalidPhone
+    };
+  }, [uploadRows]);
+
   const handleDownloadTemplateXlsx = () => {
     try {
       const headers = IMPORT_FIELDS.map(f => f.label);
-      const ws = XLSX.utils.aoa_to_sheet([headers]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 5, 18) }));
+      const sampleRow1 = [
+        'Rahul Sharma',
+        '9876543210',
+        'rahul.sharma@techcorp.com',
+        'TechCorp Solutions Ltd',
+        'India / Maharashtra',
+        'Information Technology',
+        'HRMS Software & Payroll Automation',
+        'Excel Import',
+        'Hot',
+        '85000',
+        'Interested in demo next week',
+        new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      ];
+      // Sample row 2 shows that Client Name is optional (phone only is required)
+      const sampleRow2 = [
+        '',
+        '9811223344',
+        '',
+        '',
+        '',
+        '',
+        '',
+        'Excel Import',
+        'Warm',
+        '',
+        'Direct inquiry (phone only)',
+        new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      ];
+      const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow1, sampleRow2]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 5, 20) }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Leads Template');
       XLSX.writeFile(wb, 'leads_template.xlsx');
@@ -2155,7 +2284,35 @@ function MyLeads() {
   const handleDownloadTemplateCsv = () => {
     try {
       const headers = IMPORT_FIELDS.map(f => f.label);
-      const ws = XLSX.utils.aoa_to_sheet([headers]);
+      const sampleRow1 = [
+        'Rahul Sharma',
+        '9876543210',
+        'rahul.sharma@techcorp.com',
+        'TechCorp Solutions Ltd',
+        'India / Maharashtra',
+        'Information Technology',
+        'HRMS Software & Payroll Automation',
+        'Excel Import',
+        'Hot',
+        '85000',
+        'Interested in demo next week',
+        new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      ];
+      const sampleRow2 = [
+        '',
+        '9811223344',
+        '',
+        '',
+        '',
+        '',
+        '',
+        'Excel Import',
+        'Warm',
+        '',
+        'Direct inquiry (phone only)',
+        new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      ];
+      const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow1, sampleRow2]);
       const csv = XLSX.utils.sheet_to_csv(ws);
       const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
@@ -2177,6 +2334,31 @@ function MyLeads() {
     handleDownloadTemplateXlsx();
   };
 
+  const cleanPhoneNumber = (val) => {
+    if (val === undefined || val === null) return '';
+    let str = String(val).trim();
+    if (!str) return '';
+    if (/^[0-9.]+[eE][+-]?[0-9]+$/.test(str)) {
+      try {
+        if (typeof window !== 'undefined' && typeof window.BigInt === 'function') {
+          str = window.BigInt(Math.floor(Number(str))).toString();
+        } else {
+          str = Number(str).toFixed(0);
+        }
+      } catch (e) {
+        str = Number(str).toFixed(0);
+      }
+    }
+    if (str.endsWith('.0')) str = str.slice(0, -2);
+    return str.replace(/\D/g, '');
+  };
+
+  const extractCorePhoneDigits = (val) => {
+    const digits = cleanPhoneNumber(val);
+    if (!digits) return '';
+    return digits.length >= 10 ? digits.slice(-10) : digits;
+  };
+
   const processFile = (file) => {
     if (!file) return;
     setUploadedFileName(file.name);
@@ -2193,6 +2375,31 @@ function MyLeads() {
         }
 
         const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+        // Build comprehensive phone lookup map from all leads in CRM state
+        const existingPhonesInCrm = new Map();
+        const allLoadedLeads = [
+          ...(leads || []),
+          ...(metaLeads || []),
+          ...(allLeads || [])
+        ];
+
+        allLoadedLeads.forEach(l => {
+          const p = l.contactNumber || l.phone;
+          if (!p) return;
+          const digits = cleanPhoneNumber(p);
+          const core = extractCorePhoneDigits(p);
+          const label = l.leadName || l.name || l.company || 'Existing Lead';
+
+          if (digits && digits.length >= 7) {
+            if (!existingPhonesInCrm.has(digits)) existingPhonesInCrm.set(digits, label);
+          }
+          if (core && core.length >= 7) {
+            if (!existingPhonesInCrm.has(core)) existingPhonesInCrm.set(core, label);
+          }
+        });
+
+        const seenInThisFile = new Set();
 
         const normalise = (row) => {
           const r = {};
@@ -2224,7 +2431,40 @@ function MyLeads() {
 
           result.source = result.source || 'Excel Import';
           result.date = result.date || today;
-          result.name = result.name || '—';
+          // Client Name is optional: do not force '—' if empty
+          result.name = (result.name && String(result.name).trim() !== '—') ? String(result.name).trim() : '';
+
+          // ── Professional Validation & Duplicate Detection ──
+          const rawPhone = result.phone ? String(result.phone).trim() : '';
+          const digits = cleanPhoneNumber(rawPhone);
+          const corePhone = extractCorePhoneDigits(rawPhone);
+
+          // Clean up spreadsheet float / scientific notation for display and storage
+          if (digits && (/^[0-9.]+[eE][+-]?[0-9]+$/.test(rawPhone) || rawPhone.endsWith('.0'))) {
+            result.phone = digits;
+          }
+
+          let rowStatus = 'ready';
+          let statusReason = '';
+
+          if (!rawPhone || !digits || digits.length < 7) {
+            rowStatus = 'invalid';
+            statusReason = 'Missing or invalid phone number (Required, min 7 digits)';
+          } else if (seenInThisFile.has(digits) || seenInThisFile.has(corePhone)) {
+            rowStatus = 'duplicate_file';
+            statusReason = 'Duplicate phone: already present earlier in this file';
+          } else if (existingPhonesInCrm.has(digits) || existingPhonesInCrm.has(corePhone)) {
+            rowStatus = 'duplicate_crm';
+            const matchedName = existingPhonesInCrm.get(corePhone) || existingPhonesInCrm.get(digits);
+            statusReason = `Duplicate lead: already exists in CRM (${matchedName})`;
+          } else {
+            seenInThisFile.add(digits);
+            seenInThisFile.add(corePhone);
+          }
+
+          result._status = rowStatus;
+          result._statusReason = statusReason;
+          result._corePhone = corePhone;
 
           return result;
         };
@@ -2248,15 +2488,28 @@ function MyLeads() {
   };
 
   const handleUploadSubmit = async () => {
-    if (!uploadRows.length) return;
+    const validRowsToImport = uploadRows.filter(r => r._status === 'ready');
+    if (!validRowsToImport.length) {
+      setUploadError('No new unique leads to import. All leads in this file are either duplicates or missing phone numbers.');
+      return;
+    }
     setUploading(true);
     setUploadError('');
     try {
-      await api.post('/leads/bulk-import', { leads: uploadRows });
+      const res = await api.post('/leads/bulk-import', { leads: validRowsToImport });
       setShowUploadModal(false);
       setUploadRows([]);
       setUploadedFileName('');
       fetchAll();
+
+      const importedCount = res.data?.imported ?? validRowsToImport.length;
+      const totalSkipped = (uploadRows.length - validRowsToImport.length) + (res.data?.duplicatesCount || 0);
+
+      if (totalSkipped > 0) {
+        alert(`✅ Import Completed Successfully!\n\n• ${importedCount} new lead(s) imported into CRM.\n• ${totalSkipped} duplicate/invalid record(s) were automatically skipped.`);
+      } else {
+        alert(`✅ Successfully imported ${importedCount} new lead(s) into CRM!`);
+      }
     } catch (err) {
       setUploadError(err.response?.data?.message || 'Import failed. Please verify your file.');
     } finally {
@@ -2971,8 +3224,20 @@ function MyLeads() {
                 setFilterStatus(label === 'Total Leads' ? '' : label);
                 setCurrentPage(1);
               }}
-              onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+              onMouseEnter={e => {
+                e.currentTarget.style.boxShadow = '0 6px 18px rgba(0,0,0,0.08)';
+                if (!isSelected) {
+                  e.currentTarget.style.background = '#f8fafc';
+                  e.currentTarget.style.borderColor = color ? `${color}66` : '#cbd5e1';
+                }
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.boxShadow = 'none';
+                if (!isSelected) {
+                  e.currentTarget.style.background = 'white';
+                  e.currentTarget.style.borderColor = '#e2e8f0';
+                }
+              }}
             >
               {/* Label row + trend badge */}
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -3051,15 +3316,42 @@ function MyLeads() {
                       <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', padding: '0 4px' }}>Status</div>
                       <button
                         onClick={() => { setFilterStatus(''); setOpenFilterDrop(null); }}
-                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: !filterStatus ? '#f0fdf4' : 'transparent', color: !filterStatus ? '#15803d' : '#475569', fontSize: '12px', fontWeight: !filterStatus ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: !filterStatus ? '#f0fdf4' : 'transparent', color: !filterStatus ? '#15803d' : '#475569', fontSize: '12px', fontWeight: !filterStatus ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.15s, color 0.15s' }}
+                        onMouseEnter={e => {
+                          if (filterStatus) {
+                            e.currentTarget.style.background = '#f1f5f9';
+                            e.currentTarget.style.color = '#0f172a';
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (filterStatus) {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.color = '#475569';
+                          }
+                        }}
                       >All Statuses</button>
-                      {STATUS_OPTIONS.map(s => (
-                        <button
-                          key={s}
-                          onClick={() => { setFilterStatus(s); setOpenFilterDrop(null); }}
-                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: filterStatus === s ? '#f0fdf4' : 'transparent', color: filterStatus === s ? '#15803d' : '#475569', fontSize: '12px', fontWeight: filterStatus === s ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
-                        >{s}</button>
-                      ))}
+                      {STATUS_OPTIONS.map(s => {
+                        const isSelected = filterStatus === s;
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => { setFilterStatus(s); setOpenFilterDrop(null); }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: isSelected ? '#f0fdf4' : 'transparent', color: isSelected ? '#15803d' : '#475569', fontSize: '12px', fontWeight: isSelected ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.15s, color 0.15s' }}
+                            onMouseEnter={e => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = '#f1f5f9';
+                                e.currentTarget.style.color = '#0f172a';
+                              }
+                            }}
+                            onMouseLeave={e => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = 'transparent';
+                                e.currentTarget.style.color = '#475569';
+                              }
+                            }}
+                          >{s}</button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -3084,15 +3376,42 @@ function MyLeads() {
                       <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', padding: '0 4px' }}>Source</div>
                       <button
                         onClick={() => { setFilterSource(''); setOpenFilterDrop(null); }}
-                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: !filterSource ? '#f0fdf4' : 'transparent', color: !filterSource ? '#15803d' : '#475569', fontSize: '12px', fontWeight: !filterSource ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: !filterSource ? '#f0fdf4' : 'transparent', color: !filterSource ? '#15803d' : '#475569', fontSize: '12px', fontWeight: !filterSource ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.15s, color 0.15s' }}
+                        onMouseEnter={e => {
+                          if (filterSource) {
+                            e.currentTarget.style.background = '#f1f5f9';
+                            e.currentTarget.style.color = '#0f172a';
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (filterSource) {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.color = '#475569';
+                          }
+                        }}
                       >All Sources</button>
-                      {stats.sources.map(s => (
-                        <button
-                          key={s}
-                          onClick={() => { setFilterSource(s); setOpenFilterDrop(null); }}
-                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: filterSource === s ? '#f0fdf4' : 'transparent', color: filterSource === s ? '#15803d' : '#475569', fontSize: '12px', fontWeight: filterSource === s ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
-                        >{s}</button>
-                      ))}
+                      {stats.sources.map(s => {
+                        const isSelected = filterSource === s;
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => { setFilterSource(s); setOpenFilterDrop(null); }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: isSelected ? '#f0fdf4' : 'transparent', color: isSelected ? '#15803d' : '#475569', fontSize: '12px', fontWeight: isSelected ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.15s, color 0.15s' }}
+                            onMouseEnter={e => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = '#f1f5f9';
+                                e.currentTarget.style.color = '#0f172a';
+                              }
+                            }}
+                            onMouseLeave={e => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = 'transparent';
+                                e.currentTarget.style.color = '#475569';
+                              }
+                            }}
+                          >{s}</button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -3260,13 +3579,28 @@ function MyLeads() {
                   {openFilterDrop === 'sort' && (
                     <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 1000, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '14px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '10px', minWidth: '160px' }}>
                       <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', padding: '0 4px' }}>Sort By</div>
-                      {[['newest', 'Newest First'], ['oldest', 'Oldest First']].map(([val, lbl]) => (
-                        <button
-                          key={val}
-                          onClick={() => { setSortBy(val); setOpenFilterDrop(null); }}
-                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: sortBy === val ? '#f0fdf4' : 'transparent', color: sortBy === val ? '#15803d' : '#475569', fontSize: '12px', fontWeight: sortBy === val ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
-                        >{lbl}</button>
-                      ))}
+                      {[['newest', 'Newest First'], ['oldest', 'Oldest First']].map(([val, lbl]) => {
+                        const isSelected = sortBy === val;
+                        return (
+                          <button
+                            key={val}
+                            onClick={() => { setSortBy(val); setOpenFilterDrop(null); }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderRadius: '8px', border: 'none', background: isSelected ? '#f0fdf4' : 'transparent', color: isSelected ? '#15803d' : '#475569', fontSize: '12px', fontWeight: isSelected ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.15s, color 0.15s' }}
+                            onMouseEnter={e => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = '#f1f5f9';
+                                e.currentTarget.style.color = '#0f172a';
+                              }
+                            }}
+                            onMouseLeave={e => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = 'transparent';
+                                e.currentTarget.style.color = '#475569';
+                              }
+                            }}
+                          >{lbl}</button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -3354,12 +3688,47 @@ function MyLeads() {
               }}
             >
               <svg style={{ position: 'relative', zIndex: 1 }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="5" height="18" rx="1" />
-                <rect x="10" y="3" width="5" height="11" rx="1" />
-                <rect x="17" y="3" width="5" height="15" rx="1" />
+                <line x1="4" y1="12" x2="20" y2="12" />
+                <polyline points="13 5 20 12 13 19" />
               </svg>
               <span style={{ position: 'relative', zIndex: 1 }}>
                 {bulkMovingToPipeline ? 'Moving...' : `Move ${selectedLeadIds.size} to Deals`}
+              </span>
+            </button>
+          )}
+
+          {multiAssignMode && selectedLeadIds.size > 0 && canDelete && (
+            <button
+              className="ist-btn-ghost leads-multi-delete-btn"
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              title={`Permanently delete ONLY the ${selectedLeadIds.size} selected lead(s)`}
+              style={{
+                padding: '7px 12px',
+                fontSize: '11px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                whiteSpace: 'nowrap',
+                borderColor: '#f43f5e',
+                color: '#e11d48',
+                background: '#fff1f2',
+                cursor: bulkDeleting ? 'not-allowed' : 'pointer',
+                fontWeight: 700,
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => { if (!bulkDeleting) { e.currentTarget.style.background = '#ffe4e6'; e.currentTarget.style.borderColor = '#be123c'; } }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#fff1f2'; e.currentTarget.style.borderColor = '#f43f5e'; }}
+            >
+              <svg style={{ position: 'relative', zIndex: 1 }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#e11d48" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+              <span style={{ position: 'relative', zIndex: 1 }}>
+                {bulkDeleting ? 'Deleting...' : `Delete ${selectedLeadIds.size} Leads`}
               </span>
             </button>
           )}
@@ -3468,10 +3837,43 @@ function MyLeads() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <span style={{ fontSize: '12px', fontWeight: 600, color: '#166534' }}>
                 <strong>{selectedLeadIds.size}</strong> of {filteredLeads.length} leads selected
               </span>
+
+              {selectedLeadIds.size > 0 && canDelete && (
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  disabled={bulkDeleting}
+                  title={`Permanently delete ONLY the ${selectedLeadIds.size} selected lead(s)`}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '4px 10px',
+                    borderRadius: '7px',
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    color: '#dc2626',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: bulkDeleting ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => { if (!bulkDeleting) e.currentTarget.style.background = '#fee2e2'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#fef2f2'; }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
+                  </svg>
+                  <span>{bulkDeleting ? 'Deleting...' : `Delete All Selected (${selectedLeadIds.size})`}</span>
+                </button>
+              )}
 
               {selectedLeadIds.size > 0 && (
                 <button
@@ -3480,7 +3882,7 @@ function MyLeads() {
                   style={{
                     border: 'none',
                     background: 'transparent',
-                    color: '#dc2626',
+                    color: '#64748b',
                     fontSize: '11px',
                     fontWeight: 600,
                     cursor: 'pointer',
@@ -3755,10 +4157,12 @@ function MyLeads() {
                 {paginatedLeads.map((lead, idx) => {
                   const statusColors = {
                     'New': { bg: '#eff6ff', color: '#2563eb', dot: '#3b82f6' },
+                    'Connected': { bg: '#e0f2fe', color: '#0369a1', dot: '#0284c7' },
                     'Contacted': { bg: '#ffedd5', color: '#d97706', dot: '#f59e0b' },
                     'Qualified': { bg: '#dcfce7', color: '#16a34a', dot: '#22c55e' },
                     'Interested': { bg: '#ede9fe', color: '#7c3aed', dot: '#8b5cf6' },
                     'Follow-up': { bg: '#fce7f3', color: '#be185d', dot: '#ec4899' },
+                    'Not Connected': { bg: '#f1f5f9', color: '#475569', dot: '#64748b' },
                     'Converted': { bg: '#d1fae5', color: '#047857', dot: '#059669' },
                     'Not Interested': { bg: '#fee2e2', color: '#dc2626', dot: '#ef4444' },
                     'Closed': { bg: '#f1f5f9', color: '#475569', dot: '#64748b' },
@@ -3867,17 +4271,30 @@ function MyLeads() {
                                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                               </button>
                               {openLeadTypeDrop === lead._id && (
-                                <div style={{ position: 'fixed', top: leadTypeDropPos.top, left: leadTypeDropPos.left, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '8px', minWidth: '130px' }}>
+                                <div style={{ position: 'fixed', top: leadTypeDropPos.top, left: leadTypeDropPos.left, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '6px', minWidth: '130px' }}>
                                   {/* None / clear option */}
                                   <button
                                     onClick={() => {
                                       setOpenLeadTypeDrop(null);
                                       if (lt) handleQuickLeadType(lead._id, null);
                                     }}
-                                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', borderRadius: '8px', border: 'none', background: !lt ? '#f0fdf4' : 'transparent', color: !lt ? '#15803d' : '#94a3b8', fontSize: '11px', fontWeight: !lt ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontStyle: 'italic' }}
+                                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', borderRadius: '8px', border: 'none', background: !lt ? '#f0fdf4' : 'transparent', color: !lt ? '#15803d' : '#94a3b8', fontSize: '11px', fontWeight: !lt ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontStyle: 'italic', transition: 'background 0.15s, color 0.15s' }}
+                                    onMouseEnter={e => {
+                                      if (lt) {
+                                        e.currentTarget.style.background = '#f1f5f9';
+                                        e.currentTarget.style.color = '#0f172a';
+                                      }
+                                    }}
+                                    onMouseLeave={e => {
+                                      if (lt) {
+                                        e.currentTarget.style.background = 'transparent';
+                                        e.currentTarget.style.color = '#94a3b8';
+                                      }
+                                    }}
                                   >None</button>
                                   {LEAD_TYPE_OPTIONS.map(opt => {
                                     const oc = ltCfg(opt);
+                                    const isSelected = lt === opt;
                                     return (
                                       <button
                                         key={opt}
@@ -3885,7 +4302,19 @@ function MyLeads() {
                                           setOpenLeadTypeDrop(null);
                                           if (opt !== lt) handleQuickLeadType(lead._id, opt);
                                         }}
-                                        style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '100%', textAlign: 'left', padding: '6px 10px', borderRadius: '8px', border: 'none', background: lt === opt ? oc.bg : 'transparent', color: lt === opt ? oc.color : '#475569', fontSize: '11.5px', fontWeight: lt === opt ? 700 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '100%', textAlign: 'left', padding: '6px 10px', borderRadius: '8px', border: 'none', background: isSelected ? oc.bg : 'transparent', color: isSelected ? oc.color : '#475569', fontSize: '11.5px', fontWeight: isSelected ? 700 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.15s, color 0.15s' }}
+                                        onMouseEnter={e => {
+                                          if (!isSelected) {
+                                            e.currentTarget.style.background = oc.bg || '#f1f5f9';
+                                            e.currentTarget.style.color = oc.color || '#0f172a';
+                                          }
+                                        }}
+                                        onMouseLeave={e => {
+                                          if (!isSelected) {
+                                            e.currentTarget.style.background = 'transparent';
+                                            e.currentTarget.style.color = '#475569';
+                                          }
+                                        }}
                                       >
                                         <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: oc.dot, flexShrink: 0 }} />
                                         {opt}
@@ -4031,20 +4460,55 @@ function MyLeads() {
                               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                             </button>
                             {openStatusDrop === lead._id && (
-                              <div style={{ position: 'fixed', top: statusDropPos.top, left: statusDropPos.left, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '8px', minWidth: '150px' }}>
-                                {STATUS_OPTIONS.map(s => (
-                                  <button
-                                    key={s}
-                                    onClick={() => {
-                                      setOpenStatusDrop(null);
-                                      if (s !== displayStatus) {
-                                        if (lead._type === 'meta') handleMetaQuickStatus(lead._id, s, displayStatus);
-                                        else handleExcelQuickStatus(lead._id, s, displayStatus);
-                                      }
-                                    }}
-                                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', borderRadius: '8px', border: 'none', background: displayStatus === s ? '#f0fdf4' : 'transparent', color: displayStatus === s ? '#15803d' : '#475569', fontSize: '11.5px', fontWeight: displayStatus === s ? 600 : 400, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
-                                  >{s}</button>
-                                ))}
+                              <div style={{ position: 'fixed', top: statusDropPos.top, left: statusDropPos.left, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '6px', minWidth: '150px' }}>
+                                {STATUS_OPTIONS.map(s => {
+                                  const isCurrent = displayStatus === s;
+                                  const optCfg = statusColors[s] || { bg: '#eff6ff', color: '#2563eb', dot: '#3b82f6' };
+                                  return (
+                                    <button
+                                      key={s}
+                                      onClick={() => {
+                                        setOpenStatusDrop(null);
+                                        if (s !== displayStatus) {
+                                          if (lead._type === 'meta') handleMetaQuickStatus(lead._id, s, displayStatus);
+                                          else handleExcelQuickStatus(lead._id, s, displayStatus);
+                                        }
+                                      }}
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        width: '100%',
+                                        textAlign: 'left',
+                                        padding: '7px 10px',
+                                        borderRadius: '8px',
+                                        border: 'none',
+                                        background: isCurrent ? (optCfg.bg || '#f0fdf4') : 'transparent',
+                                        color: isCurrent ? (optCfg.color || '#15803d') : '#475569',
+                                        fontSize: '11.5px',
+                                        fontWeight: isCurrent ? 700 : 500,
+                                        cursor: 'pointer',
+                                        fontFamily: "'Inter','Poppins','Segoe UI',sans-serif",
+                                        transition: 'background 0.15s, color 0.15s'
+                                      }}
+                                      onMouseEnter={e => {
+                                        if (!isCurrent) {
+                                          e.currentTarget.style.background = optCfg.bg || '#f1f5f9';
+                                          e.currentTarget.style.color = optCfg.color || '#0f172a';
+                                        }
+                                      }}
+                                      onMouseLeave={e => {
+                                        if (!isCurrent) {
+                                          e.currentTarget.style.background = 'transparent';
+                                          e.currentTarget.style.color = '#475569';
+                                        }
+                                      }}
+                                    >
+                                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: optCfg.dot, flexShrink: 0 }} />
+                                      {s}
+                                    </button>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -4117,8 +4581,8 @@ function MyLeads() {
                                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
                               </button>
 
-                              {/* 2. Move to Pipeline Deals button — restricted to Sales Head, Sales Manager, Admin */}
-                              {canMoveToPipeline && (
+                              {/* 2. Move to Pipeline Deals button — for Sales Head/Manager/Admin or assigned user */}
+                              {canUserMoveLeadToPipeline(lead) && (
                                 <button
                                   className="ist-action-btn"
                                   title="Move to Pipeline Deals (New Lead stage)"
@@ -4126,10 +4590,9 @@ function MyLeads() {
                                   onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
                                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                                 >
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="3" y="3" width="5" height="18" rx="1" />
-                                    <rect x="10" y="3" width="5" height="11" rx="1" />
-                                    <rect x="17" y="3" width="5" height="15" rx="1" />
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                    <line x1="4" y1="12" x2="20" y2="12" />
+                                    <polyline points="13 5 20 12 13 19" />
                                   </svg>
                                 </button>
                               )}
@@ -4219,7 +4682,7 @@ function MyLeads() {
                                     )}
 
                                     {/* Move to Deals in Dropdown — restricted to Sales Head, Sales Manager, Admin */}
-                                    {canMoveToPipeline && (
+                                    {canUserMoveLeadToPipeline(lead) && (
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -4244,10 +4707,9 @@ function MyLeads() {
                                           onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
                                           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                                         >
-                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <rect x="3" y="3" width="5" height="18" rx="1" />
-                                            <rect x="10" y="3" width="5" height="11" rx="1" />
-                                            <rect x="17" y="3" width="5" height="15" rx="1" />
+                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                            <line x1="4" y1="12" x2="20" y2="12" />
+                                            <polyline points="13 5 20 12 13 19" />
                                           </svg>
                                           <span>Move to Deal</span>
                                         </button>
@@ -5247,9 +5709,8 @@ function MyLeads() {
                   boxShadow: '0 4px 10px rgba(124, 58, 237, 0.25)'
                 }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="5" height="18" rx="1" />
-                    <rect x="10" y="3" width="5" height="11" rx="1" />
-                    <rect x="17" y="3" width="5" height="15" rx="1" />
+                    <line x1="4" y1="12" x2="20" y2="12" />
+                    <polyline points="13 5 20 12 13 19" />
                   </svg>
                 </div>
                 <div>
@@ -5544,7 +6005,7 @@ function MyLeads() {
                 </div>
 
                 <div style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
-                  Importing {uploadRows.length} Leads...
+                  Importing {uploadStats.ready} Leads...
                 </div>
                 <div style={{ fontSize: '13.5px', color: '#64748b', marginTop: '8px', maxWidth: '420px', lineHeight: 1.5 }}>
                   Please wait while records are being validated and added to the database.
@@ -5610,13 +6071,15 @@ function MyLeads() {
                     <span>Import Leads from Excel & CSV</span>
                     {uploadRows.length > 0 && (
                       <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>
-                        {uploadRows.length} Leads Loaded
+                        {uploadStats.ready} Ready to Import / {uploadRows.length} Loaded
                       </span>
                     )}
                   </div>
                   <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
                     {uploadRows.length > 0
-                      ? 'Review all parsed leads below before confirming import.'
+                      ? (uploadStats.totalDuplicates > 0
+                          ? `Phone is required; client name is optional. ${uploadStats.totalDuplicates} duplicate(s) detected and will be safely skipped.`
+                          : 'Phone is required; client name is optional. Review all parsed leads below before confirming import.')
                       : 'Upload your spreadsheet or download blank field templates.'}
                   </div>
                 </div>
@@ -5758,14 +6221,24 @@ function MyLeads() {
                       </svg>
                     </div>
                     <div>
-                      <div style={{ fontSize: '14.5px', fontWeight: 800, color: '#166534', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ fontSize: '14.5px', fontWeight: 800, color: '#166534', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <span>{uploadedFileName || 'Uploaded Spreadsheet'}</span>
-                        <span style={{ fontSize: '11.5px', fontWeight: 700, background: '#16a34a', color: '#fff', padding: '2px 9px', borderRadius: '10px' }}>
-                          ✓ {uploadRows.length} Leads Ready to Import
+                        <span style={{ fontSize: '11px', fontWeight: 700, background: '#16a34a', color: '#fff', padding: '2px 9px', borderRadius: '10px' }}>
+                          ✓ {uploadStats.ready} Ready to Import
                         </span>
+                        {uploadStats.totalDuplicates > 0 && (
+                          <span style={{ fontSize: '11px', fontWeight: 700, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '2px 9px', borderRadius: '10px' }}>
+                            {uploadStats.totalDuplicates} duplicates found
+                          </span>
+                        )}
+                        {uploadStats.invalidPhone > 0 && (
+                          <span style={{ fontSize: '11px', fontWeight: 700, background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', padding: '2px 9px', borderRadius: '10px' }}>
+                            ✕ {uploadStats.invalidPhone} Missing Phone
+                          </span>
+                        )}
                       </div>
-                      <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
-                        All imported columns and rows are previewed below. Click <strong>Import {uploadRows.length} Leads</strong> in the footer to proceed.
+                      <div style={{ fontSize: '12px', color: '#15803d', marginTop: '3px' }}>
+                        Phone is required for import. Client name is optional. Duplicate leads are automatically detected and safely excluded.
                       </div>
                     </div>
                   </div>
@@ -6007,12 +6480,13 @@ function MyLeads() {
                   </div>
 
                   <div style={{ flex: 1, overflow: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px', minWidth: '1100px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px', minWidth: '1150px' }}>
                       <thead>
                         <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 2, borderBottom: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: '50px' }}>#</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: '45px' }}>#</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569', width: '150px' }}>Status</th>
                           <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Client Name</th>
-                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Phone</th>
+                          <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Phone <span style={{ color: '#dc2626', fontWeight: 700 }}>*</span></th>
                           <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Email</th>
                           <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Company</th>
                           <th style={{ padding: '10px 14px', fontWeight: 700, color: '#475569' }}>Country</th>
@@ -6026,68 +6500,95 @@ function MyLeads() {
                         </tr>
                       </thead>
                       <tbody>
-                        {uploadRows.map((row, idx) => (
-                          <tr
-                            key={idx}
-                            style={{
-                              borderBottom: idx === uploadRows.length - 1 ? 'none' : '1px solid #f1f5f9',
-                              background: idx % 2 === 0 ? '#ffffff' : '#fafbfc',
-                              transition: 'background 0.1s',
-                            }}
-                          >
-                            <td style={{ padding: '10px 14px', color: '#94a3b8', fontWeight: 700 }}>{idx + 1}</td>
-                            <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                              {row.name && row.name !== '—' ? (
-                                row.name
-                              ) : (
-                                <span style={{ display: 'inline-flex', padding: '2px 7px', borderRadius: '4px', background: '#fef2f2', color: '#dc2626', fontSize: '11px', fontWeight: 700 }}>
-                                  Missing Name
+                        {uploadRows.map((row, idx) => {
+                          const isDup = row._status === 'duplicate_crm' || row._status === 'duplicate_file';
+                          const isInvalid = row._status === 'invalid';
+                          const rowBg = isInvalid ? '#fff8f8' : isDup ? '#fffdf7' : (idx % 2 === 0 ? '#ffffff' : '#fafbfc');
+
+                          return (
+                            <tr
+                              key={idx}
+                              style={{
+                                borderBottom: idx === uploadRows.length - 1 ? 'none' : '1px solid #f1f5f9',
+                                background: rowBg,
+                                transition: 'background 0.1s',
+                              }}
+                            >
+                              <td style={{ padding: '10px 14px', color: '#94a3b8', fontWeight: 700 }}>{idx + 1}</td>
+                              <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                                {row._status === 'ready' && (
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>
+                                    ✓ Ready
+                                  </span>
+                                )}
+                                {(row._status === 'duplicate_crm' || row._status === 'duplicate_file') && (
+                                  <span title={row._statusReason} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', cursor: 'help' }}>
+                                    Duplicate
+                                  </span>
+                                )}
+                                {row._status === 'invalid' && (
+                                  <span title={row._statusReason} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', cursor: 'help' }}>
+                                    ✕ Missing Phone
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                                {row.name && row.name.trim() !== '' && row.name !== '—' ? (
+                                  row.name
+                                ) : (
+                                  <span style={{ color: '#94a3b8' }}>—</span>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 14px', fontFamily: 'monospace', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                                {row.phone && row._status !== 'invalid' ? (
+                                  <span style={{ color: '#166534' }}>{row.phone}</span>
+                                ) : (
+                                  <span style={{ display: 'inline-flex', padding: '2px 7px', borderRadius: '4px', background: '#fee2e2', color: '#dc2626', fontSize: '11px', fontWeight: 700 }}>
+                                    Missing Phone *
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#2563eb', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {row.email || '—'}
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#334155', whiteSpace: 'nowrap' }}>{row.company || '—'}</td>
+                              <td style={{ padding: '10px 14px', color: '#334155', whiteSpace: 'nowrap' }}>{row.country || '—'}</td>
+                              <td style={{ padding: '10px 14px', color: '#334155', whiteSpace: 'nowrap' }}>{row.industry || '—'}</td>
+                              <td style={{ padding: '10px 14px', color: '#334155', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {row.requirements || '—'}
+                              </td>
+                              <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                                <span style={{ display: 'inline-flex', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#15803d' }}>
+                                  {row.source || 'Excel Import'}
                                 </span>
-                              )}
-                            </td>
-                            <td style={{ padding: '10px 14px', color: row.phone ? '#166534' : '#94a3b8', fontFamily: 'monospace', whiteSpace: 'nowrap', fontWeight: 600 }}>
-                              {row.phone || '—'}
-                            </td>
-                            <td style={{ padding: '10px 14px', color: '#2563eb', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {row.email || '—'}
-                            </td>
-                            <td style={{ padding: '10px 14px', color: '#334155', whiteSpace: 'nowrap' }}>{row.company || '—'}</td>
-                            <td style={{ padding: '10px 14px', color: '#334155', whiteSpace: 'nowrap' }}>{row.country || '—'}</td>
-                            <td style={{ padding: '10px 14px', color: '#334155', whiteSpace: 'nowrap' }}>{row.industry || '—'}</td>
-                            <td style={{ padding: '10px 14px', color: '#334155', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {row.requirements || '—'}
-                            </td>
-                            <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
-                              <span style={{ display: 'inline-flex', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#15803d' }}>
-                                {row.source || 'Excel Import'}
-                              </span>
-                            </td>
-                            <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
-                              <span
-                                style={{
-                                  display: 'inline-flex',
-                                  padding: '3px 8px',
-                                  borderRadius: '6px',
-                                  fontSize: '11px',
-                                  fontWeight: 700,
-                                  background: row.leadType === 'Hot' ? '#fee2e2' : row.leadType === 'Warm' ? '#ffedd5' : '#f1f5f9',
-                                  color: row.leadType === 'Hot' ? '#dc2626' : row.leadType === 'Warm' ? '#c2410c' : '#475569',
-                                }}
-                              >
-                                {row.leadType || '—'}
-                              </span>
-                            </td>
-                            <td style={{ padding: '10px 14px', color: '#334155', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                              {row.budget ? `₹${row.budget}` : '—'}
-                            </td>
-                            <td style={{ padding: '10px 14px', color: '#64748b', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {row.notes || '—'}
-                            </td>
-                            <td style={{ padding: '10px 14px', color: '#64748b', whiteSpace: 'nowrap' }}>
-                              {row.date || '—'}
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                              <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    background: row.leadType === 'Hot' ? '#fee2e2' : row.leadType === 'Warm' ? '#ffedd5' : '#f1f5f9',
+                                    color: row.leadType === 'Hot' ? '#dc2626' : row.leadType === 'Warm' ? '#c2410c' : '#475569',
+                                  }}
+                                >
+                                  {row.leadType || '—'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#334155', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                {row.budget ? `₹${row.budget}` : '—'}
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#64748b', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {row.notes || '—'}
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                                {row.date || '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -6140,7 +6641,19 @@ function MyLeads() {
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
                 {uploadRows.length > 0 ? (
-                  <span>Ready to import <strong style={{ color: '#0f172a' }}>{uploadRows.length}</strong> lead record(s)</span>
+                  <span>
+                    Ready to import <strong style={{ color: '#0f172a' }}>{uploadStats.ready}</strong> new lead record(s)
+                    {uploadStats.totalDuplicates > 0 && (
+                      <span style={{ color: '#b45309', marginLeft: '6px', fontWeight: 600 }}>
+                        · {uploadStats.totalDuplicates} duplicate(s) will be automatically skipped
+                      </span>
+                    )}
+                    {uploadStats.invalidPhone > 0 && (
+                      <span style={{ color: '#dc2626', marginLeft: '6px', fontWeight: 600 }}>
+                        · {uploadStats.invalidPhone} missing phone
+                      </span>
+                    )}
+                  </span>
                 ) : (
                   <span>Upload your Excel or CSV file above to begin import</span>
                 )}
@@ -6173,21 +6686,23 @@ function MyLeads() {
                 {uploadRows.length > 0 ? (
                   <button
                     onClick={handleUploadSubmit}
-                    disabled={uploading || !uploadRows.length}
+                    disabled={uploading || uploadStats.ready === 0}
                     style={{
                       padding: '10px 24px',
                       borderRadius: '11px',
                       border: 'none',
-                      background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                      background: uploadStats.ready > 0
+                        ? 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)'
+                        : '#cbd5e1',
                       color: '#ffffff',
                       fontSize: '12.5px',
                       fontWeight: 700,
-                      cursor: uploading ? 'not-allowed' : 'pointer',
+                      cursor: (uploading || uploadStats.ready === 0) ? 'not-allowed' : 'pointer',
                       opacity: uploading ? 0.75 : 1,
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '8px',
-                      boxShadow: '0 4px 14px rgba(22, 163, 74, 0.3)',
+                      boxShadow: uploadStats.ready > 0 ? '0 4px 14px rgba(22, 163, 74, 0.3)' : 'none',
                     }}
                   >
                     {uploading ? (
@@ -6202,7 +6717,7 @@ function MyLeads() {
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
                         </svg>
-                        <span>Import {uploadRows.length} Leads</span>
+                        <span>{uploadStats.ready > 0 ? `Import ${uploadStats.ready} Leads` : 'No New Leads to Import'}</span>
                       </>
                     )}
                   </button>

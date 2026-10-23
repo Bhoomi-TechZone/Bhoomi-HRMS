@@ -465,7 +465,7 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
   return { contact, deal, leadId, leadType };
 }
 
-// Move a single lead into Pipeline Deals under "New Lead" stage (restricted to Sales Head, Sales Manager, Admin)
+// Move a single lead into Pipeline Deals under "New Lead" stage (Sales Head, Sales Manager, Admin OR assigned user)
 router.post('/move-lead', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id || req.user._id).populate('role');
@@ -474,9 +474,7 @@ router.post('/move-lead', auth, async (req, res) => {
     }
 
     const { isSalesHead, isSalesManager, isAdmin } = checkAccess(user);
-    if (!isAdmin && !isSalesHead && !isSalesManager) {
-      return res.status(403).json({ message: 'Access denied. Only Sales Head, Sales Manager, and Admin can move leads to pipeline.' });
-    }
+    const hasGlobalMoveAccess = isAdmin || isSalesHead || isSalesManager;
 
     const {
       leadId,
@@ -501,6 +499,30 @@ router.post('/move-lead', auth, async (req, res) => {
     const trimmedFirstName = (firstName || '').trim();
     if (!trimmedFirstName && !company) {
       return res.status(400).json({ message: 'Contact name or company is required' });
+    }
+
+    if (!leadId) {
+      return res.status(400).json({ message: 'Lead ID is required' });
+    }
+
+    if (!hasGlobalMoveAccess) {
+      const targetLead = leadType === 'meta'
+        ? await MetaLead.findById(leadId)
+        : await Lead.findById(leadId);
+
+      if (!targetLead) {
+        return res.status(404).json({ message: 'Lead not found' });
+      }
+
+      const userIdStr = (user._id || user.id || '').toString();
+      const isAssigned = Array.isArray(targetLead.assignedTo)
+        ? targetLead.assignedTo.some(a => (a?._id || a || '').toString() === userIdStr)
+        : (targetLead.assignedTo?._id || targetLead.assignedTo || '').toString() === userIdStr;
+      const isCreator = (targetLead.createdBy?._id || targetLead.createdBy || '').toString() === userIdStr;
+
+      if (!isAssigned && !isCreator) {
+        return res.status(403).json({ message: 'Access denied. You can only move your assigned leads to the pipeline.' });
+      }
     }
 
     const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Artiflow';
@@ -582,9 +604,7 @@ router.post('/bulk-move-leads', auth, async (req, res) => {
     }
 
     const { isSalesHead, isSalesManager, isAdmin } = checkAccess(user);
-    if (!isAdmin && !isSalesHead && !isSalesManager) {
-      return res.status(403).json({ message: 'Access denied. Only Sales Head, Sales Manager, and Admin can move leads to pipeline.' });
-    }
+    const hasGlobalMoveAccess = isAdmin || isSalesHead || isSalesManager;
 
     const { leads = [] } = req.body;
     if (!Array.isArray(leads) || leads.length === 0) {
@@ -626,6 +646,28 @@ router.post('/bulk-move-leads', auth, async (req, res) => {
 
         if (!leadId || !mongoose.Types.ObjectId.isValid(leadId)) {
           continue;
+        }
+
+        if (!hasGlobalMoveAccess) {
+          const targetLead = leadType === 'meta'
+            ? await MetaLead.findById(leadId)
+            : await Lead.findById(leadId);
+
+          if (!targetLead) {
+            errors.push({ id: leadId, reason: 'Lead not found' });
+            continue;
+          }
+
+          const userIdStr = (user._id || user.id || '').toString();
+          const isAssigned = Array.isArray(targetLead.assignedTo)
+            ? targetLead.assignedTo.some(a => (a?._id || a || '').toString() === userIdStr)
+            : (targetLead.assignedTo?._id || targetLead.assignedTo || '').toString() === userIdStr;
+          const isCreator = (targetLead.createdBy?._id || targetLead.createdBy || '').toString() === userIdStr;
+
+          if (!isAssigned && !isCreator) {
+            errors.push({ id: leadId, reason: 'Access denied. You can only move your assigned leads.' });
+            continue;
+          }
         }
 
         const moveRes = await moveSingleLeadToPipeline({

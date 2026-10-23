@@ -979,6 +979,29 @@ router.patch('/:id', auth, async (req, res) => {
 });
 
 /**
+ * POST /api/meta-leads/bulk-delete
+ * Bulk delete Meta leads
+ */
+router.post('/bulk-delete', auth, checkPermission('leads', 'delete'), async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: 'No lead IDs provided for deletion' });
+    }
+
+    const result = await MetaLead.deleteMany({ _id: { $in: ids } });
+    res.json({
+      success: true,
+      message: `Successfully deleted ${result.deletedCount} Meta lead(s)`,
+      count: result.deletedCount
+    });
+  } catch (err) {
+    console.error('Bulk delete meta leads error:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+/**
  * DELETE /api/meta-leads/:id
  * Delete a Meta lead
  */
