@@ -1947,6 +1947,31 @@ function Letters() {
   };
 
   const handleGenerateNDA = async () => {
+    if (!ndaForm.employeeName?.trim()) {
+      alert('Please enter Employee Full Name.');
+      return;
+    }
+    if (!ndaForm.fathersName?.trim()) {
+      alert("Please enter Father's Name.");
+      return;
+    }
+    if (!ndaForm.fullAddress?.trim()) {
+      alert('Please enter Full Address.');
+      return;
+    }
+    if (!ndaForm.mobileNo?.trim()) {
+      alert('Please enter Mobile Number.');
+      return;
+    }
+    if (!ndaForm.emailId?.trim()) {
+      alert('Please enter Email ID.');
+      return;
+    }
+    if (!ndaForm.designation?.trim()) {
+      alert('Please enter Designation.');
+      return;
+    }
+
     setGenerating(true);
     try {
       const hrName = 'Nicki Verma';
@@ -3568,7 +3593,7 @@ function Letters() {
               <button
                 className="jl-btn-generate"
                 onClick={handleGenerateNDA}
-                disabled={generating || !ndaForm.employeeName || !ndaForm.fathersName || !ndaForm.fullAddress || !ndaForm.designation || !ndaForm.mobileNo || !ndaForm.emailId}
+                disabled={generating}
               >
                 {generating ? (
                   <svg className="letters-btn-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

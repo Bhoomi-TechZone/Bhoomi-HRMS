@@ -171,6 +171,10 @@
   transition: background 0.18s;
 }
 .jl-btn-generate:hover { background: #2f6350; }
+.jl-btn-generate:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
 .letters-skeleton-table {
   padding: 8px 0 4px;
