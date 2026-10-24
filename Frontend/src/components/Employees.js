@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useNavigate } from "react-router-dom";
@@ -1483,46 +1484,436 @@ function Employees() {
     currentPage * ITEMS_PER_PAGE
   );
 
-  const handleExportListExcel = async () => {
+  const getExportFilterPayload = () => {
+    return {
+      ids: filteredEmployees.map((e) => e._id),
+      status: filterStatus || 'all',
+      role: filterRole || '',
+      department: filterDepartment || '',
+      search: searchTerm || '',
+      quickFilter: quickFilter || ''
+    };
+  };
+
+  const getExportFilename = (extension) => {
+    const parts = ['Employees'];
+    if (filterStatus === 'active') parts.push('Active');
+    else if (filterStatus === 'inactive') parts.push('Inactive');
+
+    if (filterDepartment) parts.push(filterDepartment.replace(/[^a-zA-Z0-9]/g, '_'));
+    if (filterRole) {
+      const matchedRole = roles.find((r) => r._id === filterRole);
+      if (matchedRole?.name) parts.push(matchedRole.name.replace(/[^a-zA-Z0-9]/g, '_'));
+    }
+    if (quickFilter && quickFilter !== 'all') {
+      parts.push(quickFilter);
+    }
+    parts.push('Complete_Report');
+    return `${parts.join('_')}.${extension}`;
+  };
+
+  const handleExportListExcel = () => {
+    if (!filteredEmployees || filteredEmployees.length === 0) {
+      alert('No employees match the current filter to export.');
+      return;
+    }
+
     try {
-      const response = await api.get('/employees/export/excel', { responseType: 'blob' });
-      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const link = document.createElement('a');
-      link.href = window.URL.createObjectURL(blob);
-      link.download = `Employees_List.xlsx`;
-      link.click();
+      const formatDateVal = (d) => {
+        if (!d) return 'N/A';
+        try {
+          const dt = new Date(d);
+          if (isNaN(dt.getTime())) return String(d);
+          return dt.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        } catch (e) {
+          return String(d);
+        }
+      };
+
+      const formatDocVal = (docPath) => (docPath && String(docPath).trim().length > 0 ? 'Uploaded' : 'Pending');
+
+      const data = filteredEmployees.map((emp, idx) => {
+        // Role name resolution
+        let roleName = 'N/A';
+        if (emp.role) {
+          if (typeof emp.role === 'object' && emp.role.name) {
+            roleName = emp.role.name;
+          } else if (typeof emp.role === 'string') {
+            const rObj = roles.find((r) => r._id === emp.role);
+            roleName = rObj ? rObj.name : emp.role;
+          }
+        }
+
+        // Manager name resolution
+        let managerName = 'Not Assigned';
+        if (emp.assignedManager) {
+          if (typeof emp.assignedManager === 'object') {
+            managerName = `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim();
+          } else if (typeof emp.assignedManager === 'string') {
+            const mObj = employees.find((e) => e._id === emp.assignedManager);
+            if (mObj) {
+              managerName = `${mObj.firstName || ''} ${mObj.lastName || ''} (${mObj.employeeId || ''})`.trim();
+            }
+          }
+        }
+
+        // Shift timings resolution
+        let shiftHours = 'N/A';
+        if (emp.shiftStartTime && emp.shiftEndTime) {
+          shiftHours = `${emp.shiftStartTime} - ${emp.shiftEndTime}`;
+        } else if (emp.shiftType) {
+          const sc = shiftConfigs.find((c) => c.type === emp.shiftType);
+          if (sc) shiftHours = `${sc.startTime} - ${sc.endTime}`;
+        }
+
+        return {
+          'Sr. No.': idx + 1,
+          // Step 1: Basic Information
+          'Employee ID': emp.employeeId || emp.customEmployeeId || 'N/A',
+          'First Name': emp.firstName || '',
+          'Last Name': emp.lastName || '',
+          'Full Name': `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'N/A',
+          'Login Email': emp.email || 'N/A',
+          'Role': roleName,
+          'Department': emp.department || 'N/A',
+          'Designation': emp.designation || 'N/A',
+          'Primary Phone Number': emp.phone || emp.contactNumber || 'N/A',
+          'Gender': emp.gender ? emp.gender.charAt(0).toUpperCase() + emp.gender.slice(1) : 'N/A',
+          'Assign Manager': managerName,
+          // Shift Assignment
+          'Shift Type': emp.shiftType ? emp.shiftType.charAt(0).toUpperCase() + emp.shiftType.slice(1) : 'N/A',
+          'Shift Timing': shiftHours,
+          // Additional Information
+          'Date of Joining': formatDateVal(emp.joiningDate),
+          'Date of Birth': formatDateVal(emp.dateOfBirth),
+          "Father's Name": emp.fatherName || 'N/A',
+          'Highest Qualification': emp.highestQualification || 'N/A',
+          'Alternate Contact Number': emp.alternatePhone || 'N/A',
+          'Official Email ID': emp.officialEmail || 'N/A',
+          'Aadhaar Number': emp.aadharNumber || 'N/A',
+          'Current Address': emp.currentAddress || 'N/A',
+          'Permanent Address': emp.permanentAddress || 'N/A',
+          'Employment Status': emp.isActive ? 'Active' : 'Inactive',
+          // Step 2: Banking Details
+          'Bank Name': emp.bankName || 'N/A',
+          'Account Holder Name': emp.accountHolderName || 'N/A',
+          'Account Number': emp.accountNumber || 'N/A',
+          'IFSC Code': emp.ifscCode || 'N/A',
+          'PAN Number': emp.panNumber || 'N/A',
+          'UPI ID': emp.upiId || 'N/A',
+          'Bank Verification Status': emp.bankDetailsStatus ? emp.bankDetailsStatus.toUpperCase() : 'PENDING',
+          // Step 3: Documents
+          'Aadhaar Card': formatDocVal(emp.aadharCard),
+          'PAN Card': formatDocVal(emp.panCard),
+          '10th Marksheet': formatDocVal(emp.markSheet10),
+          '12th Marksheet': formatDocVal(emp.markSheet12),
+          'Graduation Document': formatDocVal(emp.graduation),
+          'Other Documents': formatDocVal(emp.otherDocs),
+        };
+      });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(data);
+
+      ws['!cols'] = [
+        { wch: 7 },  // Sr. No.
+        { wch: 15 }, // Employee ID
+        { wch: 15 }, // First Name
+        { wch: 15 }, // Last Name
+        { wch: 24 }, // Full Name
+        { wch: 30 }, // Login Email
+        { wch: 20 }, // Role
+        { wch: 20 }, // Department
+        { wch: 22 }, // Designation
+        { wch: 18 }, // Primary Phone Number
+        { wch: 12 }, // Gender
+        { wch: 26 }, // Assign Manager
+        { wch: 16 }, // Shift Type
+        { wch: 24 }, // Shift Timing
+        { wch: 16 }, // Date of Joining
+        { wch: 16 }, // Date of Birth
+        { wch: 22 }, // Father's Name
+        { wch: 22 }, // Highest Qualification
+        { wch: 20 }, // Alternate Contact Number
+        { wch: 30 }, // Official Email ID
+        { wch: 18 }, // Aadhaar Number
+        { wch: 35 }, // Current Address
+        { wch: 35 }, // Permanent Address
+        { wch: 15 }, // Employment Status
+        { wch: 24 }, // Bank Name
+        { wch: 24 }, // Account Holder Name
+        { wch: 22 }, // Account Number
+        { wch: 16 }, // IFSC Code
+        { wch: 16 }, // PAN Number
+        { wch: 24 }, // UPI ID
+        { wch: 18 }, // Bank Verification Status
+        { wch: 16 }, // Aadhaar Card
+        { wch: 16 }, // PAN Card
+        { wch: 16 }, // 10th Marksheet
+        { wch: 16 }, // 12th Marksheet
+        { wch: 20 }, // Graduation Document
+        { wch: 16 }, // Other Documents
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Employee Details');
+      const filename = getExportFilename('xlsx');
+      XLSX.writeFile(wb, filename);
     } catch (error) {
-      console.error('Error exporting excel:', error);
-      alert('Error exporting Excel file');
+      console.error('Error generating excel:', error);
+      alert('Error exporting Excel file: ' + (error?.message || ''));
     }
   };
 
   const handleExportListWord = async () => {
+    if (!filteredEmployees || filteredEmployees.length === 0) {
+      alert('No employees match the current filter to export.');
+      return;
+    }
     try {
-      const response = await api.get('/employees/export/word', { responseType: 'blob' });
+      const payload = getExportFilterPayload();
+      const response = await api.post('/employees/export/word', payload, { responseType: 'blob' });
       const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
       const link = document.createElement('a');
       link.href = window.URL.createObjectURL(blob);
-      link.download = `Employees_List.docx`;
-      link.click();
-    } catch (error) {
-      console.error('Error exporting word:', error);
-      alert('Error exporting Word file');
-    }
-  };
-
-  const handleExportListPDF = async () => {
-    try {
-      const response = await api.get('/employees/export/pdf', { responseType: 'blob' });
-      const blob = new Blob([response.data], { type: 'application/pdf' });
-      const link = document.createElement('a');
-      link.href = window.URL.createObjectURL(blob);
-      link.download = `Employees_List.pdf`;
+      link.download = getExportFilename('docx');
       link.click();
       window.URL.revokeObjectURL(link.href);
     } catch (error) {
-      console.error('Error exporting PDF:', error);
-      alert('Error exporting PDF file');
+      console.error('Error exporting word:', error);
+      alert('Error exporting Word file: ' + (error?.response?.data?.message || error.message || ''));
+    }
+  };
+
+  const handleExportListPDF = () => {
+    if (!filteredEmployees || filteredEmployees.length === 0) {
+      alert('No employees match the current filter to export.');
+      return;
+    }
+
+    try {
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+      const formatDateVal = (d) => {
+        if (!d) return 'N/A';
+        try {
+          const dt = new Date(d);
+          if (isNaN(dt.getTime())) return String(d);
+          return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        } catch (e) {
+          return String(d);
+        }
+      };
+
+      const formatDocVal = (docPath) => (docPath && String(docPath).trim().length > 0 ? '✓ Uploaded' : '✗ Pending');
+
+      const filterLabel = filterStatus === 'active' ? 'Active Employees' : (filterStatus === 'inactive' ? 'Inactive Employees' : 'All Employees');
+
+      // Top Header Banner
+      pdf.setFillColor(20, 83, 45); // Deep green #14532d
+      pdf.rect(0, 0, 842, 54, 'F');
+
+      pdf.setTextColor(190, 242, 100); // Lime #bef264
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(14);
+      pdf.text('BHOOMI TECHZONE', 28, 22);
+
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFontSize(10);
+      pdf.text('EMPLOYEE MANAGEMENT REPORT — COMPLETE PROFILE DOSSIER', 185, 22);
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8);
+      pdf.setTextColor(226, 232, 240);
+      pdf.text(`Filter: ${filterLabel}   ·   Total Records: ${filteredEmployees.length} Employees   ·   Generated: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`, 28, 42);
+
+      pdf.setFillColor(30, 58, 41);
+      pdf.roundedRect(680, 14, 134, 26, 5, 5, 'F');
+      pdf.setTextColor(190, 242, 100);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(8);
+      pdf.text(`● ${filterLabel.toUpperCase()}`, 747, 30, { align: 'center' });
+
+      // Section 1: Overview Directory Table
+      const summaryBody = filteredEmployees.map((emp, idx) => {
+        let roleName = 'N/A';
+        if (emp.role) {
+          if (typeof emp.role === 'object' && emp.role.name) {
+            roleName = emp.role.name;
+          } else if (typeof emp.role === 'string') {
+            const rObj = roles.find((r) => r._id === emp.role);
+            roleName = rObj ? rObj.name : emp.role;
+          }
+        }
+        return [
+          String(idx + 1),
+          emp.employeeId || emp.customEmployeeId || 'N/A',
+          `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'N/A',
+          roleName,
+          emp.department || 'N/A',
+          emp.designation || 'N/A',
+          emp.phone || emp.contactNumber || 'N/A',
+          emp.officialEmail || emp.email || 'N/A',
+          emp.shiftType ? emp.shiftType.toUpperCase() : 'N/A',
+          emp.isActive ? 'Active' : 'Inactive'
+        ];
+      });
+
+      autoTable(pdf, {
+        startY: 68,
+        head: [['#', 'Emp ID', 'Full Name', 'Role', 'Department', 'Designation', 'Contact Phone', 'Official Email', 'Shift', 'Status']],
+        body: summaryBody,
+        margin: { left: 28, right: 28 },
+        styles: { fontSize: 7.2, cellPadding: 3.5 },
+        headStyles: { fillColor: [22, 101, 52], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
+        didParseCell: (data) => {
+          if (data.section === 'body' && data.column.index === 9) {
+            if (data.cell.raw === 'Active') {
+              data.cell.styles.textColor = [21, 128, 61];
+              data.cell.styles.fontStyle = 'bold';
+            } else {
+              data.cell.styles.textColor = [185, 28, 28];
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
+        }
+      });
+
+      // Section 2: Comprehensive 360° Employee Details Dossier (New Page)
+      pdf.addPage();
+      pdf.setFillColor(20, 83, 45);
+      pdf.rect(0, 0, 842, 42, 'F');
+      pdf.setTextColor(190, 242, 100);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(11);
+      pdf.text('EMPLOYEE COMPLETE PROFILES (360° DETAILED DOSSIER)', 28, 18);
+      pdf.setTextColor(226, 232, 240);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7.5);
+      pdf.text('Complete onboarding records including personal, contact, job, shift, address, banking, and document verification details', 28, 32);
+
+      let currentStartY = 54;
+
+      filteredEmployees.forEach((emp, idx) => {
+        let roleName = 'N/A';
+        if (emp.role) {
+          if (typeof emp.role === 'object' && emp.role.name) {
+            roleName = emp.role.name;
+          } else if (typeof emp.role === 'string') {
+            const rObj = roles.find((r) => r._id === emp.role);
+            roleName = rObj ? rObj.name : emp.role;
+          }
+        }
+
+        let managerName = 'Not Assigned';
+        if (emp.assignedManager) {
+          if (typeof emp.assignedManager === 'object') {
+            managerName = `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim();
+          } else if (typeof emp.assignedManager === 'string') {
+            const mObj = employees.find((e) => e._id === emp.assignedManager);
+            if (mObj) {
+              managerName = `${mObj.firstName || ''} ${mObj.lastName || ''} (${mObj.employeeId || ''})`.trim();
+            }
+          }
+        }
+
+        let shiftHours = 'N/A';
+        if (emp.shiftStartTime && emp.shiftEndTime) {
+          shiftHours = `${emp.shiftStartTime} - ${emp.shiftEndTime}`;
+        } else if (emp.shiftType) {
+          const sc = shiftConfigs.find((c) => c.type === emp.shiftType);
+          if (sc) shiftHours = `${sc.startTime} - ${sc.endTime}`;
+        }
+
+        autoTable(pdf, {
+          startY: currentStartY,
+          margin: { left: 28, right: 28 },
+          head: [[
+            {
+              content: `#${idx + 1}  ${emp.firstName || ''} ${emp.lastName || ''}  (ID: ${emp.employeeId || 'N/A'})  —  ${emp.designation || 'N/A'} [${emp.department || 'N/A'}]  |  Role: ${roleName}  |  STATUS: ${emp.isActive ? 'ACTIVE' : 'INACTIVE'}`,
+              colSpan: 4,
+              styles: {
+                fillColor: emp.isActive ? [22, 101, 52] : [153, 27, 27],
+                textColor: [255, 255, 255],
+                fontStyle: 'bold',
+                fontSize: 8.5
+              }
+            }
+          ]],
+          body: [
+            [
+              { content: `Login Email:\n${emp.email || 'N/A'}` },
+              { content: `Official Email ID:\n${emp.officialEmail || 'N/A'}` },
+              { content: `Primary Phone:\n${emp.phone || 'N/A'}` },
+              { content: `Alt Contact:\n${emp.alternatePhone || 'N/A'}` },
+            ],
+            [
+              { content: `Gender:\n${emp.gender ? emp.gender.toUpperCase() : 'N/A'}` },
+              { content: `Date of Birth:\n${formatDateVal(emp.dateOfBirth)}` },
+              { content: `Father's Name:\n${emp.fatherName || 'N/A'}` },
+              { content: `Highest Qualification:\n${emp.highestQualification || 'N/A'}` },
+            ],
+            [
+              { content: `Aadhaar Number:\n${emp.aadharNumber || 'N/A'}` },
+              { content: `Date of Joining:\n${formatDateVal(emp.joiningDate)}` },
+              { content: `Current Address:\n${emp.currentAddress || 'N/A'}`, colSpan: 2 },
+            ],
+            [
+              { content: `Department:\n${emp.department || 'N/A'}` },
+              { content: `Designation:\n${emp.designation || 'N/A'}` },
+              { content: `Assign Manager:\n${managerName}` },
+              { content: `Permanent Address:\n${emp.permanentAddress || 'N/A'}` },
+            ],
+            [
+              { content: `Shift Type:\n${emp.shiftType ? emp.shiftType.toUpperCase() : 'N/A'}` },
+              { content: `Shift Timing:\n${shiftHours}` },
+              { content: `Employment Status:\n${emp.isActive ? 'Active Staff' : 'Inactive / Relieved'}` },
+              { content: `Bank Name:\n${emp.bankName || 'N/A'}` },
+            ],
+            [
+              { content: `Account Holder:\n${emp.accountHolderName || 'N/A'}` },
+              { content: `Account Number:\n${emp.accountNumber || 'N/A'}` },
+              { content: `IFSC Code:\n${emp.ifscCode || 'N/A'}` },
+              { content: `PAN Number:\n${emp.panNumber || 'N/A'}` },
+            ],
+            [
+              { content: `UPI ID:\n${emp.upiId || 'N/A'}` },
+              { content: `Bank Verification:\n${emp.bankDetailsStatus ? emp.bankDetailsStatus.toUpperCase() : 'PENDING'}` },
+              {
+                content: `Uploaded Documents Status:\nAadhaar: ${formatDocVal(emp.aadharCard)} | PAN: ${formatDocVal(emp.panCard)}\n10th: ${formatDocVal(emp.markSheet10)} | 12th: ${formatDocVal(emp.markSheet12)}\nDegree: ${formatDocVal(emp.graduation)} | Other: ${formatDocVal(emp.otherDocs)}`,
+                colSpan: 2
+              },
+            ],
+          ],
+          theme: 'grid',
+          styles: { fontSize: 7.2, cellPadding: 3.5, lineColor: [203, 213, 225], lineWidth: 0.5 },
+          pageBreak: 'auto'
+        });
+
+        currentStartY = pdf.lastAutoTable.finalY + 14;
+        if (currentStartY > 520) {
+          pdf.addPage();
+          currentStartY = 30;
+        }
+      });
+
+      // Page numbers at the bottom of all pages
+      const totalPages = pdf.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        pdf.setPage(i);
+        pdf.setFontSize(7.5);
+        pdf.setTextColor(148, 163, 184);
+        pdf.text(
+          `Bhoomi TechZone HRMS — Confidential Employee Record   ·   Page ${i} of ${totalPages}`,
+          421,
+          582,
+          { align: 'center' }
+        );
+      }
+
+      pdf.save(getExportFilename('pdf'));
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Error exporting PDF file: ' + (error?.message || ''));
     }
   };
 

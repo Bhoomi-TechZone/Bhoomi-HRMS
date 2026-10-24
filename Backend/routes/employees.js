@@ -3,6 +3,7 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
 const User = require('../models/User');
+const Role = require('../models/Role');
 const bcrypt = require('bcryptjs');
 const xlsx = require('xlsx');
 const PDFDocument = require('pdfkit');
@@ -187,211 +188,546 @@ router.get('/', auth, async (req, res) => {
 });
 
 
-// Export Employees to Excel
-router.get('/export/excel', auth, checkPermission('employees', 'read'), async (req, res) => {
+// Helper to format dates cleanly for reports
+const formatExportDate = (d) => {
+  if (!d) return 'N/A';
   try {
-    const employees = await User.find()
-      .select('-password')
-      .populate('role')
-      .sort({ createdAt: -1 });
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return 'N/A';
+    return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch (e) {
+    return 'N/A';
+  }
+};
 
-    const data = employees.map((emp, i) => ({
-      '#': i + 1,
-      'Employee ID': emp.employeeId || 'N/A',
-      'First Name': emp.firstName || '',
-      'Last Name': emp.lastName || '',
-      'Email': emp.email || '',
-      'Phone': emp.phone || 'N/A',
-      'Gender': emp.gender || 'N/A',
-      'Role': emp.role ? emp.role.name : 'N/A',
-      'Department': emp.department || 'N/A',
-      'Designation': emp.designation || 'N/A',
-      'Status': emp.isActive ? 'Active' : 'Inactive',
-      'Joining Date': emp.joiningDate ? new Date(emp.joiningDate).toLocaleDateString('en-IN') : 'N/A',
-      // Banking
-      'Bank Name': emp.bankName || 'N/A',
-      'Account Holder': emp.accountHolderName || 'N/A',
-      'Account Number': emp.accountNumber || 'N/A',
-      'IFSC Code': emp.ifscCode || 'N/A',
-      'PAN Number': emp.panNumber || 'N/A',
-      'UPI ID': emp.upiId || 'N/A',
-    }));
+// Helper to query employees for export respecting all active filters
+const getExportEmployees = async (req) => {
+  const params = req.method === 'POST' ? req.body : req.query;
+  const { ids, status, role, department, search, quickFilter } = params || {};
+
+  const queryObj = {};
+
+  // Status filter (active / inactive)
+  if (status === 'active') {
+    queryObj.isActive = true;
+  } else if (status === 'inactive') {
+    queryObj.isActive = false;
+  }
+
+  // If specific IDs array passed from UI (matches current filtered table)
+  if (ids) {
+    const idList = Array.isArray(ids) ? ids : (typeof ids === 'string' ? ids.split(',').map(s => s.trim()).filter(Boolean) : []);
+    if (idList.length > 0) {
+      queryObj._id = { $in: idList };
+    }
+  }
+
+  // If IDs were not provided, apply individual filters
+  if (!queryObj._id) {
+    if (role && role !== 'all' && role !== '') {
+      queryObj.role = role;
+    }
+
+    if (department && department !== 'all' && department !== '') {
+      queryObj.department = department;
+    }
+
+    if (search && String(search).trim() !== '') {
+      const q = String(search).trim();
+      const regex = new RegExp(q, 'i');
+      queryObj.$or = [
+        { firstName: regex },
+        { lastName: regex },
+        { employeeId: regex },
+        { email: regex },
+        { officialEmail: regex },
+        { phone: regex },
+        { department: regex },
+        { designation: regex }
+      ];
+    }
+
+    if (quickFilter === 'developers' || quickFilter === 'sales') {
+      const kw = quickFilter === 'developers' ? /developer|dev/i : /sales|business development|bde/i;
+      const matchingRoles = await Role.find({ name: kw }).select('_id');
+      const rIds = matchingRoles.map(r => r._id);
+      if (!queryObj.role) {
+        queryObj.role = { $in: rIds };
+      }
+    } else if (quickFilter === 'newJoinees') {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      queryObj.createdAt = { $gte: thirtyDaysAgo };
+    }
+  }
+
+  const employees = await User.find(queryObj)
+    .select('-password')
+    .populate('role')
+    .populate('assignedManager', 'firstName lastName employeeId designation')
+    .sort({ employeeId: 1, createdAt: -1 });
+
+  return { employees, params };
+};
+
+// Export Employees to Excel (Full details entered during Add Employee)
+const exportEmployeesToExcel = async (req, res) => {
+  try {
+    const { employees, params } = await getExportEmployees(req);
+
+    const data = employees.map((emp, i) => {
+      const managerName = emp.assignedManager
+        ? `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim()
+        : 'N/A';
+
+      const shiftTimings = (emp.shiftStartTime && emp.shiftEndTime)
+        ? `${emp.shiftStartTime} - ${emp.shiftEndTime}`
+        : (emp.shiftStartTime || emp.shiftEndTime || 'N/A');
+
+      const shiftTypeName = emp.shiftType
+        ? emp.shiftType.charAt(0).toUpperCase() + emp.shiftType.slice(1)
+        : 'N/A';
+
+      const formatDoc = (docPath) => (docPath && String(docPath).trim().length > 0 ? 'Uploaded' : 'Not Uploaded');
+
+      return {
+        '#': i + 1,
+        'Employee ID': emp.employeeId || 'N/A',
+        'First Name': emp.firstName || '',
+        'Last Name': emp.lastName || '',
+        'Full Name': `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'N/A',
+        'Status': emp.isActive ? 'Active' : 'Inactive',
+        'Role': emp.role?.name || 'N/A',
+        'Department': emp.department || 'N/A',
+        'Designation': emp.designation || 'N/A',
+        'Reporting Manager': managerName,
+        'Date of Joining': formatExportDate(emp.joiningDate),
+        'Gender': emp.gender ? emp.gender.charAt(0).toUpperCase() + emp.gender.slice(1) : 'N/A',
+        'Date of Birth': formatExportDate(emp.dateOfBirth),
+        'Father Name': emp.fatherName || 'N/A',
+        'Highest Qualification': emp.highestQualification || 'N/A',
+        'Primary Phone': emp.phone || 'N/A',
+        'Alternate Phone': emp.alternatePhone || 'N/A',
+        'Login Email': emp.email || 'N/A',
+        'Official Email': emp.officialEmail || 'N/A',
+        'Aadhaar Number': emp.aadharNumber || 'N/A',
+        'Current Address': emp.currentAddress || 'N/A',
+        'Permanent Address': emp.permanentAddress || 'N/A',
+        'Shift Type': shiftTypeName,
+        'Shift Timings': shiftTimings,
+        'Bank Name': emp.bankName || 'N/A',
+        'Account Holder Name': emp.accountHolderName || 'N/A',
+        'Account Number': emp.accountNumber || 'N/A',
+        'IFSC Code': emp.ifscCode || 'N/A',
+        'PAN Number': emp.panNumber || 'N/A',
+        'UPI ID': emp.upiId || 'N/A',
+        'Bank Verification Status': emp.bankDetailsStatus ? emp.bankDetailsStatus.toUpperCase() : 'PENDING',
+        'Aadhaar Card': formatDoc(emp.aadharCard),
+        'PAN Card': formatDoc(emp.panCard),
+        '10th Marksheet': formatDoc(emp.markSheet10),
+        '12th Marksheet': formatDoc(emp.markSheet12),
+        'Graduation Doc': formatDoc(emp.graduation),
+        'Other Documents': formatDoc(emp.otherDocs),
+        'Profile Created At': formatExportDate(emp.createdAt),
+      };
+    });
 
     const wb = xlsx.utils.book_new();
     const ws = xlsx.utils.json_to_sheet(data);
 
-    // Column widths
     ws['!cols'] = [
-      { wch: 5 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 28 },
-      { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 20 },
-      { wch: 10 }, { wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 18 },
-      { wch: 12 }, { wch: 14 }, { wch: 20 },
+      { wch: 6 },  // #
+      { wch: 14 }, // Employee ID
+      { wch: 14 }, // First Name
+      { wch: 14 }, // Last Name
+      { wch: 22 }, // Full Name
+      { wch: 10 }, // Status
+      { wch: 18 }, // Role
+      { wch: 20 }, // Department
+      { wch: 22 }, // Designation
+      { wch: 24 }, // Reporting Manager
+      { wch: 15 }, // Date of Joining
+      { wch: 10 }, // Gender
+      { wch: 15 }, // Date of Birth
+      { wch: 20 }, // Father Name
+      { wch: 22 }, // Highest Qualification
+      { wch: 16 }, // Primary Phone
+      { wch: 16 }, // Alternate Phone
+      { wch: 28 }, // Login Email
+      { wch: 28 }, // Official Email
+      { wch: 16 }, // Aadhaar Number
+      { wch: 35 }, // Current Address
+      { wch: 35 }, // Permanent Address
+      { wch: 14 }, // Shift Type
+      { wch: 22 }, // Shift Timings
+      { wch: 22 }, // Bank Name
+      { wch: 22 }, // Account Holder Name
+      { wch: 20 }, // Account Number
+      { wch: 14 }, // IFSC Code
+      { wch: 14 }, // PAN Number
+      { wch: 20 }, // UPI ID
+      { wch: 16 }, // Bank Verification Status
+      { wch: 15 }, // Aadhaar Card
+      { wch: 15 }, // PAN Card
+      { wch: 15 }, // 10th Marksheet
+      { wch: 15 }, // 12th Marksheet
+      { wch: 18 }, // Graduation Doc
+      { wch: 16 }, // Other Documents
+      { wch: 15 }, // Created At
     ];
 
     xlsx.utils.book_append_sheet(wb, ws, 'Employees');
     const buffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-    res.setHeader('Content-Disposition', 'attachment; filename="employees.xlsx"');
+    const statusLabel = params?.status ? `${params.status.charAt(0).toUpperCase() + params.status.slice(1)}_` : '';
+    res.setHeader('Content-Disposition', `attachment; filename="Employees_${statusLabel}Complete_Report.xlsx"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buffer);
   } catch (error) {
-    console.error('Error exporting employees:', error);
+    console.error('Error exporting employees excel:', error);
     res.status(500).json({ message: 'Error exporting employees' });
   }
-});
+};
 
-// Export Employees to PDF
-router.get('/export/pdf', auth, checkPermission('employees', 'read'), async (req, res) => {
+// Export Employees to PDF (Directory overview + Complete 360° Profile Dossiers)
+const exportEmployeesToPDF = async (req, res) => {
   try {
-    const employees = await User.find()
-      .select('-password')
-      .populate('role')
-      .sort({ createdAt: -1 });
+    const { employees, params } = await getExportEmployees(req);
 
-    const doc = new PDFDocument({ margin: 30, size: 'A4', layout: 'landscape' });
+    const doc = new PDFDocument({ margin: 28, size: 'A4', layout: 'landscape', bufferPages: true });
+
+    const statusLabel = params?.status ? `${params.status.charAt(0).toUpperCase() + params.status.slice(1)}_` : '';
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="employees_list.pdf"');
+    res.setHeader('Content-Disposition', `attachment; filename="Employees_${statusLabel}Complete_Report.pdf"`);
     doc.pipe(res);
 
-    // ── Colours ──
-    const GREEN = '#166534';
-    const LIME = '#a3e635';
-    const HEADER_BG = '#166534';
-    const ROW_ALT = '#f0fdf4';
-    const BORDER = '#d1d5db';
-    const TEXT_DARK = '#111827';
-    const TEXT_LIGHT = '#ffffff';
+    // ── Palette ──
+    const GREEN_DARK = '#14532d';
+    const GREEN_MED = '#166534';
+    const GREEN_LIGHT = '#f0fdf4';
+    const GREEN_BORDER = '#86efac';
+    const LIME = '#bef264';
+    const WHITE = '#ffffff';
+    const SLATE_BG = '#f8fafc';
+    const BORDER = '#cbd5e1';
+    const TEXT_MAIN = '#0f172a';
+    const TEXT_MUTED = '#64748b';
+    const ACTIVE_BG = '#dcfce7';
+    const ACTIVE_TEXT = '#15803d';
+    const INACTIVE_BG = '#fee2e2';
+    const INACTIVE_TEXT = '#b91c1c';
 
-    // ── Columns (landscape A4 ≈ 842pt, minus 60 margins = 782pt usable) ──
-    const cols = [
-      { label: '#', key: (e, i) => String(i + 1), w: 25 },
-      { label: 'Emp ID', key: e => e.employeeId || '', w: 50 },
-      { label: 'Name', key: e => `${e.firstName} ${e.lastName}`, w: 100 },
-      { label: 'Email', key: e => e.email || '', w: 155 },
-      { label: 'Role', key: e => e.role?.name || 'N/A', w: 80 },
-      { label: 'Department', key: e => e.department || 'N/A', w: 80 },
-      { label: 'Designation', key: e => e.designation || 'N/A', w: 100 },
-      { label: 'Phone', key: e => e.phone || 'N/A', w: 80 },
-      { label: 'Status', key: e => e.isActive ? 'Active' : 'Inactive', w: 52 },
+    const marginL = 28;
+    const pageW = doc.page.width;
+    const pageH = doc.page.height;
+    const contentW = pageW - marginL * 2; // 842 - 56 = 786 pt
+
+    const activeFilterText = params?.status
+      ? (params.status === 'active' ? 'Active Employees' : params.status === 'inactive' ? 'Inactive Employees' : 'All Employees')
+      : 'All Filtered Employees';
+
+    // ── Header Banner function ──
+    const drawReportHeader = (yPos) => {
+      doc.rect(0, 0, pageW, 52).fill(GREEN_DARK);
+
+      doc.fillColor(LIME).font('Helvetica-Bold').fontSize(14)
+        .text('BHOOMI TECHZONE', marginL, 12);
+      doc.fillColor(WHITE).font('Helvetica-Bold').fontSize(10)
+        .text('EMPLOYEE MASTER DOSSIER — COMPLETE DETAILS', marginL + 160, 15);
+
+      const sub = `Filter: ${activeFilterText}   ·   Total Records: ${employees.length} Employees   ·   Export Date: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+      doc.fillColor('#e2e8f0').font('Helvetica').fontSize(8)
+        .text(sub, marginL, 34);
+
+      const badgeW = 120;
+      const badgeX = pageW - marginL - badgeW;
+      doc.roundedRect(badgeX, 14, badgeW, 24, 6).fill('#1e3a29');
+      doc.roundedRect(badgeX, 14, badgeW, 24, 6).strokeColor('#86efac').lineWidth(0.8).stroke();
+      doc.fillColor(LIME).font('Helvetica-Bold').fontSize(8.5)
+        .text(`● ${activeFilterText.toUpperCase()}`, badgeX, 21, { width: badgeW, align: 'center' });
+
+      return 62;
+    };
+
+    // ── Summary Table Columns ──
+    const summaryCols = [
+      { label: '#', w: 26, get: (e, i) => String(i + 1) },
+      { label: 'Emp ID', w: 60, get: e => e.employeeId || 'N/A' },
+      { label: 'Employee Name', w: 124, get: e => `${e.firstName || ''} ${e.lastName || ''}`.trim() || 'N/A' },
+      { label: 'Role', w: 85, get: e => e.role?.name || 'N/A' },
+      { label: 'Department', w: 90, get: e => e.department || 'N/A' },
+      { label: 'Designation', w: 105, get: e => e.designation || 'N/A' },
+      { label: 'Contact Phone', w: 86, get: e => e.phone || 'N/A' },
+      { label: 'Official Email', w: 105, get: e => e.officialEmail || e.email || 'N/A' },
+      { label: 'Shift', w: 55, get: e => e.shiftType ? e.shiftType.toUpperCase() : 'N/A' },
+      { label: 'Status', w: 50, get: e => e.isActive ? 'Active' : 'Inactive' },
     ];
 
-    const marginL = 30;
-    const tableW = cols.reduce((s, c) => s + c.w, 0);
-    const rowH = 20;
-    const headerH = 24;
-    const pageH = doc.page.height;
-    const pageW = doc.page.width;
-
-    // ── Draw table header ──
-    const drawHeader = (y) => {
-      let x = marginL;
-      // Header background
-      doc.rect(marginL, y, tableW, headerH).fill(HEADER_BG);
-      // Header text
-      doc.fillColor(TEXT_LIGHT).font('Helvetica-Bold').fontSize(8);
-      cols.forEach(col => {
-        doc.text(col.label, x + 4, y + 7, { width: col.w - 8, lineBreak: false });
-        x += col.w;
+    const drawSummaryTableHeader = (y) => {
+      doc.rect(marginL, y, contentW, 20).fill(GREEN_MED);
+      doc.fillColor(WHITE).font('Helvetica-Bold').fontSize(7.5);
+      let curX = marginL;
+      summaryCols.forEach(col => {
+        doc.text(col.label, curX + 3, y + 6, { width: col.w - 6, lineBreak: false });
+        curX += col.w;
       });
+      return y + 20;
     };
 
-    // ── Draw a single data row ──
-    const drawRow = (emp, idx, y) => {
-      const bg = idx % 2 === 0 ? '#ffffff' : ROW_ALT;
-      let x = marginL;
-      // row background
-      doc.rect(marginL, y, tableW, rowH).fill(bg);
-      // cell borders (vertical)
-      doc.strokeColor(BORDER).lineWidth(0.3);
-      cols.forEach(col => {
-        doc.rect(x, y, col.w, rowH).stroke();
-        x += col.w;
-      });
-      // cell text
-      x = marginL;
-      doc.fillColor(TEXT_DARK).font('Helvetica').fontSize(7.5);
-      cols.forEach((col, ci) => {
-        const val = typeof col.key === 'function' ? col.key(emp, idx) : '';
-        // Status badge colour
-        if (col.label === 'Status') {
-          doc.fillColor(emp.isActive ? '#16a34a' : '#dc2626').font('Helvetica-Bold');
-        } else {
-          doc.fillColor(TEXT_DARK).font('Helvetica');
-        }
-        doc.text(val, x + 4, y + 6, { width: col.w - 8, lineBreak: false, ellipsis: true });
-        x += col.w;
-      });
-    };
+    let y = drawReportHeader(0);
 
-    // ── Document title ──
-    doc.rect(0, 0, pageW, 50).fill(HEADER_BG);
-    doc.fillColor(LIME).font('Helvetica-Bold').fontSize(16)
-      .text('Employee Records', marginL, 15);
-    doc.fillColor(TEXT_LIGHT).font('Helvetica').fontSize(9)
-      .text(`Generated: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}  ·  Total: ${employees.length} employees`, marginL, 34);
+    doc.fillColor(GREEN_DARK).font('Helvetica-Bold').fontSize(9)
+      .text('DIRECTORY OVERVIEW', marginL, y);
+    y += 14;
 
-    let y = 65;
-    drawHeader(y);
-    y += headerH;
+    y = drawSummaryTableHeader(y);
 
-    employees.forEach((emp, i) => {
-      if (y + rowH > pageH - 30) {
+    const rowH = 17;
+    employees.forEach((emp, idx) => {
+      if (y + rowH > pageH - 40) {
         doc.addPage();
-        y = 30;
-        drawHeader(y);
-        y += headerH;
+        y = drawReportHeader(0);
+        doc.fillColor(GREEN_DARK).font('Helvetica-Bold').fontSize(9)
+          .text('DIRECTORY OVERVIEW (CONT.)', marginL, y);
+        y += 14;
+        y = drawSummaryTableHeader(y);
       }
-      drawRow(emp, i, y);
+
+      const bg = idx % 2 === 0 ? WHITE : SLATE_BG;
+      doc.rect(marginL, y, contentW, rowH).fill(bg);
+      doc.rect(marginL, y, contentW, rowH).strokeColor('#e2e8f0').lineWidth(0.4).stroke();
+
+      let curX = marginL;
+      summaryCols.forEach(col => {
+        const val = col.get(emp, idx);
+        if (col.label === 'Status') {
+          doc.fillColor(emp.isActive ? ACTIVE_TEXT : INACTIVE_TEXT).font('Helvetica-Bold').fontSize(7);
+        } else if (col.label === 'Emp ID' || col.label === 'Employee Name') {
+          doc.fillColor(TEXT_MAIN).font('Helvetica-Bold').fontSize(7.5);
+        } else {
+          doc.fillColor(TEXT_MAIN).font('Helvetica').fontSize(7);
+        }
+        doc.text(val, curX + 3, y + 4.5, { width: col.w - 6, lineBreak: false, ellipsis: true });
+        curX += col.w;
+      });
+
       y += rowH;
     });
 
-    // outer border
-    doc.strokeColor(GREEN).lineWidth(0.8)
-      .rect(marginL, 65, tableW, y - 65).stroke();
+    // ── Detailed Employee Profile Cards (360° Dossier) ──
+    doc.addPage();
+    y = drawReportHeader(0);
 
-    // footer
-    doc.fillColor('#9ca3af').font('Helvetica').fontSize(7)
-      .text('Confidential — HRMS', marginL, pageH - 20, { align: 'center', width: tableW });
+    doc.fillColor(GREEN_DARK).font('Helvetica-Bold').fontSize(9.5)
+      .text('EMPLOYEE COMPLETE DETAILS (360° DOSSIER)', marginL, y);
+    doc.fillColor(TEXT_MUTED).font('Helvetica').fontSize(7.5)
+      .text('Comprehensive profile records including personal, contact, job, shift, address, banking, and document statuses', marginL, y + 12);
+    y += 26;
+
+    const cardH = 228;
+    const cardGap = 12;
+
+    const drawEmployeeCard = (emp, index, cardY) => {
+      const managerName = emp.assignedManager
+        ? `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim()
+        : 'N/A';
+
+      const shiftTimings = (emp.shiftStartTime && emp.shiftEndTime)
+        ? `${emp.shiftStartTime} - ${emp.shiftEndTime}`
+        : (emp.shiftStartTime || emp.shiftEndTime || 'N/A');
+
+      const shiftTypeName = emp.shiftType
+        ? emp.shiftType.charAt(0).toUpperCase() + emp.shiftType.slice(1)
+        : 'N/A';
+
+      doc.roundedRect(marginL, cardY, contentW, cardH, 6).fill(WHITE);
+      doc.roundedRect(marginL, cardY, contentW, cardH, 6).strokeColor(BORDER).lineWidth(0.8).stroke();
+
+      const cardHeaderH = 24;
+      doc.roundedRect(marginL, cardY, contentW, cardHeaderH, 6).fill(GREEN_LIGHT);
+      doc.rect(marginL, cardY + 12, contentW, 12).fill(GREEN_LIGHT);
+      doc.lineCap('butt').moveTo(marginL, cardY + cardHeaderH).lineTo(marginL + contentW, cardY + cardHeaderH)
+        .strokeColor(GREEN_BORDER).lineWidth(0.8).stroke();
+
+      const empTitle = `#${index + 1}  ${emp.firstName || ''} ${emp.lastName || ''}  (${emp.employeeId || 'No ID'})`;
+      doc.fillColor(GREEN_DARK).font('Helvetica-Bold').fontSize(9)
+        .text(empTitle, marginL + 10, cardY + 6.5);
+
+      const jobSub = `${emp.designation || 'N/A'}  ·  ${emp.role?.name || 'N/A'}  ·  Dept: ${emp.department || 'N/A'}`;
+      doc.fillColor(TEXT_MUTED).font('Helvetica-Bold').fontSize(8)
+        .text(jobSub, marginL + 250, cardY + 7.5);
+
+      const statusPillW = 75;
+      const statusPillH = 16;
+      const statusPillX = marginL + contentW - statusPillW - 8;
+      const statusPillY = cardY + 4;
+      doc.roundedRect(statusPillX, statusPillY, statusPillW, statusPillH, 4)
+        .fill(emp.isActive ? ACTIVE_BG : INACTIVE_BG);
+      doc.fillColor(emp.isActive ? ACTIVE_TEXT : INACTIVE_TEXT).font('Helvetica-Bold').fontSize(7.5)
+        .text(emp.isActive ? '● ACTIVE' : '● INACTIVE', statusPillX, statusPillY + 4, { width: statusPillW, align: 'center' });
+
+      const col1X = marginL + 10;
+      const col2X = marginL + 265;
+      const col3X = marginL + 520;
+      const innerY = cardY + cardHeaderH + 8;
+
+      doc.strokeColor('#e2e8f0').lineWidth(0.6)
+        .moveTo(col2X - 8, innerY).lineTo(col2X - 8, cardY + cardH - 6).stroke();
+      doc.strokeColor('#e2e8f0').lineWidth(0.6)
+        .moveTo(col3X - 8, innerY).lineTo(col3X - 8, cardY + cardH - 6).stroke();
+
+      const renderField = (label, val, xPos, lineY, maxW = 240) => {
+        doc.fillColor(TEXT_MUTED).font('Helvetica-Bold').fontSize(7)
+          .text(label + ':', xPos, lineY, { width: 75, lineBreak: false });
+        doc.fillColor(TEXT_MAIN).font('Helvetica').fontSize(7.2)
+          .text(String(val || 'N/A'), xPos + 78, lineY, { width: maxW - 78, lineBreak: false, ellipsis: true });
+      };
+
+      // ── COL 1: PERSONAL & CONTACT ──
+      doc.fillColor(GREEN_DARK).font('Helvetica-Bold').fontSize(7.5)
+        .text('PERSONAL & CONTACT DETAILS', col1X, innerY);
+      doc.strokeColor(GREEN_BORDER).lineWidth(0.5)
+        .moveTo(col1X, innerY + 11).lineTo(col1X + 130, innerY + 11).stroke();
+
+      let lY = innerY + 16;
+      renderField('Personal Email', emp.email, col1X, lY, 245); lY += 14;
+      renderField('Official Email', emp.officialEmail, col1X, lY, 245); lY += 14;
+      renderField('Primary Phone', emp.phone, col1X, lY, 245); lY += 14;
+      renderField('Alternate Phone', emp.alternatePhone, col1X, lY, 245); lY += 14;
+      renderField('Gender', emp.gender ? emp.gender.toUpperCase() : 'N/A', col1X, lY, 245); lY += 14;
+      renderField('Date of Birth', formatExportDate(emp.dateOfBirth), col1X, lY, 245); lY += 14;
+      renderField('Father Name', emp.fatherName, col1X, lY, 245); lY += 14;
+      renderField('Qualification', emp.highestQualification, col1X, lY, 245); lY += 14;
+      renderField('Aadhaar No.', emp.aadharNumber, col1X, lY, 245); lY += 14;
+      renderField('Joined Date', formatExportDate(emp.joiningDate), col1X, lY, 245); lY += 14;
+      renderField('Created At', formatExportDate(emp.createdAt), col1X, lY, 245);
+
+      // ── COL 2: EMPLOYMENT, SHIFT & ADDRESSES ──
+      doc.fillColor(GREEN_DARK).font('Helvetica-Bold').fontSize(7.5)
+        .text('EMPLOYMENT & RESIDENTIAL INFO', col2X, innerY);
+      doc.strokeColor(GREEN_BORDER).lineWidth(0.5)
+        .moveTo(col2X, innerY + 11).lineTo(col2X + 145, innerY + 11).stroke();
+
+      lY = innerY + 16;
+      renderField('Employee ID', emp.employeeId, col2X, lY, 245); lY += 14;
+      renderField('Department', emp.department, col2X, lY, 245); lY += 14;
+      renderField('Designation', emp.designation, col2X, lY, 245); lY += 14;
+      renderField('Role / Access', emp.role?.name, col2X, lY, 245); lY += 14;
+      renderField('Reporting Mgr', managerName, col2X, lY, 245); lY += 14;
+      renderField('Shift Type', shiftTypeName, col2X, lY, 245); lY += 14;
+      renderField('Shift Timing', shiftTimings, col2X, lY, 245); lY += 14;
+      renderField('Current Addr', emp.currentAddress, col2X, lY, 245); lY += 14;
+      renderField('Permanent Addr', emp.permanentAddress, col2X, lY, 245); lY += 14;
+      renderField('Work Status', emp.isActive ? 'Active Staff' : 'Deactivated / Relieved', col2X, lY, 245);
+
+      // ── COL 3: BANKING & ATTACHMENTS ──
+      doc.fillColor(GREEN_DARK).font('Helvetica-Bold').fontSize(7.5)
+        .text('BANKING & VERIFIED DOCUMENTS', col3X, innerY);
+      doc.strokeColor(GREEN_BORDER).lineWidth(0.5)
+        .moveTo(col3X, innerY + 11).lineTo(col3X + 150, innerY + 11).stroke();
+
+      lY = innerY + 16;
+      renderField('Bank Name', emp.bankName, col3X, lY, 250); lY += 14;
+      renderField('Account Holder', emp.accountHolderName, col3X, lY, 250); lY += 14;
+      renderField('Account No.', emp.accountNumber, col3X, lY, 250); lY += 14;
+      renderField('IFSC Code', emp.ifscCode, col3X, lY, 250); lY += 14;
+      renderField('PAN Number', emp.panNumber, col3X, lY, 250); lY += 14;
+      renderField('UPI ID', emp.upiId, col3X, lY, 250); lY += 14;
+      renderField('Bank Status', emp.bankDetailsStatus ? emp.bankDetailsStatus.toUpperCase() : 'PENDING', col3X, lY, 250); lY += 16;
+
+      doc.fillColor(TEXT_MUTED).font('Helvetica-Bold').fontSize(7)
+        .text('Uploaded Document Checklist:', col3X, lY);
+      lY += 11;
+
+      const docCheck = (isUploaded, name) => isUploaded ? `[✓] ${name}` : `[ ] ${name}`;
+      const docCol1 = [
+        docCheck(Boolean(emp.aadharCard), 'Aadhaar Card'),
+        docCheck(Boolean(emp.panCard), 'PAN Card'),
+        docCheck(Boolean(emp.markSheet10), '10th Marksheet')
+      ];
+      const docCol2 = [
+        docCheck(Boolean(emp.markSheet12), '12th Marksheet'),
+        docCheck(Boolean(emp.graduation), 'Degree / Grad'),
+        docCheck(Boolean(emp.otherDocs), 'Other Docs')
+      ];
+
+      doc.font('Helvetica').fontSize(6.8);
+      docCol1.forEach((txt, di) => {
+        const isUp = txt.startsWith('[✓]');
+        doc.fillColor(isUp ? '#15803d' : '#94a3b8').text(txt, col3X, lY + di * 12);
+      });
+      docCol2.forEach((txt, di) => {
+        const isUp = txt.startsWith('[✓]');
+        doc.fillColor(isUp ? '#15803d' : '#94a3b8').text(txt, col3X + 120, lY + di * 12);
+      });
+    };
+
+    employees.forEach((emp, index) => {
+      if (y + cardH > pageH - 30) {
+        doc.addPage();
+        y = drawReportHeader(0);
+        doc.fillColor(GREEN_DARK).font('Helvetica-Bold').fontSize(9.5)
+          .text('EMPLOYEE COMPLETE DETAILS (CONT.)', marginL, y);
+        y += 18;
+      }
+
+      drawEmployeeCard(emp, index, y);
+      y += cardH + cardGap;
+    });
+
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.fillColor('#94a3b8').font('Helvetica').fontSize(7.5)
+        .text(
+          `Bhoomi TechZone HRMS — Confidential Employee Record   ·   Page ${i + 1} of ${range.count}`,
+          marginL,
+          pageH - 20,
+          { align: 'center', width: contentW }
+        );
+    }
 
     doc.end();
   } catch (error) {
-    console.error('Error exporting PDF:', error);
-    res.status(500).json({ message: 'Error exporting PDF' });
+    console.error('Error exporting employees PDF:', error);
+    res.status(500).json({ message: 'Error exporting employees PDF' });
   }
-});
+};
 
 // Export Employees to Word
-router.get('/export/word', auth, checkPermission('employees', 'read'), async (req, res) => {
+const exportEmployeesToWord = async (req, res) => {
   try {
-    const employees = await User.find()
-      .select('-password')
-      .populate('role')
-      .sort({ createdAt: -1 });
+    const { employees, params } = await getExportEmployees(req);
 
-    // Create table rows
     const tableRows = [
-      // Header row
       new TableRow({
         children: [
-          new TableCell({ children: [new Paragraph({ text: 'Employee ID', bold: true })] }),
-          new TableCell({ children: [new Paragraph({ text: 'First Name', bold: true })] }),
-          new TableCell({ children: [new Paragraph({ text: 'Last Name', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: '#', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'Emp ID', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'Name', bold: true })] }),
           new TableCell({ children: [new Paragraph({ text: 'Email', bold: true })] }),
           new TableCell({ children: [new Paragraph({ text: 'Role', bold: true })] }),
           new TableCell({ children: [new Paragraph({ text: 'Department', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'Designation', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'Phone', bold: true })] }),
           new TableCell({ children: [new Paragraph({ text: 'Status', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'Bank A/C', bold: true })] }),
+          new TableCell({ children: [new Paragraph({ text: 'IFSC', bold: true })] }),
         ],
       }),
-      // Data rows
-      ...employees.map(emp => new TableRow({
+      ...employees.map((emp, i) => new TableRow({
         children: [
+          new TableCell({ children: [new Paragraph(String(i + 1))] }),
           new TableCell({ children: [new Paragraph(emp.employeeId || 'N/A')] }),
-          new TableCell({ children: [new Paragraph(emp.firstName || 'N/A')] }),
-          new TableCell({ children: [new Paragraph(emp.lastName || 'N/A')] }),
-          new TableCell({ children: [new Paragraph(emp.email || 'N/A')] }),
+          new TableCell({ children: [new Paragraph(`${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'N/A')] }),
+          new TableCell({ children: [new Paragraph(emp.officialEmail || emp.email || 'N/A')] }),
           new TableCell({ children: [new Paragraph(emp.role ? emp.role.name : 'N/A')] }),
           new TableCell({ children: [new Paragraph(emp.department || 'N/A')] }),
+          new TableCell({ children: [new Paragraph(emp.designation || 'N/A')] }),
+          new TableCell({ children: [new Paragraph(emp.phone || 'N/A')] }),
           new TableCell({ children: [new Paragraph(emp.isActive ? 'Active' : 'Inactive')] }),
+          new TableCell({ children: [new Paragraph(emp.accountNumber || 'N/A')] }),
+          new TableCell({ children: [new Paragraph(emp.ifscCode || 'N/A')] }),
         ],
       })),
     ];
@@ -401,12 +737,12 @@ router.get('/export/word', auth, checkPermission('employees', 'read'), async (re
         properties: {},
         children: [
           new Paragraph({
-            text: 'Employees List',
+            text: 'Employee Complete Records',
             heading: 'Heading1',
             alignment: AlignmentType.CENTER,
           }),
           new Paragraph({
-            text: `Generated on: ${new Date().toLocaleDateString()}`,
+            text: `Generated on: ${new Date().toLocaleDateString()} · Total Records: ${employees.length}`,
             spacing: { after: 200 },
           }),
           new Table({
@@ -418,15 +754,25 @@ router.get('/export/word', auth, checkPermission('employees', 'read'), async (re
     });
 
     const buffer = await Packer.toBuffer(doc);
-
-    res.setHeader('Content-Disposition', 'attachment; filename="employees.docx"');
+    const statusLabel = params?.status ? `${params.status.charAt(0).toUpperCase() + params.status.slice(1)}_` : '';
+    res.setHeader('Content-Disposition', `attachment; filename="Employees_${statusLabel}Complete_Report.docx"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.send(buffer);
   } catch (error) {
     console.error('Error exporting Word:', error);
     res.status(500).json({ message: 'Error exporting Word document' });
   }
-});
+};
+
+// Export routes - Support both GET and POST with active filter payload
+router.get('/export/excel', auth, checkPermission('employees', 'read'), exportEmployeesToExcel);
+router.post('/export/excel', auth, checkPermission('employees', 'read'), exportEmployeesToExcel);
+
+router.get('/export/pdf', auth, checkPermission('employees', 'read'), exportEmployeesToPDF);
+router.post('/export/pdf', auth, checkPermission('employees', 'read'), exportEmployeesToPDF);
+
+router.get('/export/word', auth, checkPermission('employees', 'read'), exportEmployeesToWord);
+router.post('/export/word', auth, checkPermission('employees', 'read'), exportEmployeesToWord);
 
 // GET /employees/gender-stats — male/female counts overall and per department
 // MUST be before /:id to avoid Express matching 'gender-stats' as an ID

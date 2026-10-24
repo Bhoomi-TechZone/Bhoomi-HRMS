@@ -602,7 +602,7 @@ router.post('/break/start', auth, async (req, res) => {
 
     attendance.breaks.push({
       breakType,
-      reason: breakType === 'Other' ? reason : undefined,
+      reason: (reason && typeof reason === 'string' && reason.trim()) ? reason.trim() : (reason || undefined),
       startTime: new Date()
     });
 
