@@ -6,17 +6,20 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
 
-// Get payment records (optional filter by dealId or contactId)
+// Get payment records (optional filter by dealId, contactId, or projectId)
 router.get('/', auth, async (req, res) => {
   try {
-    const { dealId, contactId } = req.query;
+    const { dealId, contactId, projectId } = req.query;
     let query = {};
     if (dealId) query.dealId = dealId;
     if (contactId) query.contactId = contactId;
+    if (projectId) {
+      query.$or = [{ projectId: projectId }, { dealId: projectId }];
+    }
 
     const records = await PaymentRecord.find(query)
       .populate('createdBy', 'firstName lastName email')
-      .sort({ createdAt: 1 });
+      .sort({ createdAt: -1 });
 
     res.json(records);
   } catch (error) {
@@ -29,6 +32,7 @@ router.get('/', auth, async (req, res) => {
 router.post('/', auth, async (req, res) => {
   try {
     const {
+      projectId,
       dealId,
       contactId,
       srNo,
@@ -51,6 +55,7 @@ router.post('/', auth, async (req, res) => {
     const defaultRecordedTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
 
     const newRecord = new PaymentRecord({
+      projectId: projectId || null,
       dealId: dealId || null,
       contactId: contactId || null,
       srNo: srNo || 1,
@@ -70,6 +75,39 @@ router.post('/', auth, async (req, res) => {
     });
 
     await newRecord.save();
+
+    // 0. Sync paid amount to Project if associated with a project
+    if (projectId) {
+      try {
+        const Project = require('../models/Project');
+        const project = await Project.findById(projectId);
+        if (project) {
+          const numericPaid = parseFloat(String(paidAmount).replace(/[^0-9.-]/g, '')) || 0;
+          if ((paymentStatus || 'Paid').toLowerCase() === 'paid') {
+            project.paidAmount = (project.paidAmount || 0) + numericPaid;
+            project.paymentHistory = project.paymentHistory || [];
+            project.paymentHistory.push({
+              amount: numericPaid,
+              date: paymentDate ? new Date(paymentDate) : new Date(),
+              paymentMethod: paymentMode || 'Bank Transfer',
+              notes: notes || '',
+              recordedBy: req.user?._id
+            });
+            const projVal = project.projectValue || project.budget || 0;
+            if (project.paidAmount >= projVal && projVal > 0) {
+              project.paymentStatus = 'Paid';
+            } else if (project.paidAmount > 0) {
+              project.paymentStatus = 'Partially Paid';
+            } else {
+              project.paymentStatus = 'Unpaid';
+            }
+            await project.save();
+          }
+        }
+      } catch (projErr) {
+        console.warn('Sync project paidAmount error:', projErr.message);
+      }
+    }
 
     // 1. Sync activity to Deal if associated with a deal
     let deal = null;
@@ -162,6 +200,32 @@ router.put('/:id', auth, async (req, res) => {
 
     await record.save();
 
+    // Sync project paidAmount & paymentStatus if associated with a project
+    if (record.projectId) {
+      try {
+        const Project = require('../models/Project');
+        const project = await Project.findById(record.projectId);
+        if (project) {
+          const allRecords = await PaymentRecord.find({ projectId: record.projectId });
+          const totalPaid = allRecords
+            .filter(r => (r.paymentStatus || 'Paid').toLowerCase() === 'paid')
+            .reduce((sum, r) => sum + (parseFloat(String(r.paidAmount).replace(/[^0-9.-]/g, '')) || 0), 0);
+          project.paidAmount = totalPaid;
+          const projVal = project.projectValue || project.budget || 0;
+          if (project.paidAmount >= projVal && projVal > 0) {
+            project.paymentStatus = 'Paid';
+          } else if (project.paidAmount > 0) {
+            project.paymentStatus = 'Partially Paid';
+          } else {
+            project.paymentStatus = 'Unpaid';
+          }
+          await project.save();
+        }
+      } catch (projErr) {
+        console.warn('Sync project paidAmount on update error:', projErr.message);
+      }
+    }
+
     // Trigger CRM notification on update
     try {
       const io = req.app.get('socketio');
@@ -204,6 +268,31 @@ router.delete('/:id', auth, async (req, res) => {
     }
 
     await PaymentRecord.findByIdAndDelete(req.params.id);
+
+    // Sync paid amount on Project if associated with a project
+    if (record.projectId) {
+      try {
+        const Project = require('../models/Project');
+        const project = await Project.findById(record.projectId);
+        if (project) {
+          const numericPaid = parseFloat(String(record.paidAmount).replace(/[^0-9.-]/g, '')) || 0;
+          if ((record.paymentStatus || 'Paid').toLowerCase() === 'paid') {
+            project.paidAmount = Math.max(0, (project.paidAmount || 0) - numericPaid);
+            const projVal = project.projectValue || project.budget || 0;
+            if (project.paidAmount >= projVal && projVal > 0) {
+              project.paymentStatus = 'Paid';
+            } else if (project.paidAmount > 0) {
+              project.paymentStatus = 'Partially Paid';
+            } else {
+              project.paymentStatus = 'Unpaid';
+            }
+            await project.save();
+          }
+        }
+      } catch (projErr) {
+        console.warn('Sync project paidAmount on delete error:', projErr.message);
+      }
+    }
 
     // Trigger CRM notification on delete
     try {

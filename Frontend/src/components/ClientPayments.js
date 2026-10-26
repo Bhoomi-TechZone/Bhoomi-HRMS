@@ -3,6 +3,7 @@ import "./ClientPayments.css";
 import api from "../api/axios";
 import { useAuth } from "../context/AuthContext";
 import { useContextualQueryState } from "../utils/routeUtils";
+import ProjectPaymentHistoryModal from "./ProjectPaymentHistoryModal";
 
 // Icons
 const RefreshIcon = () => (
@@ -155,6 +156,36 @@ function ClientPayments() {
     return palette[index];
   };
 
+  // Professional pill styles generator for payment status
+  const getPaymentPillStyles = (status) => {
+    const norm = String(status || 'unpaid').toLowerCase();
+    if (norm === 'paid') {
+      return {
+        bg: '#dcfce7',
+        color: '#15803d',
+        border: '#86efac',
+        dot: '#22c55e',
+        chevron: '%2315803d'
+      };
+    }
+    if (norm.includes('part')) {
+      return {
+        bg: '#fef3c7',
+        color: '#b45309',
+        border: '#fcd34d',
+        dot: '#f59e0b',
+        chevron: '%23b45309'
+      };
+    }
+    return {
+      bg: '#fee2e2',
+      color: '#b91c1c',
+      border: '#fca5a5',
+      dot: '#ef4444',
+      chevron: '%23b91c1c'
+    };
+  };
+
   // Fetch payment data
   useEffect(() => {
     fetchData();
@@ -218,7 +249,16 @@ function ClientPayments() {
 
       const paymentsWithData = projects.map((project, index) => {
         const baseAmount = project.projectValue || project.budget || project.totalAmount || 0;
-        const totalWithGst = baseAmount * 1.18;
+        const paidAmount = project.paidAmount || 0;
+        
+        // Derive payment status
+        let derivedPaymentStatus = project.paymentStatus;
+        if (!derivedPaymentStatus) {
+          if (baseAmount <= 0) derivedPaymentStatus = 'Paid';
+          else if (paidAmount >= baseAmount) derivedPaymentStatus = 'Paid';
+          else if (paidAmount > 0) derivedPaymentStatus = 'Partially Paid';
+          else derivedPaymentStatus = 'Unpaid';
+        }
         
         return {
           id: project.projectId || `PRJ${String(index + 1).padStart(4, '0')}`,
@@ -237,10 +277,11 @@ function ClientPayments() {
             project.status === 'completed' ? 'Completed' :
               project.status === 'on-hold' ? 'On Hold' :
                 project.status || 'Active',
+          paymentStatus: derivedPaymentStatus,
           baseAmount: baseAmount,
           rate: baseAmount,
-          totalAmount: totalWithGst,
-          paidAmount: project.paidAmount || 0,
+          totalAmount: baseAmount,
+          paidAmount: paidAmount,
           description: project.description || '',
           itemDetails: project.description || '',
           hsnSac: project.hsnSac || '9975',
@@ -284,16 +325,10 @@ function ClientPayments() {
     }
   };
 
-  // Unique statuses dynamically from paymentData
+  // Unique payment statuses
   const uniqueStatuses = useMemo(() => {
-    const statuses = new Set();
-    paymentData.forEach(p => {
-      if (p.projectStatus && p.projectStatus !== '-') {
-        statuses.add(p.projectStatus);
-      }
-    });
-    return Array.from(statuses);
-  }, [paymentData]);
+    return ['Paid', 'Partially Paid', 'Unpaid'];
+  }, []);
 
   // Filter and search
   const filteredData = useMemo(() => {
@@ -305,7 +340,8 @@ function ClientPayments() {
       const phone = String(payment.phone || '').toLowerCase();
       const projectName = String(payment.projectName || '').toLowerCase();
       const id = String(payment.id || '').toLowerCase();
-      const status = String(payment.projectStatus || '').toLowerCase();
+      const payStatus = String(payment.paymentStatus || '').toLowerCase();
+      const projStatus = String(payment.projectStatus || '').toLowerCase();
 
       const matchesSearch = !query ||
         clientName.includes(query) ||
@@ -313,10 +349,12 @@ function ClientPayments() {
         phone.includes(query) ||
         projectName.includes(query) ||
         id.includes(query) ||
-        status.includes(query);
+        payStatus.includes(query) ||
+        projStatus.includes(query);
 
       const matchesStatus = !statusFilter || statusFilter.toLowerCase() === 'all' || 
-        status === statusFilter.toLowerCase();
+        payStatus === statusFilter.toLowerCase() ||
+        (statusFilter.toLowerCase() === 'partial' && payStatus === 'partially paid');
 
       return matchesSearch && matchesStatus;
     });
@@ -1609,9 +1647,127 @@ ${isDownload ? '' : `
 
   const handleEditDetailsClick = (payment) => {
     setEditingPayment(payment);
-    setEditForm({ projectStatus: payment.projectStatus || 'Active' });
+    setEditForm({
+      projectStatus: payment.projectStatus || 'Active',
+      paymentStatus: payment.paymentStatus || 'Unpaid'
+    });
     setActiveDropdown(null);
     setIsEditModalOpen(true);
+  };
+
+  const handleMarkAsPaid = async (payment) => {
+    if (!canEdit) {
+      alert('You do not have permission to edit payment records.');
+      return;
+    }
+
+    const dueAmount = Math.max(0, (payment.totalAmount || payment.baseAmount || 0) - (payment.paidAmount || 0));
+    
+    if (dueAmount <= 0 && payment.paymentStatus === 'Paid') {
+      alert('This project payment is already marked as Paid.');
+      return;
+    }
+
+    const confirmMsg = dueAmount > 0
+      ? `Mark payment for "${payment.projectName}" as Paid?\n\nThis will record the remaining balance of ₹${dueAmount.toLocaleString('en-IN')} as Paid.`
+      : `Mark payment for "${payment.projectName}" as Paid?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setLoading(true);
+
+      // If there is remaining due, create a payment record
+      if (dueAmount > 0) {
+        const now = new Date();
+        const defaultRecordedDate = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+        const defaultRecordedTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+
+        await api.post('/payment-records', {
+          projectId: payment._id,
+          srNo: 1,
+          clientName: payment.clientName,
+          clientEmail: payment.email,
+          projectName: payment.projectName,
+          paidAmount: `₹ ${dueAmount.toLocaleString('en-IN')}`,
+          paymentMode: 'Bank Transfer',
+          paymentStatus: 'Paid',
+          paymentDate: defaultRecordedDate,
+          recordedOnDate: defaultRecordedDate,
+          recordedOnTime: defaultRecordedTime,
+          recordedOn: `${defaultRecordedDate}, ${defaultRecordedTime}`,
+          notes: `Marked as fully paid by ${user?.name || user?.firstName || 'Admin'}`
+        });
+      }
+
+      // Also ensure project paymentStatus and paidAmount are updated
+      await api.put(`/projects/${payment._id}`, {
+        paymentStatus: 'Paid',
+        paidAmount: payment.totalAmount || payment.baseAmount || dueAmount
+      });
+
+      alert(`Payment for "${payment.projectName}" marked as Paid successfully!`);
+      await fetchData();
+    } catch (err) {
+      console.error('Error marking payment as paid:', err);
+      alert(err.response?.data?.message || 'Failed to update payment status to Paid. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePaymentStatusChange = async (payment, newStatus) => {
+    if (!canEdit) {
+      alert('You do not have permission to update payment status.');
+      return;
+    }
+    if (payment.paymentStatus === newStatus) return;
+
+    try {
+      setLoading(true);
+      const total = payment.totalAmount || payment.baseAmount || 0;
+      const currentPaid = payment.paidAmount || 0;
+      const due = Math.max(0, total - currentPaid);
+
+      const updatePayload = {
+        paymentStatus: newStatus
+      };
+
+      if (newStatus === 'Paid') {
+        if (due > 0) {
+          const now = new Date();
+          const defaultRecordedDate = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+          const defaultRecordedTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+
+          await api.post('/payment-records', {
+            projectId: payment._id,
+            srNo: 1,
+            clientName: payment.clientName,
+            clientEmail: payment.email,
+            projectName: payment.projectName,
+            paidAmount: `₹ ${due.toLocaleString('en-IN')}`,
+            paymentMode: 'Bank Transfer',
+            paymentStatus: 'Paid',
+            paymentDate: defaultRecordedDate,
+            recordedOnDate: defaultRecordedDate,
+            recordedOnTime: defaultRecordedTime,
+            recordedOn: `${defaultRecordedDate}, ${defaultRecordedTime}`,
+            notes: `Status changed to Paid by ${user?.name || user?.firstName || 'Admin'}`
+          });
+        }
+        updatePayload.paidAmount = total;
+      } else if (newStatus === 'Unpaid') {
+        updatePayload.paidAmount = 0;
+      }
+
+      await api.put(`/projects/${payment._id}`, updatePayload);
+      await fetchData();
+    } catch (err) {
+      console.error('Error changing payment status:', err);
+      alert(err.response?.data?.message || 'Failed to update payment status.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRegenerateInvoice = (payment) => {
@@ -1631,7 +1787,19 @@ ${isDownload ? '' : `
       if (editForm.projectStatus === 'Active') dbStatus = 'active';
       if (editForm.projectStatus === 'In Progress') dbStatus = 'in-progress';
       
-      await api.put(`/projects/${editingPayment._id}`, { status: dbStatus });
+      const updatePayload = {
+        status: dbStatus,
+        paymentStatus: editForm.paymentStatus || 'Unpaid'
+      };
+
+      if (editForm.paymentStatus === 'Paid') {
+        const total = editingPayment.totalAmount || editingPayment.baseAmount || 0;
+        updatePayload.paidAmount = total;
+      } else if (editForm.paymentStatus === 'Unpaid') {
+        updatePayload.paidAmount = 0;
+      }
+      
+      await api.put(`/projects/${editingPayment._id}`, updatePayload);
       setIsEditModalOpen(false);
       fetchData();
     } catch (error) {
@@ -1652,20 +1820,37 @@ ${isDownload ? '' : `
 
     setAddingPayment(true);
     try {
+      const addedAmount = parseFloat(paymentForm.amount);
       const currentPaid = selectedProj.paidAmount || 0;
-      const newPaidAmount = currentPaid + parseFloat(paymentForm.amount);
+      const newPaidAmount = currentPaid + addedAmount;
 
-      const newPaymentRecord = {
-        amount: parseFloat(paymentForm.amount),
-        date: paymentForm.paymentDate,
-        paymentMethod: paymentForm.paymentMethod,
-        notes: paymentForm.notes
-      };
+      const now = new Date();
+      const defaultRecordedDate = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+      const defaultRecordedTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
 
+      const formattedPaidDate = paymentForm.paymentDate
+        ? new Date(paymentForm.paymentDate).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+        : defaultRecordedDate;
+
+      // 1. Save to payment-records API (same backend as Pipeline)
+      await api.post('/payment-records', {
+        projectId: selectedProj._id,
+        clientName: selectedProj.clientName || 'Client',
+        clientEmail: selectedProj.email || '',
+        projectName: selectedProj.projectName,
+        paidAmount: `₹ ${addedAmount.toLocaleString('en-IN')}`,
+        paymentMode: paymentForm.paymentMethod || 'Bank Transfer',
+        paymentStatus: 'Paid',
+        paymentDate: formattedPaidDate,
+        recordedOnDate: defaultRecordedDate,
+        recordedOnTime: defaultRecordedTime,
+        recordedOn: `${defaultRecordedDate}, ${defaultRecordedTime}`,
+        notes: paymentForm.notes || ''
+      });
+
+      // 2. Update Project paidAmount
       await api.put(`/projects/${selectedProj._id}`, {
         paidAmount: newPaidAmount,
-        // Optional: Assuming the backend can handle appending to an array if we send it all.
-        // We just send the updated total since the backend array append logic might override if we replace array.
       });
 
       alert('Payment added successfully!');
@@ -2402,9 +2587,9 @@ ${isDownload ? '' : `
           }}>
             {[
               { label: "Total Projects", value: stats.total, trend: totalChange, isUp: totalTrend },
-              { label: "Total Revenue", value: `₹${stats.totalRevenue.toLocaleString()}`, trend: revenueChange, isUp: revenueTrend },
-              { label: "Total Paid", value: `₹${stats.totalPaid.toLocaleString()}`, trend: paidChange, isUp: paidTrend },
-              { label: "Pending", value: `₹${stats.pending.toLocaleString()}`, trend: pendingChange, isUp: pendingTrend }
+              { label: "Total Revenue", value: `₹${Math.round(stats.totalRevenue).toLocaleString()}`, trend: revenueChange, isUp: revenueTrend },
+              { label: "Total Paid", value: `₹${Math.round(stats.totalPaid).toLocaleString()}`, trend: paidChange, isUp: paidTrend },
+              { label: "Pending", value: `₹${Math.round(stats.pending).toLocaleString()}`, trend: pendingChange, isUp: pendingTrend }
             ].map((item) => (
               <div
                 key={item.label}
@@ -2539,7 +2724,7 @@ ${isDownload ? '' : `
               onFocus={e => e.target.style.borderColor = '#16a34a'}
               onBlur={e => e.target.style.borderColor = '#e2e8f0'}
             >
-              <option value="all">All Statuses</option>
+              <option value="all">All Payment Statuses</option>
               {uniqueStatuses.map(status => (
                 <option key={status} value={status}>{status}</option>
               ))}
@@ -2571,7 +2756,7 @@ ${isDownload ? '' : `
                     <th style={{ padding: '12px 14px', textAlign: 'left', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Email</th>
                     <th style={{ padding: '12px 14px', textAlign: 'left', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Phone</th>
                     <th style={{ padding: '12px 14px', textAlign: 'left', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Project Name</th>
-                    <th style={{ padding: '12px 14px', textAlign: 'left', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Status</th>
+                    <th style={{ padding: '12px 14px', textAlign: 'left', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Payment Status</th>
                     <th style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Total Amount</th>
                     <th style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Paid Amount</th>
                     <th style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Due Amount</th>
@@ -2608,26 +2793,67 @@ ${isDownload ? '' : `
                         <td style={{ padding: '11px 14px', color: '#64748b', fontSize: '12px' }}>{payment.phone}</td>
                         <td style={{ padding: '11px 14px', color: '#0f172a', fontWeight: 500, fontSize: '12px' }}>{payment.projectName}</td>
                         <td style={{ padding: '11px 14px' }}>
-                          <span style={{
-                            display: 'inline-block',
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            fontSize: '10px',
-                            fontWeight: 600,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.03em',
-                            background: payment.projectStatus === 'Completed' ? '#dcfce7' :
-                              payment.projectStatus === 'Active' ? '#dbeafe' :
-                                payment.projectStatus === 'In Progress' ? '#fef3c7' : '#f1f5f9',
-                            color: payment.projectStatus === 'Completed' ? '#166534' :
-                              payment.projectStatus === 'Active' ? '#1e40af' :
-                                payment.projectStatus === 'In Progress' ? '#92400e' : '#475569'
-                          }}>
-                            {payment.projectStatus}
-                          </span>
+                          {(() => {
+                            const pill = getPaymentPillStyles(payment.paymentStatus);
+                            return canEdit ? (
+                              <div style={{ position: 'relative', display: 'inline-block' }}>
+                                <select
+                                  value={payment.paymentStatus || 'Unpaid'}
+                                  onChange={(e) => handlePaymentStatusChange(payment, e.target.value)}
+                                  title="Change Payment Status"
+                                  style={{
+                                    appearance: 'none',
+                                    WebkitAppearance: 'none',
+                                    MozAppearance: 'none',
+                                    background: `${pill.bg} url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='${pill.chevron}' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>") no-repeat right 9px center`,
+                                    color: pill.color,
+                                    border: `1.5px solid ${pill.border}`,
+                                    borderRadius: '50px',
+                                    padding: '4px 24px 4px 11px',
+                                    fontSize: '10.5px',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                    cursor: 'pointer',
+                                    outline: 'none',
+                                    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                                    transition: 'all 0.15s ease',
+                                    display: 'inline-flex',
+                                    alignItems: 'center'
+                                  }}
+                                  onMouseEnter={(e) => e.target.style.filter = 'brightness(0.96)'}
+                                  onMouseLeave={(e) => e.target.style.filter = 'none'}
+                                >
+                                  <option value="Paid" style={{ background: '#fff', color: '#15803d', fontWeight: 700 }}>PAID</option>
+                                  <option value="Partially Paid" style={{ background: '#fff', color: '#b45309', fontWeight: 700 }}>PARTIALLY PAID</option>
+                                  <option value="Unpaid" style={{ background: '#fff', color: '#b91c1c', fontWeight: 700 }}>UNPAID</option>
+                                </select>
+                              </div>
+                            ) : (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                padding: '4px 12px',
+                                borderRadius: '50px',
+                                fontSize: '10.5px',
+                                fontWeight: 700,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                                background: pill.bg,
+                                color: pill.color,
+                                border: `1.5px solid ${pill.border}`
+                              }}>
+                                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: pill.dot }}></span>
+                                {payment.paymentStatus}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td style={{ padding: '11px 14px', textAlign: 'right', color: '#0f172a', fontWeight: 600, fontSize: '12px' }}>
-                          ₹{payment.totalAmount.toLocaleString()}
+                          <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                            ₹{Math.round(payment.totalAmount || payment.baseAmount || 0).toLocaleString()}
+                          </div>
                         </td>
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                           <span style={{
@@ -2635,7 +2861,7 @@ ${isDownload ? '' : `
                             fontWeight: 600,
                             fontSize: '12px'
                           }}>
-                            ₹{payment.paidAmount.toLocaleString()}
+                            ₹{Math.round(payment.paidAmount).toLocaleString()}
                           </span>
                         </td>
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
@@ -2644,7 +2870,7 @@ ${isDownload ? '' : `
                             fontWeight: 600,
                             fontSize: '12px'
                           }}>
-                            ₹{Math.max(0, payment.totalAmount - payment.paidAmount).toLocaleString()}
+                            ₹{Math.round(Math.max(0, payment.totalAmount - payment.paidAmount)).toLocaleString()}
                           </span>
                         </td>
                         <td style={{ padding: '11px 14px', textAlign: 'center' }}>
@@ -2658,20 +2884,31 @@ ${isDownload ? '' : `
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2.5"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
                                     </button>
                                     {activeDropdown === payment._id && (
-                                        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '4px', background: '#fff', borderRadius: '8px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', border: '1px solid #e5e7eb', zIndex: 100, minWidth: '130px', padding: '4px', textAlign: 'left' }}>
+                                        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '4px', background: '#fff', borderRadius: '8px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', border: '1px solid #e5e7eb', zIndex: 100, minWidth: '135px', padding: '4px', textAlign: 'left' }}>
                                             {canCreate && (
                                               <button onClick={() => {
                                                 setActiveDropdown(null);
-                                                setPaymentForm({
-                                                  projectId: payment._id,
-                                                  amount: '',
-                                                  paymentDate: new Date().toISOString().split('T')[0],
-                                                  paymentMethod: 'Bank Transfer',
-                                                  notes: ''
-                                                });
-                                                setIsPaymentModalOpen(true);
+                                                handleOpenPaymentDetails(payment);
                                               }} className="cp-dropdown-item-btn">
                                                 Add Payment
+                                              </button>
+                                            )}
+                                            <button onClick={() => {
+                                              setActiveDropdown(null);
+                                              handleOpenPaymentDetails(payment);
+                                            }} className="cp-dropdown-item-btn">
+                                              Payment History
+                                            </button>
+                                            {canEdit && (
+                                              <button
+                                                onClick={() => {
+                                                  setActiveDropdown(null);
+                                                  handleMarkAsPaid(payment);
+                                                }}
+                                                className="cp-dropdown-item-btn"
+                                                style={{ color: payment.paymentStatus === 'Paid' ? '#94a3b8' : '#16a34a', fontWeight: 600 }}
+                                              >
+                                                {payment.paymentStatus === 'Paid' ? '✓ Marked Paid' : 'Mark as Paid'}
                                               </button>
                                             )}
                                             {canEdit && <button onClick={() => handleEditDetailsClick(payment)} className="cp-dropdown-item-btn">Edit Details</button>}
@@ -4469,122 +4706,14 @@ ${isDownload ? '' : `
         </div>
       )}
 
-      {/* Project Payment Details Modal (for Payment Records table) */}
-      {showPaymentDetailsModal && selectedPaymentRecord && (
-        <div className="pay-overlay" onClick={() => setShowPaymentDetailsModal(false)}>
-          <div className="pay-modal" style={{ maxWidth: '560px' }} onClick={e => e.stopPropagation()}>
-            <div className="pay-modal-hd">
-              <div className="pay-modal-hd-icon" style={{ background: '#ecfdf5', color: '#16a34a' }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2">
-                  <rect x="2" y="5" width="20" height="14" rx="2" />
-                  <line x1="2" y1="10" x2="22" y2="10" />
-                </svg>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div className="pay-modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>{selectedPaymentRecord.projectName}</span>
-                  <span style={{
-                    fontSize: '11px',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    fontWeight: 600,
-                    background: '#f1f5f9',
-                    color: '#475569'
-                  }}>
-                    {selectedPaymentRecord.id}
-                  </span>
-                </div>
-                <div className="pay-modal-sub">Payment & Account Balance Summary</div>
-              </div>
-              <button className="pay-close-btn" type="button" onClick={() => setShowPaymentDetailsModal(false)}>
-                <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-                  <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="pay-modal-body" style={{ padding: '18px 20px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '16px' }}>
-                <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase' }}>Total Contract</div>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>₹{selectedPaymentRecord.totalAmount.toLocaleString()}</div>
-                </div>
-                <div style={{ background: '#f0fdf4', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
-                  <div style={{ fontSize: '10.5px', color: '#166534', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase' }}>Total Paid</div>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#16a34a' }}>₹{selectedPaymentRecord.paidAmount.toLocaleString()}</div>
-                </div>
-                <div style={{
-                  background: (selectedPaymentRecord.totalAmount - selectedPaymentRecord.paidAmount) > 0 ? '#fff7ed' : '#f0fdf4',
-                  padding: '12px 14px',
-                  borderRadius: '10px',
-                  border: `1px solid ${(selectedPaymentRecord.totalAmount - selectedPaymentRecord.paidAmount) > 0 ? '#fed7aa' : '#bbf7d0'}`
-                }}>
-                  <div style={{
-                    fontSize: '10.5px',
-                    color: (selectedPaymentRecord.totalAmount - selectedPaymentRecord.paidAmount) > 0 ? '#c2410c' : '#166534',
-                    fontWeight: 600,
-                    marginBottom: '4px',
-                    textTransform: 'uppercase'
-                  }}>
-                    Outstanding Due
-                  </div>
-                  <div style={{
-                    fontSize: '15px',
-                    fontWeight: 700,
-                    color: (selectedPaymentRecord.totalAmount - selectedPaymentRecord.paidAmount) > 0 ? '#ea580c' : '#16a34a'
-                  }}>
-                    ₹{Math.max(0, selectedPaymentRecord.totalAmount - selectedPaymentRecord.paidAmount).toLocaleString()}
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ background: '#fff', borderRadius: '10px', border: '1px solid #e2e8f0', padding: '14px', marginBottom: '14px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' }}>Client & Project Details</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12.5px' }}>
-                  <div><span style={{ color: '#64748b' }}>Client Name:</span> <strong style={{ color: '#0f172a' }}>{selectedPaymentRecord.clientName}</strong></div>
-                  <div><span style={{ color: '#64748b' }}>Status:</span> <strong style={{ color: '#0f172a' }}>{selectedPaymentRecord.projectStatus}</strong></div>
-                  <div><span style={{ color: '#64748b' }}>Email:</span> <span style={{ color: '#0f172a' }}>{selectedPaymentRecord.email || '-'}</span></div>
-                  <div><span style={{ color: '#64748b' }}>Phone:</span> <span style={{ color: '#0f172a' }}>{selectedPaymentRecord.phone || '-'}</span></div>
-                </div>
-              </div>
-
-              <div style={{ background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', padding: '14px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Payment Status Info</div>
-                <p style={{ fontSize: '12.5px', color: '#475569', margin: 0, lineHeight: 1.5 }}>
-                  {selectedPaymentRecord.paidAmount > 0
-                    ? `₹${selectedPaymentRecord.paidAmount.toLocaleString()} has been received against this project.`
-                    : 'No payments have been received or recorded for this project yet.'}
-                </p>
-              </div>
-            </div>
-
-            <div className="pay-footer" style={{ padding: '12px 20px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button type="button" className="pay-btn-ghost" onClick={() => setShowPaymentDetailsModal(false)}>
-                Close
-              </button>
-              {canCreate && (
-                <button
-                  type="button"
-                  className="pay-btn-primary"
-                  onClick={() => {
-                    setShowPaymentDetailsModal(false);
-                    setPaymentForm({
-                      projectId: selectedPaymentRecord._id,
-                      amount: '',
-                      paymentDate: new Date().toISOString().split('T')[0],
-                      paymentMethod: 'Bank Transfer',
-                      notes: ''
-                    });
-                    setIsPaymentModalOpen(true);
-                  }}
-                >
-                  Add Payment
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Project Payment History & Installments Modal */}
+      <ProjectPaymentHistoryModal
+        isOpen={showPaymentDetailsModal}
+        onClose={() => setShowPaymentDetailsModal(false)}
+        project={selectedPaymentRecord}
+        onPaymentUpdated={fetchData}
+        currentUser={user}
+      />
 
       {/* Add Payment Modal */}
       {isPaymentModalOpen && (
@@ -4826,7 +4955,7 @@ ${isDownload ? '' : `
                     <div className="pay-section-lbl" style={{ marginTop: '5px' }}>Financials</div>
                     <div className="pay-date-row">
                       <div className="pay-field">
-                        <label className="pay-lbl">Total w/ GST</label>
+                        <label className="pay-lbl">Total Amount</label>
                         <input className="pay-input" value={`₹${(editingPayment.totalAmount || 0).toLocaleString()}`} disabled style={{ backgroundColor: '#f9fafb', color: '#6b7280', borderColor: '#f3f4f6' }} />
                       </div>
                       <div className="pay-field">
@@ -4839,19 +4968,34 @@ ${isDownload ? '' : `
                   </>
                 )}
                 
-                <div className="pay-field">
-                  <label className="pay-lbl">Project Status <span className="pay-req">*</span></label>
-                  <select
-                    className="pay-input pay-select"
-                    value={editForm.projectStatus}
-                    onChange={(e) => setEditForm({ ...editForm, projectStatus: e.target.value })}
-                    required
-                  >
-                    <option value="Active">Active</option>
-                    <option value="In Progress">In Progress</option>
-                    <option value="Completed">Completed</option>
-                    <option value="On Hold">On Hold</option>
-                  </select>
+                <div className="pay-date-row">
+                  <div className="pay-field">
+                    <label className="pay-lbl">Project Status <span className="pay-req">*</span></label>
+                    <select
+                      className="pay-input pay-select"
+                      value={editForm.projectStatus}
+                      onChange={(e) => setEditForm({ ...editForm, projectStatus: e.target.value })}
+                      required
+                    >
+                      <option value="Active">Active</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Completed">Completed</option>
+                      <option value="On Hold">On Hold</option>
+                    </select>
+                  </div>
+                  <div className="pay-field">
+                    <label className="pay-lbl">Payment Status <span className="pay-req">*</span></label>
+                    <select
+                      className="pay-input pay-select"
+                      value={editForm.paymentStatus || 'Unpaid'}
+                      onChange={(e) => setEditForm({ ...editForm, paymentStatus: e.target.value })}
+                      required
+                    >
+                      <option value="Unpaid">Unpaid</option>
+                      <option value="Partially Paid">Partially Paid</option>
+                      <option value="Paid">Paid</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="pay-actions">

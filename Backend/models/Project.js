@@ -82,6 +82,11 @@ const projectSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  paymentStatus: {
+    type: String,
+    enum: ['Paid', 'Partially Paid', 'Unpaid'],
+    default: 'Unpaid'
+  },
   paymentHistory: [{
     amount: { type: Number, required: true },
     date: { type: Date, default: Date.now },

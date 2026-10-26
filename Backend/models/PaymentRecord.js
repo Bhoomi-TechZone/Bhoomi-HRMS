@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const paymentRecordSchema = new mongoose.Schema({
+  projectId: {
+    type: String,
+    index: true,
+    default: null
+  },
   dealId: {
     type: String,
     index: true,
@@ -82,6 +87,7 @@ const paymentRecordSchema = new mongoose.Schema({
   timestamps: true
 });
 
+paymentRecordSchema.index({ projectId: 1, createdAt: -1 });
 paymentRecordSchema.index({ dealId: 1, createdAt: -1 });
 paymentRecordSchema.index({ contactId: 1, createdAt: -1 });
 

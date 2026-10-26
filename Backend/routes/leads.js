@@ -474,6 +474,31 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
           phoneToSave = digits;
         }
 
+        // Parse date safely (supports DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, ISO, and standard dates)
+        let parsedDate = new Date();
+        if (row.date) {
+          const rawDateStr = String(row.date).trim();
+          const dmyMatch = rawDateStr.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+          if (dmyMatch) {
+            const day = parseInt(dmyMatch[1], 10);
+            const month = parseInt(dmyMatch[2], 10) - 1;
+            const year = parseInt(dmyMatch[3], 10);
+            const d = new Date(year, month, day);
+            if (!isNaN(d.getTime())) parsedDate = d;
+          } else {
+            const d = new Date(rawDateStr);
+            if (!isNaN(d.getTime())) parsedDate = d;
+          }
+        }
+
+        // Parse budget safely (strip currency symbols and commas, prevent NaN)
+        let parsedBudget = 0;
+        if (row.budget !== undefined && row.budget !== null && row.budget !== '') {
+          const cleanBudget = String(row.budget).replace(/[^0-9.-]/g, '');
+          const val = parseFloat(cleanBudget);
+          if (!isNaN(val)) parsedBudget = val;
+        }
+
         const leadData = {
           name: clientName,
           email: row.email ? String(row.email).toLowerCase().trim() : '',
@@ -481,14 +506,14 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
           company: row.company ? String(row.company).trim() : '',
           country: row.country ? String(row.country).trim() : '',
           industry: row.industry ? String(row.industry).trim() : '',
-          date: row.date ? new Date(row.date) : new Date(),
+          date: parsedDate,
           addedOn: new Date(),
           source: row.source || 'Excel Import',
           leadType: normalizedLeadType,
           requirement: row.requirement ? String(row.requirement).trim() : '',
           requirements: row.requirements ? String(row.requirements).trim() : (row.requirement ? String(row.requirement).trim() : ''),
           notes: row.notes ? String(row.notes).trim() : '',
-          budget: row.budget ? parseFloat(row.budget) : 0,
+          budget: parsedBudget,
           status: 'New',
           createdBy: req.user.id,
           history: [{
@@ -510,9 +535,10 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
 
         // Keep local cache updated for subsequent rows
         existingPhoneSet.add(digits);
-        existingPhoneSet.add(corePhone);
-        existingPhoneDetails.set(corePhone, clientName || 'Imported Lead');
+        if (corePhone) existingPhoneSet.add(corePhone);
+        if (corePhone) existingPhoneDetails.set(corePhone, clientName || 'Imported Lead');
       } catch (err) {
+        console.error(`Bulk import row ${rowNum} save error:`, err.message);
         errors.push({ row: rowNum, reason: err.message });
       }
     }

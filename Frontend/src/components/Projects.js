@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { useContextualQueryState } from "../utils/routeUtils";
 import NotificationBell from './NotificationBell';
 import { COUNTRIES } from "../utils/countries";
+import ProjectPaymentHistoryModal from "./ProjectPaymentHistoryModal";
 
 const emptyProjectForm = {
   name: "",
@@ -346,6 +347,7 @@ function Projects() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [viewProject, setViewProject] = useState(null);
   const [editingProject, setEditingProject] = useState(null);
+  const [paymentHistoryProject, setPaymentHistoryProject] = useState(null);
   const [addForm, setAddForm] = useState(emptyProjectForm);
   const [editForm, setEditForm] = useState(emptyProjectForm);
   const [addFormErrors, setAddFormErrors] = useState({});
@@ -1356,6 +1358,13 @@ function Projects() {
                     </td>
                     <td style={{ padding: "9px 12px" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }} data-proj-action-menu>
+                        <button onClick={() => setPaymentHistoryProject(project)} title="Payment History & Add Payment"
+                          style={{ width: "28px", height: "28px", borderRadius: "8px", border: "1px solid #bbf7d0", background: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#16a34a", transition: "all 0.15s" }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="2" y="5" width="20" height="14" rx="2" />
+                            <line x1="2" y1="10" x2="22" y2="10" />
+                          </svg>
+                        </button>
                         <button onClick={() => setViewProject(project)} title="View Details"
                           style={{ width: "28px", height: "28px", borderRadius: "8px", border: "1px solid #e2e8f0", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#3b82f6", transition: "all 0.15s" }}>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1408,7 +1417,15 @@ function Projects() {
         const proj = projects.find((p) => p._id === actionMenu.id);
         if (!proj) return null;
         return (
-          <div data-proj-action-menu style={{ position: "fixed", top: actionMenu.top, left: actionMenu.left, width: "160px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 18px 40px rgba(15,23,42,0.12)", padding: "6px", zIndex: 1200 }}>
+          <div data-proj-action-menu style={{ position: "fixed", top: actionMenu.top, left: actionMenu.left, width: "165px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 18px 40px rgba(15,23,42,0.12)", padding: "6px", zIndex: 1200 }}>
+            <button onClick={() => { setPaymentHistoryProject(proj); setActionMenu(null); }}
+              style={{ width: "100%", border: "none", background: "transparent", borderRadius: "8px", padding: "9px 10px", display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", fontWeight: 600, color: "#16a34a", cursor: "pointer", textAlign: "left" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="5" width="20" height="14" rx="2" />
+                <line x1="2" y1="10" x2="22" y2="10" />
+              </svg>
+              Payment History
+            </button>
             {canUpdate && (
               <button onClick={() => openEditModal(proj)}
                 style={{ width: "100%", border: "none", background: "transparent", borderRadius: "8px", padding: "9px 10px", display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", fontWeight: 600, color: "#334155", cursor: "pointer", textAlign: "left" }}>
@@ -1687,10 +1704,18 @@ function Projects() {
                 )}
               </div>
             </div>
-            
           </div>
         </div>
       )}
+
+      {/* Payment History & Installments Modal */}
+      <ProjectPaymentHistoryModal
+        isOpen={!!paymentHistoryProject}
+        onClose={() => setPaymentHistoryProject(null)}
+        project={paymentHistoryProject}
+        onPaymentUpdated={fetchProjects}
+        currentUser={user}
+      />
     </div>
   );
 }

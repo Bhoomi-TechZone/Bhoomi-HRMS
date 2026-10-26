@@ -2527,10 +2527,19 @@ function MyLeads() {
       fetchAll();
 
       const importedCount = res.data?.imported ?? validRowsToImport.length;
+      const duplicatesCount = res.data?.duplicatesCount ?? 0;
+      const errorsCount = res.data?.errorsCount ?? 0;
       const skippedCount = uploadRows.length - importedCount;
 
       if (skippedCount > 0) {
-        alert(`✅ Import Completed Successfully!\n\n• ${importedCount} lead(s) imported into CRM.\n• ${skippedCount} duplicate/invalid record(s) were safely skipped.`);
+        let details = `✅ Import Completed!\n\n• ${importedCount} lead(s) imported into CRM.`;
+        if (duplicatesCount > 0) {
+          details += `\n• ${duplicatesCount} duplicate lead(s) were safely skipped.`;
+        }
+        if (errorsCount > 0) {
+          details += `\n• ${errorsCount} record(s) skipped due to missing/invalid data.`;
+        }
+        alert(details);
       } else {
         alert(`✅ Successfully imported all ${importedCount} lead(s) into CRM!`);
       }
@@ -2587,6 +2596,8 @@ function MyLeads() {
     const link = document.createElement('a');
     link.href = url;
     link.download = `leads_export_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
@@ -6039,7 +6050,7 @@ function MyLeads() {
                 </div>
 
                 <div style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
-                  Importing {uploadStats.ready} Leads...
+                  Importing {skipCrmDuplicates ? uploadStats.ready : uploadStats.totalValid} Leads...
                 </div>
                 <div style={{ fontSize: '13.5px', color: '#64748b', marginTop: '8px', maxWidth: '420px', lineHeight: 1.5 }}>
                   Please wait while records are being validated and added to the database.
