@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import * as XLSX from 'xlsx';
 import { useContextualQueryState } from '../utils/routeUtils';
 import {
   ArrowUpDown,
@@ -7541,10 +7542,12 @@ function Pipeline() {
         if (dealId && !dealId.toString().startsWith('deal-')) {
           await api.delete(`/deals/${dealId}`);
         }
+        setDeals(prev => prev.filter(d => d._id !== dealId));
       } catch (err) {
-        console.warn('Delete deal API sync:', err.message);
+        console.error('Delete deal API error:', err);
+        alert(err.response?.data?.message || 'Failed to delete deal. Please check your permissions.');
+        return;
       }
-      setDeals(prev => prev.filter(d => d._id !== dealId));
 
       if (dealToDelete) {
         const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
@@ -7748,15 +7751,28 @@ function Pipeline() {
     if (!canDelete || targetIds.length === 0) return;
     if (window.confirm(`Are you sure you want to delete ${targetIds.length} selected deal(s)?`)) {
       const dealIdsToDelete = [...targetIds];
-      setDeals(prev => prev.filter(d => !dealIdsToDelete.includes(d._id)));
-      setSelectedKanbanDealIds([]);
-      for (const id of dealIdsToDelete) {
-        try {
-          if (id && !id.toString().startsWith('deal-')) {
-            await api.delete(`/deals/${id}`);
+      try {
+        await api.post('/deals/bulk-delete', { dealIds: dealIdsToDelete });
+        setDeals(prev => prev.filter(d => !dealIdsToDelete.includes(d._id)));
+        setSelectedKanbanDealIds([]);
+      } catch (err) {
+        console.warn('Bulk delete deals API error, trying fallback:', err.message);
+        let deletedSuccessfully = [];
+        for (const id of dealIdsToDelete) {
+          try {
+            if (id && !id.toString().startsWith('deal-')) {
+              await api.delete(`/deals/${id}`);
+              deletedSuccessfully.push(id);
+            }
+          } catch (singleErr) {
+            console.warn(`Bulk delete deal ${id} API error:`, singleErr.message);
           }
-        } catch (err) {
-          console.warn(`Bulk delete deal ${id} API error:`, err.message);
+        }
+        if (deletedSuccessfully.length > 0) {
+          setDeals(prev => prev.filter(d => !deletedSuccessfully.includes(d._id)));
+          setSelectedKanbanDealIds(prev => prev.filter(id => !deletedSuccessfully.includes(id)));
+        } else {
+          alert(err.response?.data?.message || 'Failed to delete selected deal(s). Please verify your permissions.');
         }
       }
     }
@@ -8194,25 +8210,182 @@ function Pipeline() {
     setShowCreateModal(false);
   };
 
-  // Quick export functionality
+  // Export deals to Excel sheet with all required fields
   const handleExport = () => {
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      ['Client Name,Deal Name,Location,Deal Value,Expected Close Date,Sales Owner,Stage']
-        .concat(
-          filteredDeals.map(
-            d => `"${d.clientName}","${d.dealName}","${d.location}",${d.dealValue},"${d.expectedCloseDate}","${d.salesOwner}","${d.stage}"`
-          )
-        )
-        .join('\n');
+    const dealsToExport = (selectedKanbanDealIds && selectedKanbanDealIds.length > 0)
+      ? filteredDeals.filter(d => selectedKanbanDealIds.includes(d._id || d.id))
+      : filteredDeals;
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `pipeline_deals_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (!dealsToExport || dealsToExport.length === 0) {
+      alert('No deals found to export.');
+      return;
+    }
+
+    const exportRows = dealsToExport.map(deal => {
+      // 1. Client Name
+      const clientName = (deal.clientName || deal.dealName || '').trim();
+
+      // Find matched contact if needed for email, phone, location, origin, or source
+      const targetEmail = (deal.associatedContact || deal.email || deal.clientEmail || '').trim().toLowerCase();
+      const targetName = (deal.clientName || deal.dealName || '').trim().toLowerCase();
+      const targetPhone = String(deal.phone || deal.phoneNumber || '').replace(/\D/g, '');
+      const matchedContact = (contacts || []).find(c => {
+        if (!c) return false;
+        if (deal.contactId && String(c._id) === String(deal.contactId)) return true;
+        if (deal.associatedContactId && String(c._id) === String(deal.associatedContactId)) return true;
+        const cEmail = (c.email || '').trim().toLowerCase();
+        if (targetEmail && cEmail && cEmail === targetEmail) return true;
+        const cFullName = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
+        if (targetName && cFullName && cFullName === targetName) return true;
+        const cPhone = String(c.phone || '').replace(/\D/g, '');
+        if (targetPhone && cPhone && targetPhone.length >= 7 && (targetPhone.includes(cPhone) || cPhone.includes(targetPhone))) return true;
+        return false;
+      });
+
+      // 2. Email
+      let email = (deal.email || deal.clientEmail || '').trim();
+      if (!email && deal.associatedContact && deal.associatedContact.includes('@')) {
+        email = deal.associatedContact.trim();
+      }
+      if (!email && matchedContact && matchedContact.email) {
+        email = matchedContact.email.trim();
+      }
+
+      // 3. Phone
+      let phone = (typeof getDealContactPhone === 'function' ? getDealContactPhone(deal) : '') || deal.phone || deal.phoneNumber || deal.clientPhone || '';
+      if (!phone && matchedContact && matchedContact.phone) {
+        const cCode = matchedContact.countryCode ? `${matchedContact.countryCode} ` : '';
+        const rawP = String(matchedContact.phone).trim();
+        phone = rawP.startsWith('+') ? rawP : `${cCode}${rawP}`.trim();
+      }
+
+      // 4. Location
+      let location = (deal.location || deal.city || '').trim();
+      if (!location && matchedContact) {
+        location = [matchedContact.city, matchedContact.state, matchedContact.country].filter(Boolean).join(', ') || matchedContact.location || '';
+      }
+
+      // 5. Value
+      const value = Number(deal.dealValue !== undefined && deal.dealValue !== null ? deal.dealValue : (deal.value || 0));
+
+      // 6. Status
+      const status = deal.stage || deal.status || (typeof getDealStageName === 'function' ? getDealStageName(deal, pipelines) : '') || 'New';
+
+      // 7. Deal Owner
+      const dealOwner = deal.salesOwner || deal.owner || deal.dealOwner || 'Unassigned';
+
+      // 8. Origin
+      const origin = (typeof getDealContactOrigin === 'function' ? getDealContactOrigin(deal) : '') || deal.origin || (matchedContact ? matchedContact.origin : '') || 'Domestic';
+
+      // 9. Contact Source
+      let contactSource = (deal.contactSource || deal.source || deal.leadSource || '').trim();
+      if (!contactSource && matchedContact && matchedContact.contactSource) {
+        contactSource = matchedContact.contactSource.trim();
+      }
+      if (!contactSource && deal.relatedLead && (deal.relatedLead.source || deal.relatedLead.leadSource)) {
+        contactSource = deal.relatedLead.source || deal.relatedLead.leadSource;
+      }
+      if (!contactSource && deal.relatedMetaLead) {
+        contactSource = 'Meta Lead';
+      }
+      if (!contactSource) {
+        contactSource = 'Direct';
+      }
+
+      // 10. Created On
+      let createdOn = '';
+      const createdDateObj = (typeof parseDealDate === 'function' ? parseDealDate(deal.createdAt || deal.createdDate || deal.date) : null) || (deal.createdAt ? new Date(deal.createdAt) : null);
+      if (createdDateObj && !isNaN(createdDateObj.getTime())) {
+        const y = createdDateObj.getFullYear();
+        const m = String(createdDateObj.getMonth() + 1).padStart(2, '0');
+        const d = String(createdDateObj.getDate()).padStart(2, '0');
+        createdOn = `${y}-${m}-${d}`;
+      }
+
+      return {
+        'Client Name': clientName,
+        'Email': email,
+        'Phone': phone,
+        'Location': location,
+        'Value': value,
+        'Status': status,
+        'Deal Owner': dealOwner,
+        'Origin': origin,
+        'Contact Source': contactSource,
+        'Created On': createdOn
+      };
+    });
+
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    try {
+      const ws = XLSX.utils.json_to_sheet(exportRows);
+      ws['!cols'] = [
+        { wch: 26 }, // Client Name
+        { wch: 28 }, // Email
+        { wch: 20 }, // Phone
+        { wch: 22 }, // Location
+        { wch: 14 }, // Value
+        { wch: 18 }, // Status
+        { wch: 22 }, // Deal Owner
+        { wch: 16 }, // Origin
+        { wch: 20 }, // Contact Source
+        { wch: 16 }  // Created On
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Deals');
+      XLSX.writeFile(wb, `pipeline_deals_${fileDate}.xlsx`);
+
+      // Immediately notify all admins about deals export
+      try {
+        api.post('/pipeline-contacts/export-notify', {
+          category: 'Deals',
+          count: dealsToExport.length,
+          details: `${dealsToExport.length} deal(s) exported to Excel`
+        }).catch(err => console.error('Export notify error:', err));
+      } catch (e) {
+        console.error('Export notification error:', e);
+      }
+    } catch (err) {
+      console.error('XLSX export failed, using CSV fallback:', err);
+      const headers = ['Client Name', 'Email', 'Phone', 'Location', 'Value', 'Status', 'Deal Owner', 'Origin', 'Contact Source', 'Created On'];
+      const csvRows = [headers.join(',')];
+      exportRows.forEach(r => {
+        const row = [
+          `"${String(r['Client Name'] || '').replace(/"/g, '""')}"`,
+          `"${String(r['Email'] || '').replace(/"/g, '""')}"`,
+          `"${String(r['Phone'] || '').replace(/"/g, '""')}"`,
+          `"${String(r['Location'] || '').replace(/"/g, '""')}"`,
+          r['Value'] !== undefined ? r['Value'] : 0,
+          `"${String(r['Status'] || '').replace(/"/g, '""')}"`,
+          `"${String(r['Deal Owner'] || '').replace(/"/g, '""')}"`,
+          `"${String(r['Origin'] || '').replace(/"/g, '""')}"`,
+          `"${String(r['Contact Source'] || '').replace(/"/g, '""')}"`,
+          `"${String(r['Created On'] || '').replace(/"/g, '""')}"`
+        ];
+        csvRows.push(row.join(','));
+      });
+      const blob = new Blob(['\ufeff' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `pipeline_deals_${fileDate}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      // Immediately notify all admins about deals export fallback
+      try {
+        api.post('/pipeline-contacts/export-notify', {
+          category: 'Deals',
+          count: dealsToExport.length,
+          details: `${dealsToExport.length} deal(s) exported to CSV`
+        }).catch(err => console.error('Export notify error:', err));
+      } catch (e) {
+        console.error('Export notification error:', e);
+      }
+    }
   };
 
   // Contacts Management Handlers
@@ -8353,11 +8526,12 @@ function Pipeline() {
         if (contactId && !contactId.toString().startsWith('contact-')) {
           await api.delete(`/pipeline-contacts/${contactId}`);
         }
+        setContacts(prev => prev.filter(c => c._id !== contactId));
       } catch (err) {
-        console.warn('Delete contact API sync:', err.message);
+        console.error('Delete contact API error:', err);
+        alert(err.response?.data?.message || 'Failed to delete contact from database.');
+        return;
       }
-
-      setContacts(prev => prev.filter(c => c._id !== contactId));
       if (contactToDelete) {
         const targetEmail = (contactToDelete.email || '').toLowerCase();
         const targetFullName = `${contactToDelete.firstName || ''} ${contactToDelete.lastName || ''}`.trim().toLowerCase();
@@ -8562,6 +8736,17 @@ function Pipeline() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    // Immediately notify all admins about contacts export
+    try {
+      api.post('/pipeline-contacts/export-notify', {
+        category: 'Contacts',
+        count: filteredContacts.length,
+        details: `${filteredContacts.length} contact(s) exported to CSV`
+      }).catch(err => console.error('Export notify error:', err));
+    } catch (e) {
+      console.error('Export notification error:', e);
+    }
   };
 
   // Drag and drop for contacts across stages
@@ -8773,32 +8958,28 @@ function Pipeline() {
     if (!canDelete || targetIds.length === 0) return;
     if (window.confirm(`Are you sure you want to delete ${targetIds.length} selected contact(s)?`)) {
       const contactIdsToDelete = [...targetIds];
-      const contactsToDelete = contacts.filter(c => contactIdsToDelete.includes(c._id));
-
-      let deletedContacts = [];
-      try {
-        deletedContacts = JSON.parse(localStorage.getItem('crm_deleted_contacts') || '[]');
-      } catch (err) { }
-      contactIdsToDelete.forEach(id => deletedContacts.push(id.toString()));
-      contactsToDelete.forEach(c => {
-        if (c.email) deletedContacts.push(c.email.toLowerCase());
-        if (c.firstName) deletedContacts.push(`${c.firstName} ${c.lastName || ''}`.trim().toLowerCase());
-      });
-      try {
-        localStorage.setItem('crm_deleted_contacts', JSON.stringify(Array.from(new Set(deletedContacts))));
-      } catch (err) { }
-
-      setContacts(prev => prev.filter(c => !contactIdsToDelete.includes(c._id)));
-      setSelectedKanbanContactIds([]);
-
       try {
         await api.post('/pipeline-contacts/bulk-delete', { contactIds: contactIdsToDelete });
+        setContacts(prev => prev.filter(c => !contactIdsToDelete.includes(c._id)));
+        setSelectedKanbanContactIds([]);
       } catch (err) {
-        console.warn('Bulk delete API error, falling back to individual calls:', err.message);
+        console.warn('Bulk delete contacts API error, falling back to individual calls:', err.message);
+        let deletedSuccessfully = [];
         for (const id of contactIdsToDelete) {
-          if (id && !id.toString().startsWith('contact-')) {
-            api.delete(`/pipeline-contacts/${id}`).catch(() => {});
+          try {
+            if (id && !id.toString().startsWith('contact-')) {
+              await api.delete(`/pipeline-contacts/${id}`);
+              deletedSuccessfully.push(id);
+            }
+          } catch (singleErr) {
+            console.warn(`Bulk delete contact ${id} API error:`, singleErr.message);
           }
+        }
+        if (deletedSuccessfully.length > 0) {
+          setContacts(prev => prev.filter(c => !deletedSuccessfully.includes(c._id)));
+          setSelectedKanbanContactIds(prev => prev.filter(id => !deletedSuccessfully.includes(id)));
+        } else {
+          alert(err.response?.data?.message || 'Failed to delete selected contact(s). Please verify your permissions.');
         }
       }
     }
@@ -8828,6 +9009,17 @@ function Pipeline() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    // Immediately notify all admins about bulk contacts export
+    try {
+      api.post('/pipeline-contacts/export-notify', {
+        category: 'Contacts',
+        count: contactsToExport.length,
+        details: `${contactsToExport.length} selected contact(s) exported to CSV`
+      }).catch(err => console.error('Export notify error:', err));
+    } catch (e) {
+      console.error('Export notification error:', e);
+    }
   };
 
   const handleChangeDealStage = async (newStage) => {
@@ -9098,6 +9290,17 @@ function Pipeline() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    // Immediately notify all admins about companies export
+    try {
+      api.post('/pipeline-contacts/export-notify', {
+        category: 'Companies',
+        count: filteredCompanies.length,
+        details: `${filteredCompanies.length} company record(s) exported to CSV`
+      }).catch(err => console.error('Export notify error:', err));
+    } catch (e) {
+      console.error('Export notification error:', e);
+    }
   };
 
   // Companies Double Click on Card: multi-select all companies (or double-click again to deselect)
@@ -9253,6 +9456,17 @@ function Pipeline() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    // Immediately notify all admins about bulk companies export
+    try {
+      api.post('/pipeline-contacts/export-notify', {
+        category: 'Companies',
+        count: companiesToExport.length,
+        details: `${companiesToExport.length} selected company record(s) exported to CSV`
+      }).catch(err => console.error('Export notify error:', err));
+    } catch (e) {
+      console.error('Export notification error:', e);
+    }
   };
 
   const handleExportTasks = () => {
@@ -9273,6 +9487,17 @@ function Pipeline() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    // Immediately notify all admins about tasks export
+    try {
+      api.post('/pipeline-contacts/export-notify', {
+        category: 'Tasks',
+        count: filteredTasks.length,
+        details: `${filteredTasks.length} task(s) exported to CSV`
+      }).catch(err => console.error('Export notify error:', err));
+    } catch (e) {
+      console.error('Export notification error:', e);
+    }
   };
 
   // Close dropdowns on outside click
@@ -11601,7 +11826,7 @@ function Pipeline() {
                   </div>
 
                   {/* Export */}
-                  <button className="pipeline-btn-export" onClick={handleExport} title="Export CSV">
+                  <button className="pipeline-btn-export" onClick={handleExport} title="Export to Excel">
                     <Download size={14} />
                     <span>Export</span>
                   </button>
@@ -12849,7 +13074,7 @@ function Pipeline() {
                       className="pipeline-kanban-bulk-btn"
                       style={{ background: 'rgba(255, 255, 255, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}
                       onClick={handleExport}
-                      title="Export selected deals to CSV"
+                      title="Export selected deals to Excel"
                     >
                       <Download size={13} />
                       <span>Export</span>

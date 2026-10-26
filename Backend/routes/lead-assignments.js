@@ -4,6 +4,7 @@ const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
 const LeadAssignment = require('../models/LeadAssignment');
 const User = require('../models/User');
+const { sendAdminDataActivityNotification } = require('../utils/crmNotifier');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const path = require('path');
@@ -232,6 +233,22 @@ router.post('/import-excel', auth, checkPermission('leads', 'create'), (req, res
 
     // Clean up uploaded file after processing
     fs.unlinkSync(req.file.path);
+
+    if (assignedLeads.length > 0) {
+      try {
+        const io = req.app.get('socketio');
+        await sendAdminDataActivityNotification(io, {
+          actorUser: req.user,
+          activityType: 'import',
+          category: 'Leads',
+          count: assignedLeads.length,
+          details: `${assignedLeads.length} leads assigned to ${salesPersons.length} sales persons`,
+          link: '/leads'
+        });
+      } catch (notifErr) {
+        console.error('Lead assignments import admin notification error:', notifErr);
+      }
+    }
 
     res.status(201).json({
       message: `${assignedLeads.length} leads imported and assigned successfully`,

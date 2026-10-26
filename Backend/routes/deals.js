@@ -75,29 +75,28 @@ function checkAccess(user) {
     email.startsWith('admin@') ||
     user?.role?.name === 'Admin' ||
     user?.role?.name === 'Super Admin' ||
-    user?.role?.name === 'Director';
+    user?.role?.name === 'Director' ||
+    user?.isAdmin === true;
 
   const hasFullAccess = isAdmin || isSalesHead || isSalesManager;
 
   const permissions = Array.isArray(user?.role?.permissions) ? user.role.permissions : [];
-  const hasRead = hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals' || p.module === 'proposals') && p.actions.includes('read'));
-  const hasCreate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('create'));
-  const hasUpdate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('update'));
-  const hasDelete = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals') && p.actions.includes('delete'));
+  const hasRead = hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals' || p.module === 'proposals' || p.module === 'contacts' || p.module === 'leads') && p.actions.includes('read'));
+  const hasCreate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals' || p.module === 'contacts' || p.module === 'leads') && p.actions.includes('create'));
+  const hasUpdate = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals' || p.module === 'contacts' || p.module === 'leads') && p.actions.includes('update'));
+  const hasDelete = isAdmin || hasFullAccess || permissions.some(p => (p.module === 'pipeline' || p.module === 'deals' || p.module === 'contacts' || p.module === 'leads') && p.actions.includes('delete'));
 
   return { roleName, isSalesHead, isSalesManager, isAdmin, hasFullAccess, hasRead, hasCreate, hasUpdate, hasDelete };
 }
 
 // Helper to check if a specific deal is accessible to a user
 function isDealOwnedByUser(deal, user, hasFullAccess, isAdmin) {
-  if (isAdmin) return true;
+  if (isAdmin || hasFullAccess) return true;
   if (!deal || !user) return false;
 
-  // Old deals are strictly visible only to Admin
+  // Non-privileged users cannot access deals before cutoff
   const dealDate = new Date(deal.createdAt || 0);
   if (dealDate < DATA_CUTOFF_DATE) return false;
-
-  if (hasFullAccess) return true;
   if (!deal || !user) return false;
 
   const userId = (user._id || user.id || '').toString();
@@ -588,6 +587,83 @@ router.put('/:id', auth, async (req, res) => {
     }
   } catch (error) {
     console.error('Update deal error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Bulk delete deals
+router.post('/bulk-delete', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) return res.status(401).json({ message: 'User not found' });
+    const { hasDelete, hasFullAccess, isAdmin } = checkAccess(user);
+    if (!hasDelete) return res.status(403).json({ message: 'Access denied. Delete permission required.' });
+
+    const { dealIds } = req.body;
+    if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
+      return res.status(400).json({ message: 'dealIds array is required' });
+    }
+
+    const validIds = dealIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      return res.json({ success: true, count: 0 });
+    }
+
+    let filter = { _id: { $in: validIds } };
+    if (!isAdmin && !hasFullAccess) {
+      const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+      const userEmail = (user.email || '').trim().toLowerCase();
+      filter.$or = [
+        { assignedTo: user._id },
+        { createdBy: user._id }
+      ];
+      if (userFullName) {
+        filter.$or.push({ salesOwner: new RegExp(`^${userFullName}$`, 'i') });
+        filter.$or.push({ addedBy: new RegExp(`^${userFullName}$`, 'i') });
+      }
+      if (userEmail) {
+        filter.$or.push({ email: userEmail });
+      }
+    }
+
+    // Find deals before deletion to clean up any related leads
+    const dealsToDelete = await Deal.find(filter).select('_id relatedLead relatedMetaLead dealName clientName');
+    const dealIdsToDelete = dealsToDelete.map(d => d._id);
+
+    const result = await Deal.deleteMany({ _id: { $in: dealIdsToDelete } });
+
+    // Clean up related leads if any
+    const leadIds = dealsToDelete.map(d => d.relatedLead).filter(Boolean);
+    const metaLeadIds = dealsToDelete.map(d => d.relatedMetaLead).filter(Boolean);
+
+    if (leadIds.length > 0) {
+      await Lead.updateMany(
+        { _id: { $in: leadIds } },
+        { $set: { movedToPipeline: false, pipelineDealId: null } }
+      ).catch(() => {});
+    }
+    if (metaLeadIds.length > 0) {
+      await MetaLead.updateMany(
+        { _id: { $in: metaLeadIds } },
+        { $set: { movedToPipeline: false, pipelineDealId: null } }
+      ).catch(() => {});
+    }
+
+    // Trigger CRM notification
+    try {
+      const io = req.app.get('socketio');
+      sendCrmNotification(io, {
+        actorUser: user,
+        entityType: 'Deal',
+        action: 'delete',
+        entityName: `${dealsToDelete.length} Deal(s)`,
+        link: '/pipeline?tab=deals'
+      });
+    } catch (notifErr) {}
+
+    res.json({ success: true, count: result.deletedCount });
+  } catch (error) {
+    console.error('Bulk delete deals error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

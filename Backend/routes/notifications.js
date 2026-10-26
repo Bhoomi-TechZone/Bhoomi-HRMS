@@ -63,4 +63,25 @@ router.delete('/clear-all', auth, async (req, res) => {
   }
 });
 
+// General export-notify endpoint for any module
+router.post('/export-notify', auth, async (req, res) => {
+  try {
+    const { category = 'Data', count = 0, details = '', link = '' } = req.body;
+    const { sendAdminDataActivityNotification } = require('../utils/crmNotifier');
+    const io = req.app.get('socketio');
+    await sendAdminDataActivityNotification(io, {
+      actorUser: req.user,
+      activityType: 'export',
+      category,
+      count: parseInt(count, 10) || 0,
+      details,
+      link
+    });
+    res.status(200).json({ success: true, message: `Admin notified of ${category} export` });
+  } catch (error) {
+    console.error('Export notify error:', error);
+    res.status(500).json({ message: 'Error notifying admin', error: error.message });
+  }
+});
+
 module.exports = router;

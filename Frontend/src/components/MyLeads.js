@@ -200,6 +200,7 @@ function MyLeads() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState('');
+  const [skipCrmDuplicates, setSkipCrmDuplicates] = useState(true);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
   const modalFileInputRef = useRef(null);
@@ -2234,7 +2235,8 @@ function MyLeads() {
       duplicateCrm,
       duplicateFile,
       totalDuplicates: duplicateCrm + duplicateFile,
-      invalidPhone
+      invalidPhone,
+      totalValid: ready + duplicateCrm
     };
   }, [uploadRows]);
 
@@ -2353,10 +2355,20 @@ function MyLeads() {
     return str.replace(/\D/g, '');
   };
 
+  const isDummyPhoneNumber = (digits) => {
+    if (!digits || digits.length < 7) return true;
+    if (/^(\d)\1+$/.test(digits)) return true;
+    if (['1234567', '12345678', '123456789', '1234567890', '9876543210', '0123456789'].includes(digits)) return true;
+    return false;
+  };
+
   const extractCorePhoneDigits = (val) => {
     const digits = cleanPhoneNumber(val);
-    if (!digits) return '';
-    return digits.length >= 10 ? digits.slice(-10) : digits;
+    if (!digits || isDummyPhoneNumber(digits)) return '';
+    if (digits.length === 10) return digits;
+    if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+    if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+    return digits;
   };
 
   const processFile = (file) => {
@@ -2364,7 +2376,7 @@ function MyLeads() {
     setUploadedFileName(file.name);
     setUploadError('');
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const wb = XLSX.read(evt.target.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -2375,30 +2387,7 @@ function MyLeads() {
         }
 
         const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-
-        // Build comprehensive phone lookup map from all leads in CRM state
-        const existingPhonesInCrm = new Map();
-        const allLoadedLeads = [
-          ...(leads || []),
-          ...(metaLeads || []),
-          ...(allLeads || [])
-        ];
-
-        allLoadedLeads.forEach(l => {
-          const p = l.contactNumber || l.phone;
-          if (!p) return;
-          const digits = cleanPhoneNumber(p);
-          const core = extractCorePhoneDigits(p);
-          const label = l.leadName || l.name || l.company || 'Existing Lead';
-
-          if (digits && digits.length >= 7) {
-            if (!existingPhonesInCrm.has(digits)) existingPhonesInCrm.set(digits, label);
-          }
-          if (core && core.length >= 7) {
-            if (!existingPhonesInCrm.has(core)) existingPhonesInCrm.set(core, label);
-          }
-        });
-
+        const rawPhones = [];
         const seenInThisFile = new Set();
 
         const normalise = (row) => {
@@ -2431,7 +2420,6 @@ function MyLeads() {
 
           result.source = result.source || 'Excel Import';
           result.date = result.date || today;
-          // Client Name is optional: do not force '—' if empty
           result.name = (result.name && String(result.name).trim() !== '—') ? String(result.name).trim() : '';
 
           // ── Professional Validation & Duplicate Detection ──
@@ -2450,26 +2438,43 @@ function MyLeads() {
           if (!rawPhone || !digits || digits.length < 7) {
             rowStatus = 'invalid';
             statusReason = 'Missing or invalid phone number (Required, min 7 digits)';
-          } else if (seenInThisFile.has(digits) || seenInThisFile.has(corePhone)) {
+          } else if (seenInThisFile.has(digits)) {
             rowStatus = 'duplicate_file';
             statusReason = 'Duplicate phone: already present earlier in this file';
-          } else if (existingPhonesInCrm.has(digits) || existingPhonesInCrm.has(corePhone)) {
-            rowStatus = 'duplicate_crm';
-            const matchedName = existingPhonesInCrm.get(corePhone) || existingPhonesInCrm.get(digits);
-            statusReason = `Duplicate lead: already exists in CRM (${matchedName})`;
           } else {
             seenInThisFile.add(digits);
-            seenInThisFile.add(corePhone);
+            if (rawPhone) rawPhones.push(rawPhone);
           }
 
           result._status = rowStatus;
           result._statusReason = statusReason;
           result._corePhone = corePhone;
+          result._digits = digits;
 
           return result;
         };
 
         const parsed = json.map(normalise);
+
+        // Real-time server duplicate check against all CRM databases
+        if (rawPhones.length > 0) {
+          try {
+            const dupRes = await api.post('/leads/check-duplicates', { phones: rawPhones });
+            const serverDuplicates = dupRes.data?.duplicates || {};
+            parsed.forEach(r => {
+              if (r._status === 'ready' && r.phone) {
+                const matched = serverDuplicates[r.phone] || serverDuplicates[r._digits] || (r._corePhone && serverDuplicates[r._corePhone]);
+                if (matched) {
+                  r._status = 'duplicate_crm';
+                  r._statusReason = `Duplicate lead: already exists in CRM (${matched})`;
+                }
+              }
+            });
+          } catch (e) {
+            console.warn('Real-time duplicate check fallback:', e.message);
+          }
+        }
+
         setUploadRows(parsed);
         setShowUploadModal(true);
       } catch (err) {
@@ -2488,27 +2493,46 @@ function MyLeads() {
   };
 
   const handleUploadSubmit = async () => {
-    const validRowsToImport = uploadRows.filter(r => r._status === 'ready');
+    const validRowsToImport = uploadRows.filter(r => {
+      if (r._status === 'invalid') return false;
+      if (r._status === 'duplicate_file') return false;
+      if (r._status === 'duplicate_crm' && skipCrmDuplicates) return false;
+      return true;
+    });
+
     if (!validRowsToImport.length) {
-      setUploadError('No new unique leads to import. All leads in this file are either duplicates or missing phone numbers.');
+      setUploadError('No leads selected for import. All leads in this file are either missing phone numbers or skipped as duplicates.');
       return;
     }
+
     setUploading(true);
     setUploadError('');
     try {
-      const res = await api.post('/leads/bulk-import', { leads: validRowsToImport });
+      const res = await api.post('/leads/bulk-import', {
+        leads: validRowsToImport,
+        skipDuplicates: skipCrmDuplicates
+      });
+
       setShowUploadModal(false);
       setUploadRows([]);
       setUploadedFileName('');
+
+      // Reset filters so newly imported leads show up immediately at the top
+      setFilterStatus('');
+      setFilterSource('');
+      setFilterEmployee('');
+      setSearchTerm('');
+      setSortBy('newest');
+
       fetchAll();
 
       const importedCount = res.data?.imported ?? validRowsToImport.length;
-      const totalSkipped = (uploadRows.length - validRowsToImport.length) + (res.data?.duplicatesCount || 0);
+      const skippedCount = uploadRows.length - importedCount;
 
-      if (totalSkipped > 0) {
-        alert(`✅ Import Completed Successfully!\n\n• ${importedCount} new lead(s) imported into CRM.\n• ${totalSkipped} duplicate/invalid record(s) were automatically skipped.`);
+      if (skippedCount > 0) {
+        alert(`✅ Import Completed Successfully!\n\n• ${importedCount} lead(s) imported into CRM.\n• ${skippedCount} duplicate/invalid record(s) were safely skipped.`);
       } else {
-        alert(`✅ Successfully imported ${importedCount} new lead(s) into CRM!`);
+        alert(`✅ Successfully imported all ${importedCount} lead(s) into CRM!`);
       }
     } catch (err) {
       setUploadError(err.response?.data?.message || 'Import failed. Please verify your file.');
@@ -2563,10 +2587,20 @@ function MyLeads() {
     const link = document.createElement('a');
     link.href = url;
     link.download = `leads_export_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+
+    // Immediately notify all admins of lead export activity
+    try {
+      api.post('/leads/export-notify', {
+        count: filteredLeads.length,
+        category: 'Leads',
+        details: `${filteredLeads.length} lead(s) exported to CSV/Excel`
+      }).catch(err => console.error('Export notify error:', err));
+    } catch (e) {
+      console.error('Export notification call error:', e);
+    }
   };
 
   // ── SVG Icons ─────────────────────────────────────────────────────────────
@@ -6071,14 +6105,14 @@ function MyLeads() {
                     <span>Import Leads from Excel & CSV</span>
                     {uploadRows.length > 0 && (
                       <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>
-                        {uploadStats.ready} Ready to Import / {uploadRows.length} Loaded
+                        {skipCrmDuplicates ? uploadStats.ready : uploadStats.totalValid} Ready to Import / {uploadRows.length} Loaded
                       </span>
                     )}
                   </div>
                   <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
                     {uploadRows.length > 0
                       ? (uploadStats.totalDuplicates > 0
-                          ? `Phone is required; client name is optional. ${uploadStats.totalDuplicates} duplicate(s) detected and will be safely skipped.`
+                          ? `Phone is required; client name is optional. ${uploadStats.totalDuplicates} duplicate(s) detected (${uploadStats.duplicateCrm} in CRM, ${uploadStats.duplicateFile} in file).`
                           : 'Phone is required; client name is optional. Review all parsed leads below before confirming import.')
                       : 'Upload your spreadsheet or download blank field templates.'}
                   </div>
@@ -6224,11 +6258,16 @@ function MyLeads() {
                       <div style={{ fontSize: '14.5px', fontWeight: 800, color: '#166534', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <span>{uploadedFileName || 'Uploaded Spreadsheet'}</span>
                         <span style={{ fontSize: '11px', fontWeight: 700, background: '#16a34a', color: '#fff', padding: '2px 9px', borderRadius: '10px' }}>
-                          ✓ {uploadStats.ready} Ready to Import
+                          ✓ {skipCrmDuplicates ? uploadStats.ready : uploadStats.totalValid} Ready to Import
                         </span>
-                        {uploadStats.totalDuplicates > 0 && (
+                        {uploadStats.duplicateCrm > 0 && (
                           <span style={{ fontSize: '11px', fontWeight: 700, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '2px 9px', borderRadius: '10px' }}>
-                            {uploadStats.totalDuplicates} duplicates found
+                            {uploadStats.duplicateCrm} already in CRM {skipCrmDuplicates ? '(skipped)' : '(will import)'}
+                          </span>
+                        )}
+                        {uploadStats.duplicateFile > 0 && (
+                          <span style={{ fontSize: '11px', fontWeight: 700, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '2px 9px', borderRadius: '10px' }}>
+                            {uploadStats.duplicateFile} duplicate in file
                           </span>
                         )}
                         {uploadStats.invalidPhone > 0 && (
@@ -6238,7 +6277,7 @@ function MyLeads() {
                         )}
                       </div>
                       <div style={{ fontSize: '12px', color: '#15803d', marginTop: '3px' }}>
-                        Phone is required for import. Client name is optional. Duplicate leads are automatically detected and safely excluded.
+                        Phone is required for import. Client name is optional. You can choose whether to skip or include existing CRM duplicates before importing.
                       </div>
                     </div>
                   </div>
@@ -6521,9 +6560,14 @@ function MyLeads() {
                                     ✓ Ready
                                   </span>
                                 )}
-                                {(row._status === 'duplicate_crm' || row._status === 'duplicate_file') && (
+                                {row._status === 'duplicate_crm' && (
+                                  <span title={row._statusReason} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: skipCrmDuplicates ? '#fef3c7' : '#e0f2fe', color: skipCrmDuplicates ? '#b45309' : '#0369a1', border: `1px solid ${skipCrmDuplicates ? '#fde68a' : '#bae6fd'}`, cursor: 'help' }}>
+                                    {skipCrmDuplicates ? 'CRM Duplicate' : 'CRM Duplicate (Will Import)'}
+                                  </span>
+                                )}
+                                {row._status === 'duplicate_file' && (
                                   <span title={row._statusReason} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', cursor: 'help' }}>
-                                    Duplicate
+                                    File Duplicate
                                   </span>
                                 )}
                                 {row._status === 'invalid' && (
@@ -6636,17 +6680,25 @@ function MyLeads() {
                 flexShrink: 0,
               }}
             >
-              <div style={{ fontSize: '12.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ fontSize: '12.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.3">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
                 {uploadRows.length > 0 ? (
                   <span>
-                    Ready to import <strong style={{ color: '#0f172a' }}>{uploadStats.ready}</strong> new lead record(s)
-                    {uploadStats.totalDuplicates > 0 && (
-                      <span style={{ color: '#b45309', marginLeft: '6px', fontWeight: 600 }}>
-                        · {uploadStats.totalDuplicates} duplicate(s) will be automatically skipped
-                      </span>
+                    Ready to import <strong style={{ color: '#0f172a' }}>{skipCrmDuplicates ? uploadStats.ready : uploadStats.totalValid}</strong> lead record(s)
+                    {skipCrmDuplicates ? (
+                      uploadStats.totalDuplicates > 0 && (
+                        <span style={{ color: '#b45309', marginLeft: '6px', fontWeight: 600 }}>
+                          · {uploadStats.totalDuplicates} duplicate(s) skipped ({uploadStats.duplicateCrm} in CRM, {uploadStats.duplicateFile} in file)
+                        </span>
+                      )
+                    ) : (
+                      uploadStats.duplicateFile > 0 && (
+                        <span style={{ color: '#b45309', marginLeft: '6px', fontWeight: 600 }}>
+                          · {uploadStats.duplicateFile} duplicate(s) within file skipped
+                        </span>
+                      )
                     )}
                     {uploadStats.invalidPhone > 0 && (
                       <span style={{ color: '#dc2626', marginLeft: '6px', fontWeight: 600 }}>
@@ -6659,7 +6711,35 @@ function MyLeads() {
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                {uploadRows.length > 0 && uploadStats.duplicateCrm > 0 && (
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '7px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      color: '#334155',
+                      fontWeight: 600,
+                      background: '#ffffff',
+                      padding: '8px 12px',
+                      borderRadius: '10px',
+                      border: '1px solid #cbd5e1',
+                      userSelect: 'none',
+                    }}
+                    title="When unchecked, leads whose numbers already exist in CRM will also be imported"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={skipCrmDuplicates}
+                      onChange={(e) => setSkipCrmDuplicates(e.target.checked)}
+                      style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#16a34a' }}
+                    />
+                    <span>Skip existing CRM duplicates ({uploadStats.duplicateCrm})</span>
+                  </label>
+                )}
+
                 <button
                   onClick={() => {
                     if (!uploading) {
@@ -6686,23 +6766,23 @@ function MyLeads() {
                 {uploadRows.length > 0 ? (
                   <button
                     onClick={handleUploadSubmit}
-                    disabled={uploading || uploadStats.ready === 0}
+                    disabled={uploading || (skipCrmDuplicates ? uploadStats.ready === 0 : uploadStats.totalValid === 0)}
                     style={{
                       padding: '10px 24px',
                       borderRadius: '11px',
                       border: 'none',
-                      background: uploadStats.ready > 0
+                      background: (skipCrmDuplicates ? uploadStats.ready > 0 : uploadStats.totalValid > 0)
                         ? 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)'
                         : '#cbd5e1',
                       color: '#ffffff',
                       fontSize: '12.5px',
                       fontWeight: 700,
-                      cursor: (uploading || uploadStats.ready === 0) ? 'not-allowed' : 'pointer',
+                      cursor: (uploading || (skipCrmDuplicates ? uploadStats.ready === 0 : uploadStats.totalValid === 0)) ? 'not-allowed' : 'pointer',
                       opacity: uploading ? 0.75 : 1,
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '8px',
-                      boxShadow: uploadStats.ready > 0 ? '0 4px 14px rgba(22, 163, 74, 0.3)' : 'none',
+                      boxShadow: (skipCrmDuplicates ? uploadStats.ready > 0 : uploadStats.totalValid > 0) ? '0 4px 14px rgba(22, 163, 74, 0.3)' : 'none',
                     }}
                   >
                     {uploading ? (
@@ -6717,7 +6797,11 @@ function MyLeads() {
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
                         </svg>
-                        <span>{uploadStats.ready > 0 ? `Import ${uploadStats.ready} Leads` : 'No New Leads to Import'}</span>
+                        <span>
+                          {skipCrmDuplicates
+                            ? (uploadStats.ready > 0 ? `Import ${uploadStats.ready} Leads` : 'No New Leads to Import')
+                            : (uploadStats.totalValid > 0 ? `Import All ${uploadStats.totalValid} Leads` : 'No Valid Leads to Import')}
+                        </span>
                       </>
                     )}
                   </button>

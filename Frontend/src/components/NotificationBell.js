@@ -20,6 +20,7 @@ const getIconForType = (type, title = '') => {
     case 'Payment': return <DollarSign size={16} color="#10b981" />;
     case 'Contact': return <UserCheck size={16} color="#06b6d4" />;
     case 'Company': return <Building size={16} color="#8b5cf6" />;
+    case 'Lead':
     case 'CRM':
     case 'Client': return <Briefcase size={16} color="#3b82f6" />;
     default: return <Info size={16} color="#64748b" />;
@@ -35,8 +36,8 @@ function NotificationBell({ filterType, filterTypes }) {
       return allNotifications.filter(n => filterTypes.includes(n.type));
     }
     if (!filterType) return allNotifications;
-    if (filterType === 'CRM' || filterType === 'Pipeline') {
-      return allNotifications.filter(n => ['Deal', 'Payment', 'Contact', 'Company', 'Task', 'CRM', 'Client', 'Follow-up', 'Followup'].includes(n.type));
+    if (filterType === 'CRM' || filterType === 'Pipeline' || filterType === 'Lead') {
+      return allNotifications.filter(n => ['Deal', 'Payment', 'Contact', 'Company', 'Task', 'CRM', 'Client', 'Follow-up', 'Followup', 'Lead'].includes(n.type));
     }
     return allNotifications.filter(n => n.type === filterType);
   })();

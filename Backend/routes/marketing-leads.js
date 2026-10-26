@@ -4,6 +4,7 @@ const Lead = require('../models/Lead');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
+const { sendAdminDataActivityNotification } = require('../utils/crmNotifier');
 
 // Get stats for marketing role (added leads count)
 router.get('/stats', auth, checkPermission('leads', 'create'), async (req, res) => {
@@ -227,6 +228,22 @@ router.post('/import-excel', auth, checkPermission('leads', 'create'), async (re
         existingPhoneSet.add(corePhone);
       } catch (err) {
         errors.push({ row: rowNum, reason: err.message });
+      }
+    }
+
+    if (created.length > 0) {
+      try {
+        const io = req.app.get('socketio');
+        await sendAdminDataActivityNotification(io, {
+          actorUser: req.user,
+          activityType: 'import',
+          category: 'Leads',
+          count: created.length,
+          details: duplicates.length > 0 ? `${duplicates.length} duplicate(s) skipped` : 'Marketing leads upload',
+          link: '/leads'
+        });
+      } catch (notifErr) {
+        console.error('Marketing leads import admin notification error:', notifErr);
       }
     }
 

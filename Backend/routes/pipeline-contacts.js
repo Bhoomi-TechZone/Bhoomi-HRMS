@@ -7,7 +7,7 @@ const Lead = require('../models/Lead');
 const MetaLead = require('../models/MetaLead');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
-const { sendCrmNotification } = require('../utils/crmNotifier');
+const { sendCrmNotification, sendAdminDataActivityNotification } = require('../utils/crmNotifier');
 const { notifyFollowUpScheduled, parseFollowUpDateTime } = require('../services/followupNotificationService');
 
 // Cutoff timestamp: old pipeline data (before this cutoff) is strictly visible ONLY to Admin
@@ -58,13 +58,11 @@ function checkAccess(user) {
 
 // Helper to check if a specific contact is accessible to a user
 function isContactOwnedByUser(contact, user, hasFullAccess, isAdmin) {
-  if (isAdmin) return true;
+  if (isAdmin || hasFullAccess) return true;
   if (!contact || !user) return false;
 
   const contactDate = new Date(contact.createdAt || 0);
   if (contactDate < DATA_CUTOFF_DATE) return false;
-
-  if (hasFullAccess) return true;
 
   const userId = (user._id || user.id || '').toString();
   const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
@@ -690,6 +688,14 @@ router.post('/bulk-move-leads', auth, async (req, res) => {
     // Trigger CRM socket notification for bulk move
     try {
       const io = req.app.get('socketio');
+      await sendAdminDataActivityNotification(io, {
+        actorUser: user,
+        activityType: 'import',
+        category: 'Pipeline',
+        count: results.length,
+        details: `${results.length} lead(s) moved to Pipeline Deals under "New Lead" stage`,
+        link: '/pipeline?tab=deals'
+      });
       sendCrmNotification(io, {
         actorUser: user,
         entityType: 'Deal',
@@ -965,17 +971,65 @@ router.post('/bulk-delete', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id || req.user._id).populate('role');
     if (!user) return res.status(401).json({ message: 'User not found' });
-    const { hasDelete } = checkAccess(user);
+    const { hasDelete, hasFullAccess, isAdmin } = checkAccess(user);
     if (!hasDelete) return res.status(403).json({ message: 'Access denied. Delete permission required.' });
 
     const { contactIds } = req.body;
-    if (!contactIds || !Array.isArray(contactIds)) {
+    if (!contactIds || !Array.isArray(contactIds) || contactIds.length === 0) {
       return res.status(400).json({ message: 'contactIds array is required' });
     }
 
     const validIds = contactIds.filter(id => mongoose.Types.ObjectId.isValid(id));
-    await PipelineContact.deleteMany({ _id: { $in: validIds } });
-    res.json({ success: true, count: validIds.length });
+    if (validIds.length === 0) {
+      return res.json({ success: true, count: 0 });
+    }
+
+    let filter = { _id: { $in: validIds } };
+    if (!isAdmin && !hasFullAccess) {
+      const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+      const userEmail = (user.email || '').trim().toLowerCase();
+      filter.$or = [
+        { assignedTo: user._id },
+        { createdBy: user._id }
+      ];
+      if (userFullName) {
+        filter.$or.push({ owner: new RegExp(`^${userFullName}$`, 'i') });
+        filter.$or.push({ addedBy: new RegExp(`^${userFullName}$`, 'i') });
+      }
+      if (userEmail) {
+        filter.$or.push({ email: userEmail });
+      }
+    }
+
+    const contactsToDelete = await PipelineContact.find(filter).select('_id email relatedLead');
+    const contactIdsToDelete = contactsToDelete.map(c => c._id);
+    const emailsToDelete = contactsToDelete.map(c => (c.email || '').trim().toLowerCase()).filter(Boolean);
+
+    const result = await PipelineContact.deleteMany({ _id: { $in: contactIdsToDelete } });
+
+    // Clean up related leads if any
+    const leadIds = contactsToDelete.map(c => c.relatedLead).filter(Boolean);
+    if (leadIds.length > 0) {
+      await Lead.updateMany(
+        { _id: { $in: leadIds } },
+        { $set: { movedToPipeline: false, pipelineContactId: null } }
+      ).catch(() => {});
+      await MetaLead.updateMany(
+        { _id: { $in: leadIds } },
+        { $set: { movedToPipeline: false, pipelineContactId: null } }
+      ).catch(() => {});
+    }
+
+    // Also delete any associated deals if linked by contactId
+    await Deal.deleteMany({
+      $or: [
+        { contactId: { $in: contactIdsToDelete.map(String) } },
+        { associatedContactId: { $in: contactIdsToDelete.map(String) } },
+        ...(emailsToDelete.length > 0 ? [{ email: { $in: emailsToDelete } }] : [])
+      ]
+    }).catch(() => {});
+
+    res.json({ success: true, count: result.deletedCount });
   } catch (error) {
     console.error('Bulk delete contacts error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -1308,6 +1362,28 @@ router.delete('/:id/activities/:activityId', auth, async (req, res) => {
   } catch (error) {
     console.error('Delete contact activity error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Notify admin when user exports pipeline data (Deals, Contacts, Companies, Tasks)
+router.post('/export-notify', auth, async (req, res) => {
+  try {
+    const { category = 'Pipeline', count = 0, details = '' } = req.body;
+    const io = req.app.get('socketio');
+    const tab = (category || 'deals').toLowerCase();
+    const link = `/pipeline?tab=${tab}`;
+    await sendAdminDataActivityNotification(io, {
+      actorUser: req.user,
+      activityType: 'export',
+      category,
+      count: parseInt(count, 10) || 0,
+      details,
+      link
+    });
+    res.status(200).json({ success: true, message: `Admin notified of ${category} export` });
+  } catch (error) {
+    console.error('Pipeline export notification error:', error);
+    res.status(500).json({ message: 'Error notifying admin', error: error.message });
   }
 });
 

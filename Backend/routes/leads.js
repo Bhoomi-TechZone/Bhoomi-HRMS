@@ -8,6 +8,7 @@ const Client = require('../models/Client');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
+const { sendAdminDataActivityNotification } = require('../utils/crmNotifier');
 
 // Cutoff timestamp: old leads (before this cutoff) are strictly visible ONLY to Admin.
 // Sales Head and other roles only see new leads added from this cutoff onwards.
@@ -278,22 +279,32 @@ function cleanPhoneNumber(val) {
   return str.replace(/\D/g, '');
 }
 
-// Helper to extract core phone digits (strips country codes and symbols, takes last 10 digits)
-function extractCorePhoneDigits(val) {
-  const digits = cleanPhoneNumber(val);
-  if (!digits) return '';
-  return digits.length >= 10 ? digits.slice(-10) : digits;
+// Helper to identify dummy or placeholder phone numbers that should never be used for deduplication
+function isDummyPhoneNumber(digits) {
+  if (!digits || digits.length < 7) return true;
+  if (/^(\d)\1+$/.test(digits)) return true; // 0000000, 9999999999, etc.
+  if (['1234567', '12345678', '123456789', '1234567890', '9876543210', '0123456789'].includes(digits)) return true;
+  return false;
 }
 
-// Bulk import leads from Excel/CSV upload with professional duplicate prevention
-router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req, res) => {
+// Helper to extract core phone digits (specifically for Indian 10-digit mobile numbers with 0 or 91 prefix)
+function extractCorePhoneDigits(val) {
+  const digits = cleanPhoneNumber(val);
+  if (!digits || isDummyPhoneNumber(digits)) return '';
+  if (digits.length === 10) return digits;
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  return digits;
+}
+
+// Check duplicate phone numbers against all CRM databases (Lead, MetaLead, WebsiteLead)
+router.post('/check-duplicates', auth, async (req, res) => {
   try {
-    const { leads: leadsData } = req.body;
-    if (!Array.isArray(leadsData) || leadsData.length === 0) {
-      return res.status(400).json({ message: 'No leads data provided' });
+    const { phones } = req.body;
+    if (!Array.isArray(phones) || phones.length === 0) {
+      return res.json({ duplicates: {} });
     }
 
-    // ── 1. Query all existing phone numbers in CRM database for exhaustive duplicate prevention ────
     const existingPhoneSet = new Set();
     const existingPhoneDetails = new Map();
 
@@ -306,26 +317,87 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
     const indexRecord = (rec) => {
       if (!rec || !rec.phone) return;
       const digits = cleanPhoneNumber(rec.phone);
+      if (isDummyPhoneNumber(digits)) return;
       const core = extractCorePhoneDigits(rec.phone);
       const label = rec.name || rec.company || 'Existing Lead';
 
       if (digits && digits.length >= 7) {
         existingPhoneSet.add(digits);
-        if (!existingPhoneDetails.has(digits)) {
-          existingPhoneDetails.set(digits, label);
-        }
+        if (!existingPhoneDetails.has(digits)) existingPhoneDetails.set(digits, label);
       }
       if (core && core.length >= 7) {
         existingPhoneSet.add(core);
-        if (!existingPhoneDetails.has(core)) {
-          existingPhoneDetails.set(core, label);
-        }
+        if (!existingPhoneDetails.has(core)) existingPhoneDetails.set(core, label);
       }
     };
 
     (existingLeads || []).forEach(indexRecord);
     (existingMetaLeads || []).forEach(indexRecord);
     (existingWebsiteLeads || []).forEach(indexRecord);
+
+    const duplicates = {};
+    phones.forEach(p => {
+      const raw = String(p || '').trim();
+      const digits = cleanPhoneNumber(raw);
+      if (!digits || isDummyPhoneNumber(digits)) return;
+      const core = extractCorePhoneDigits(raw);
+
+      if (existingPhoneSet.has(digits) || (core && existingPhoneSet.has(core))) {
+        duplicates[raw] = existingPhoneDetails.get(core) || existingPhoneDetails.get(digits) || 'Existing Lead';
+      }
+    });
+
+    res.json({ duplicates });
+  } catch (err) {
+    console.error('Check duplicates error:', err);
+    res.status(500).json({ message: 'Error checking duplicates', error: err.message });
+  }
+});
+
+// Bulk import leads from Excel/CSV upload with professional duplicate prevention
+router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req, res) => {
+  try {
+    const { leads: leadsData, skipDuplicates = true } = req.body;
+    if (!Array.isArray(leadsData) || leadsData.length === 0) {
+      return res.status(400).json({ message: 'No leads data provided' });
+    }
+
+    // ── 1. Query all existing phone numbers in CRM database for exhaustive duplicate prevention ────
+    const existingPhoneSet = new Set();
+    const existingPhoneDetails = new Map();
+
+    if (skipDuplicates) {
+      const [existingLeads, existingMetaLeads, existingWebsiteLeads] = await Promise.all([
+        Lead.find({ phone: { $exists: true, $ne: '' } }).select('name phone company email').lean(),
+        MetaLead.find({ phone: { $exists: true, $ne: '' } }).select('name phone').lean(),
+        WebsiteLead.find({ phone: { $exists: true, $ne: '' } }).select('name phone').lean()
+      ]);
+
+      const indexRecord = (rec) => {
+        if (!rec || !rec.phone) return;
+        const digits = cleanPhoneNumber(rec.phone);
+        if (isDummyPhoneNumber(digits)) return;
+        const core = extractCorePhoneDigits(rec.phone);
+        const label = rec.name || rec.company || 'Existing Lead';
+
+        if (digits && digits.length >= 7) {
+          existingPhoneSet.add(digits);
+          if (!existingPhoneDetails.has(digits)) {
+            existingPhoneDetails.set(digits, label);
+          }
+        }
+        if (core && core.length >= 7) {
+          existingPhoneSet.add(core);
+          if (!existingPhoneDetails.has(core)) {
+            existingPhoneDetails.set(core, label);
+          }
+        }
+      };
+
+      (existingLeads || []).forEach(indexRecord);
+      (existingMetaLeads || []).forEach(indexRecord);
+      (existingWebsiteLeads || []).forEach(indexRecord);
+    }
 
     const created = [];
     const duplicates = [];
@@ -354,7 +426,7 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
         }
 
         // Duplicate Check 1: Duplicate within the uploaded file batch
-        if (seenInBatch.has(digits) || seenInBatch.has(corePhone)) {
+        if (seenInBatch.has(digits) || (corePhone && seenInBatch.has(corePhone))) {
           duplicates.push({
             row: rowNum,
             phone: rawPhone,
@@ -364,9 +436,9 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
           continue;
         }
 
-        // Duplicate Check 2: Already exists anywhere in CRM database
-        if (existingPhoneSet.has(digits) || existingPhoneSet.has(corePhone)) {
-          const matchedName = existingPhoneDetails.get(corePhone) || existingPhoneDetails.get(digits) || 'Existing Lead';
+        // Duplicate Check 2: Already exists anywhere in CRM database (when skipDuplicates is true)
+        if (skipDuplicates && (existingPhoneSet.has(digits) || (corePhone && existingPhoneSet.has(corePhone)))) {
+          const matchedName = (corePhone && existingPhoneDetails.get(corePhone)) || existingPhoneDetails.get(digits) || 'Existing Lead';
           duplicates.push({
             row: rowNum,
             phone: rawPhone,
@@ -376,9 +448,9 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
           continue;
         }
 
-        // Mark as seen in this import batch (both full digits and core 10 digits)
+        // Mark as seen in this import batch
         seenInBatch.add(digits);
-        seenInBatch.add(corePhone);
+        if (corePhone) seenInBatch.add(corePhone);
 
         // Client Name is OPTIONAL: clean it up, or fall back to company or empty string
         const clientName = (row.name && String(row.name).trim() !== '—')
@@ -449,6 +521,23 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
       ? `Successfully imported ${created.length} new lead${created.length > 1 ? 's' : ''}.${duplicates.length > 0 ? ` ${duplicates.length} duplicate lead${duplicates.length > 1 ? 's were' : ' was'} safely skipped.` : ''}`
       : `No new leads imported. ${duplicates.length > 0 ? `${duplicates.length} duplicate lead(s) were skipped.` : 'Please verify your file.'}`;
 
+    // Notify all admins about lead import
+    if (created.length > 0) {
+      try {
+        const io = req.app.get('socketio');
+        await sendAdminDataActivityNotification(io, {
+          actorUser: req.user,
+          activityType: 'import',
+          category: 'Leads',
+          count: created.length,
+          details: duplicates.length > 0 ? `${duplicates.length} duplicate(s) skipped` : '',
+          link: '/leads'
+        });
+      } catch (notifErr) {
+        console.error('Lead import admin notification error:', notifErr);
+      }
+    }
+
     res.status(200).json({
       success: true,
       imported: created.length,
@@ -462,6 +551,26 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
   } catch (error) {
     console.error('Bulk import error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Notify admin when user exports leads
+router.post('/export-notify', auth, async (req, res) => {
+  try {
+    const { count = 0, details = '' } = req.body;
+    const io = req.app.get('socketio');
+    await sendAdminDataActivityNotification(io, {
+      actorUser: req.user,
+      activityType: 'export',
+      category: 'Leads',
+      count: parseInt(count, 10) || 0,
+      details,
+      link: '/leads'
+    });
+    res.status(200).json({ success: true, message: 'Admin notified of lead export' });
+  } catch (error) {
+    console.error('Lead export notification error:', error);
+    res.status(500).json({ message: 'Error notifying admin', error: error.message });
   }
 });
 
