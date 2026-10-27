@@ -1972,7 +1972,9 @@ function MyLeads() {
       leadStatus: getEffectiveStatus(lead) || lead.status || 'New',
       company: lead.company || lead.businessCategory || '',
       address: lead.city || lead.country || '',
-      notes: lead.requirements || lead.requirement || lead.product || lead.notes || lead.description || '',
+      requirement: (lead.requirements || lead.requirement || lead.product || '').trim(),
+      requirements: (lead.requirements || lead.requirement || lead.product || '').trim(),
+      notes: (lead.notes || '').trim(),
       owner: ownerStr,
       addedBy: addedByStr,
       assignedTo: assignedToId
@@ -5913,9 +5915,17 @@ function MyLeads() {
                       </span>
                     </div>
                   )}
+                  {movePipelinePayload.requirement && (
+                    <div style={{ gridColumn: 'span 2' }}>
+                      <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Requirement</span>
+                      <span style={{ fontSize: '11px', color: '#475569', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {movePipelinePayload.requirement}
+                      </span>
+                    </div>
+                  )}
                   {movePipelinePayload.notes && (
                     <div style={{ gridColumn: 'span 2' }}>
-                      <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Requirement / Notes</span>
+                      <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block' }}>Notes & Remarks</span>
                       <span style={{ fontSize: '11px', color: '#475569', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                         {movePipelinePayload.notes}
                       </span>

@@ -267,7 +267,26 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
   const phone = (overrideData.phone || lead?.phone || '').trim();
   const company = (overrideData.company || lead?.company || lead?.businessCategory || '').trim();
   const address = overrideData.address || lead?.country || lead?.city || '';
-  const notes = overrideData.notes || lead?.requirements || lead?.requirement || lead?.notes || '';
+  
+  // Cleanly distinguish Requirement and Notes
+  const rawRequirement = (
+    overrideData.requirement ||
+    overrideData.requirements ||
+    lead?.requirements ||
+    lead?.requirement ||
+    lead?.product ||
+    ''
+  ).trim();
+
+  let rawNotes = '';
+  if (overrideData.notes !== undefined && overrideData.notes !== rawRequirement) {
+    rawNotes = String(overrideData.notes || '').trim();
+  }
+  if (!rawNotes && lead?.notes) {
+    rawNotes = String(lead.notes || '').trim();
+  }
+
+  const notes = rawNotes || rawRequirement;
   const contactSource = overrideData.contactSource || (leadType === 'meta' ? (lead?.pageName ? `Meta · ${lead.pageName}` : 'Meta') : (lead?.source || 'Manual'));
 
   // Assigned To & Owner resolution
@@ -358,6 +377,66 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
     await contact.save();
   }
 
+  // Parse lead notes into activity note entries
+  const parsedLeadNoteActivities = [];
+  if (rawNotes) {
+    const pattern = /\[(\d{1,2}\s+[A-Za-z]{3}\s+\d{4}(?:\s+\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)?)\s*-\s*([^\]]+)\]:\s*([\s\S]*?)(?=(?:\[\d{1,2}\s+[A-Za-z]{3}\s+\d{4})|$)/g;
+    let match;
+    let matchedAny = false;
+    while ((match = pattern.exec(rawNotes)) !== null) {
+      matchedAny = true;
+      const timeStr = match[1].trim();
+      const noteAuthor = match[2].trim() || userFullName;
+      const noteContent = match[3].trim();
+      if (noteContent) {
+        const d = new Date(timeStr);
+        const isValidDate = !isNaN(d.getTime());
+        parsedLeadNoteActivities.push({
+          type: 'note',
+          title: 'Lead Note',
+          content: noteContent,
+          author: noteAuthor,
+          time: isValidDate ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : timeStr,
+          date: isValidDate ? d.toLocaleDateString('en-GB') : timeStr.slice(0, 11),
+          createdAt: isValidDate ? d : new Date()
+        });
+      }
+    }
+    if (!matchedAny && rawNotes.trim()) {
+      parsedLeadNoteActivities.push({
+        type: 'note',
+        title: 'Lead Note',
+        content: rawNotes.trim(),
+        author: userFullName,
+        time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        date: new Date().toLocaleDateString('en-GB'),
+        createdAt: new Date()
+      });
+    }
+  }
+
+  // Also check lead.history for note entries if any
+  if (Array.isArray(lead?.history)) {
+    lead.history.forEach(h => {
+      if (h && (h.action === 'Note Added' || h.action === 'Note') && h.details) {
+        const content = String(h.details).trim();
+        if (content && !parsedLeadNoteActivities.some(a => a.content === content)) {
+          const hDate = h.date ? new Date(h.date) : new Date();
+          const author = (h.by && (h.by.firstName ? `${h.by.firstName} ${h.by.lastName || ''}`.trim() : h.by.name)) || userFullName;
+          parsedLeadNoteActivities.push({
+            type: 'note',
+            title: 'Lead Note',
+            content,
+            author,
+            time: hDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+            date: hDate.toLocaleDateString('en-GB'),
+            createdAt: hDate
+          });
+        }
+      }
+    });
+  }
+
   // 2. Deal upsert into Deals collection under "New Lead" stage
   let deal = null;
   if (leadId && mongoose.Types.ObjectId.isValid(leadId)) {
@@ -385,12 +464,24 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
     if (validAssignedTo) deal.assignedTo = validAssignedTo;
     if (owner) deal.salesOwner = owner;
     if (contact) deal.contactId = contact._id.toString();
+    if (rawRequirement) deal.requirements = rawRequirement;
+    if (rawNotes) deal.notes = rawNotes;
+    if (rawRequirement || rawNotes) deal.description = rawRequirement || rawNotes;
     if (leadType === 'meta') {
       deal.relatedMetaLead = leadId;
     } else if (leadId) {
       deal.relatedLead = leadId;
     }
     deal.createdAt = new Date();
+
+    // Append any parsed lead notes not already in deal.activities
+    if (!Array.isArray(deal.activities)) deal.activities = [];
+    parsedLeadNoteActivities.forEach(pAct => {
+      if (!deal.activities.some(a => a.content === pAct.content)) {
+        deal.activities.push(pAct);
+      }
+    });
+
     deal.activities.push({
       type: 'note',
       title: 'Lead moved to Pipeline Deals',
@@ -402,6 +493,16 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
     });
     await deal.save();
   } else {
+    const initialActivities = [...parsedLeadNoteActivities, {
+      type: 'note',
+      title: 'Lead moved to Pipeline Deals',
+      content: `Moved from ${leadType === 'meta' ? 'Meta Leads' : 'Leads'} into Deals under "New Lead" stage by ${userFullName}.`,
+      author: userFullName,
+      time: new Date().toLocaleTimeString(),
+      date: new Date().toLocaleDateString(),
+      createdAt: new Date()
+    }];
+
     deal = new Deal({
       dealName,
       clientName: clientDisplayName,
@@ -419,21 +520,13 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
       createdBy: user._id,
       addedBy: overrideData.addedBy || userFullName,
       source: contactSource,
-      description: notes,
-      requirements: notes,
-      notes,
+      description: rawRequirement || rawNotes,
+      requirements: rawRequirement,
+      notes: rawNotes,
       contactId: contact ? contact._id.toString() : null,
       relatedLead: (leadType !== 'meta' && leadId && mongoose.Types.ObjectId.isValid(leadId)) ? leadId : null,
       relatedMetaLead: (leadType === 'meta' && leadId && mongoose.Types.ObjectId.isValid(leadId)) ? leadId : null,
-      activities: [{
-        type: 'note',
-        title: 'Lead moved to Pipeline Deals',
-        content: `Moved from ${leadType === 'meta' ? 'Meta Leads' : 'Leads'} into Deals under "New Lead" stage by ${userFullName}.`,
-        author: userFullName,
-        time: new Date().toLocaleTimeString(),
-        date: new Date().toLocaleDateString(),
-        createdAt: new Date()
-      }]
+      activities: initialActivities
     });
     await deal.save();
   }
@@ -487,6 +580,8 @@ router.post('/move-lead', auth, async (req, res) => {
       company,
       address,
       notes,
+      requirement,
+      requirements,
       owner,
       addedBy,
       assignedTo,
@@ -539,6 +634,8 @@ router.post('/move-lead', auth, async (req, res) => {
         company,
         address,
         notes,
+        requirement: requirement || requirements,
+        requirements: requirements || requirement,
         owner,
         addedBy,
         assignedTo,
@@ -1226,19 +1323,34 @@ router.post('/:id/activities', auth, async (req, res) => {
       createdAt: new Date()
     };
 
+    // Deduplication check: prevent adding duplicate activity
+    const isDuplicate = Array.isArray(contact.activities) && contact.activities.some(a =>
+      a.type === (type || 'note') &&
+      (a.title || '').trim().toLowerCase() === (title || '').trim().toLowerCase() &&
+      (a.remarks || a.content || '').trim().toLowerCase() === (remarks || content || '').trim().toLowerCase() &&
+      (a.followUpDate || a.date || '') === (followUpDate || date || '') &&
+      (a.followUpTime || a.time || '') === (followUpTime || time || '')
+    );
+
+    if (isDuplicate) {
+      return res.status(200).json(contact.activities.find(a => (a.title || '').trim().toLowerCase() === (title || '').trim().toLowerCase()) || contact.activities[0]);
+    }
+
     contact.activities.unshift(newActivity);
     await contact.save();
+
+    const savedActivity = contact.activities[0];
 
     if (newActivity.type === 'followup') {
       notifyFollowUpScheduled(req.app.get('socketio'), {
         entity: contact,
-        activity: newActivity,
+        activity: savedActivity,
         creatorUser: user,
         isContact: true
       }).catch(err => console.error('notifyFollowUpScheduled contact error:', err));
     }
 
-    res.status(201).json(newActivity);
+    res.status(201).json(savedActivity);
   } catch (error) {
     console.error('Add contact activity error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });

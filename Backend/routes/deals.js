@@ -212,8 +212,8 @@ router.get('/', auth, async (req, res) => {
       const deals = await Deal.find(query)
         .populate('assignedTo', 'firstName lastName email officialEmail employeeId designation department phone alternatePhone isActive role')
         .populate('createdBy', 'firstName lastName email')
-        .populate('relatedLead', 'phone contactNumber')
-        .populate('relatedMetaLead', 'phone')
+        .populate('relatedLead', 'phone contactNumber requirement requirements notes history')
+        .populate('relatedMetaLead', 'phone notes businessCategory fieldData')
         .sort({ createdAt: -1 });
 
       const sanitizedDeals = (!hasFullAccess && Array.isArray(deals))
@@ -264,8 +264,8 @@ router.get('/:id', auth, async (req, res) => {
       deal = await Deal.findById(req.params.id)
         .populate('assignedTo', 'firstName lastName email officialEmail employeeId designation department phone alternatePhone isActive role')
         .populate('createdBy', 'firstName lastName email')
-        .populate('relatedLead', 'phone contactNumber')
-        .populate('relatedMetaLead', 'phone');
+        .populate('relatedLead', 'phone contactNumber requirement requirements notes history')
+        .populate('relatedMetaLead', 'phone notes businessCategory fieldData');
     } catch (e) {
       deal = await Deal.findById(req.params.id);
     }
@@ -757,19 +757,34 @@ router.post('/:id/activities', auth, async (req, res) => {
       createdAt: new Date()
     };
 
+    // Deduplication check: prevent adding duplicate activity
+    const isDuplicate = Array.isArray(deal.activities) && deal.activities.some(a =>
+      a.type === (type || 'note') &&
+      (a.title || '').trim().toLowerCase() === (title || '').trim().toLowerCase() &&
+      (a.remarks || a.content || '').trim().toLowerCase() === (remarks || content || '').trim().toLowerCase() &&
+      (a.followUpDate || a.date || '') === (followUpDate || date || '') &&
+      (a.followUpTime || a.time || '') === (followUpTime || time || '')
+    );
+
+    if (isDuplicate) {
+      return res.status(200).json(deal.activities.find(a => (a.title || '').trim().toLowerCase() === (title || '').trim().toLowerCase()) || deal.activities[0]);
+    }
+
     deal.activities.unshift(newActivity);
     await deal.save();
+
+    const savedActivity = deal.activities[0];
 
     if (newActivity.type === 'followup') {
       notifyFollowUpScheduled(req.app.get('socketio'), {
         entity: deal,
-        activity: newActivity,
+        activity: savedActivity,
         creatorUser: user,
         isContact: false
       }).catch(err => console.error('notifyFollowUpScheduled error:', err));
     }
 
-    res.status(201).json(newActivity);
+    res.status(201).json(savedActivity);
   } catch (error) {
     console.error('Add deal activity error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });

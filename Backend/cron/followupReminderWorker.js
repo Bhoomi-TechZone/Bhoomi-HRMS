@@ -7,16 +7,16 @@ function startFollowUpReminderWorker(io = null) {
     clearInterval(intervalTimer);
   }
 
-  // Evaluate due follow-ups every 20 seconds so reminders trigger precisely on time
+  // Evaluate due follow-ups every 10 seconds so notifications trigger instantly at the scheduled time
   intervalTimer = setInterval(async () => {
     try {
       await checkAndSendFollowUpReminders(io);
     } catch (err) {
       console.error('[FollowUpReminderWorker] Error in reminder tick:', err);
     }
-  }, 20000);
+  }, 10000);
 
-  console.log('[FollowUpReminderWorker] Follow-up reminder worker started (evaluating due touchpoints every 20s)');
+  console.log('[FollowUpReminderWorker] Follow-up reminder worker started (evaluating due touchpoints every 10s)');
 
   // Run an immediate check on startup so overdue/pending follow-ups fire immediately
   setTimeout(() => {

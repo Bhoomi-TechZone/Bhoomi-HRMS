@@ -396,6 +396,7 @@ body.sidebar-expanded .pipeline-page-wrapper {
    -------------------------------------------------------------------------- */
 .pipeline-main-content {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1786,14 +1787,23 @@ body.sidebar-expanded .pipeline-page-wrapper {
   }
 }
 
+.pipeline-board-container {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* --------------------------------------------------------------------------
    Table List View (Alternative View Mode)
    -------------------------------------------------------------------------- */
 .pipeline-table-view {
   flex: 1;
-  padding: 20px 24px;
-  overflow-y: auto;
-  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  overflow-y: visible;
+  overflow-x: visible;
   width: 100%;
   box-sizing: border-box;
 }
@@ -1803,34 +1813,86 @@ body.sidebar-expanded .pipeline-page-wrapper {
   border-radius: 12px;
   border: 1px solid #e2e8f0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  overflow-x: auto;
+  overflow-x: auto !important;
   overflow-y: hidden;
   width: 100%;
   max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
   -webkit-overflow-scrolling: touch;
 }
 
 .pipeline-table-card::-webkit-scrollbar {
-  height: 7px;
+  height: 9px;
+  display: block;
 }
 
 .pipeline-table-card::-webkit-scrollbar-track {
   background: #f1f5f9;
-  border-radius: 4px;
+  border-radius: 6px;
+  margin: 0 4px;
 }
 
 .pipeline-table-card::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background: #94a3b8;
+  border-radius: 6px;
+  border: 2px solid #f1f5f9;
 }
 
 .pipeline-table-card::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #64748b;
 }
 
 .pipeline-table {
   width: 100%;
   min-width: 1050px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+/* Dedicated Reminders & Follow-ups Table Card and Scrollbar */
+.pipeline-reminders-table-card {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  overflow-x: auto !important;
+  overflow-y: hidden;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  scrollbar-width: auto;
+  scrollbar-color: #94a3b8 #f1f5f9;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pipeline-reminders-table-card::-webkit-scrollbar {
+  height: 10px;
+  display: block;
+}
+
+.pipeline-reminders-table-card::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 6px;
+  margin: 0 4px;
+}
+
+.pipeline-reminders-table-card::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 6px;
+  border: 2px solid #f1f5f9;
+}
+
+.pipeline-reminders-table-card::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.pipeline-reminders-table {
+  width: 100%;
+  min-width: 1400px;
   border-collapse: collapse;
   text-align: left;
 }
@@ -2655,10 +2717,13 @@ body.sidebar-expanded .pipeline-page-wrapper {
    -------------------------------------------------------------------------- */
 .pipeline-tab-page-view {
   flex: 1;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   background: #f8fafc;
 }
 
@@ -3335,6 +3400,8 @@ body.sidebar-expanded .pipeline-page-wrapper {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .pipeline-detail-card-panel {
@@ -3371,6 +3438,9 @@ body.sidebar-expanded .pipeline-page-wrapper {
   height: 100%;
   max-height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  max-width: 100%;
   box-sizing: border-box;
 }
 
@@ -3495,6 +3565,10 @@ body.sidebar-expanded .pipeline-page-wrapper {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .pipeline-timeline-item-card {
@@ -3506,6 +3580,11 @@ body.sidebar-expanded .pipeline-page-wrapper {
   display: flex;
   gap: 14px;
   transition: all 0.15s ease;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .pipeline-timeline-item-card:hover {
@@ -3580,16 +3659,22 @@ body.sidebar-expanded .pipeline-page-wrapper {
 
 .pipeline-timeline-content {
   flex: 1;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow: hidden;
 }
 
 .pipeline-timeline-header-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
 }
 
 .pipeline-timeline-author-title {
@@ -3604,6 +3689,7 @@ body.sidebar-expanded .pipeline-page-wrapper {
   color: #94a3b8;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 .pipeline-timeline-body-text {
@@ -3612,7 +3698,11 @@ body.sidebar-expanded .pipeline-page-wrapper {
   line-height: 1.55;
   margin: 4px 0 0 0;
   white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   letter-spacing: -0.005em;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* ------------------------------------------------------------- */
@@ -5462,6 +5552,61 @@ body.sidebar-expanded .pipeline-page-wrapper {
 .pipeline-task-entity-link.contact:hover {
   background: #f1f5f9;
   color: #0f172a;
+}
+
+/* Clean text link for associated entities with blue hover and underline */
+.pipeline-clean-text-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+  text-decoration: none;
+  transition: color 0.15s ease, text-decoration 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+}
+
+.pipeline-clean-text-link:hover {
+  color: #0284c7 !important;
+  text-decoration: underline !important;
+}
+
+.pipeline-clean-text-link:hover svg {
+  color: #0284c7 !important;
+}
+
+.pipeline-contact-details-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-decoration: none;
+}
+
+.pipeline-contact-details-link:hover .pipeline-contact-info-item {
+  color: #0284c7 !important;
+  text-decoration: underline !important;
+}
+
+.pipeline-contact-details-link:hover .pipeline-contact-info-item svg {
+  color: #0284c7 !important;
+}
+
+.pipeline-contact-info-item {
+  font-size: 12px;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 0.15s ease, text-decoration 0.15s ease;
 }
 
 .task-row-completed td {
@@ -7324,4 +7469,10 @@ body.sidebar-expanded .pipeline-page-wrapper {
   padding: 14px 20px;
   border-top: 1px solid #f1f5f9;
   background: #fafafa;
+}
+
+.pipeline-spinner-icon {
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
 }

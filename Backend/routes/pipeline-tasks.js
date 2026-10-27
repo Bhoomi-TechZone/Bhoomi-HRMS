@@ -3,6 +3,8 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const PipelineTask = require('../models/PipelineTask');
 const User = require('../models/User');
+const Deal = require('../models/Deal');
+const PipelineContact = require('../models/PipelineContact');
 const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
 
@@ -53,7 +55,7 @@ function checkAccess(user) {
 }
 
 // Helper to check if a specific task is accessible to a user
-function isTaskOwnedByUser(task, user, hasFullAccess, isAdmin) {
+async function isTaskOwnedByUser(task, user, hasFullAccess, isAdmin) {
   if (isAdmin) return true;
   if (!task || !user) return false;
 
@@ -72,8 +74,36 @@ function isTaskOwnedByUser(task, user, hasFullAccess, isAdmin) {
   const assignee = (task.assignee || '').trim().toLowerCase();
 
   if (userId && (assignedId === userId || createdId === userId)) return true;
-  if (userFullName && assignee === userFullName) return true;
+  if (userFullName && (assignee === userFullName || assignee === 'admin system')) return true;
   if (userEmail && assignee === userEmail) return true;
+
+  // Check if associated with a deal owned by or assigned to this user
+  if (task.associatedDealId) {
+    try {
+      const deal = await Deal.findById(task.associatedDealId).select('assignedTo salesOwner addedBy');
+      if (deal) {
+        const dealAssignedId = (deal.assignedTo?._id || deal.assignedTo || '').toString();
+        const dealOwner = (deal.salesOwner || '').toLowerCase().trim();
+        const dealAddedBy = (deal.addedBy || '').toLowerCase().trim();
+        if (userId && dealAssignedId === userId) return true;
+        if (userFullName && (dealOwner === userFullName || dealAddedBy === userFullName)) return true;
+      }
+    } catch (e) {}
+  }
+
+  // Check if associated with a contact owned by or assigned to this user
+  if (task.associatedContactId) {
+    try {
+      const contact = await PipelineContact.findById(task.associatedContactId).select('assignedTo owner addedBy');
+      if (contact) {
+        const contactAssignedId = (contact.assignedTo?._id || contact.assignedTo || '').toString();
+        const contactOwner = (contact.owner || '').toLowerCase().trim();
+        const contactAddedBy = (contact.addedBy || '').toLowerCase().trim();
+        if (userId && contactAssignedId === userId) return true;
+        if (userFullName && (contactOwner === userFullName || contactAddedBy === userFullName)) return true;
+      }
+    } catch (e) {}
+  }
 
   return false;
 }
@@ -124,6 +154,34 @@ router.get('/', auth, async (req, res) => {
         orConditions.push({ assignee: userEmail });
       }
 
+      // Also include tasks associated with user's assigned deals
+      try {
+        const userDeals = await Deal.find({
+          $or: [
+            { assignedTo: user._id },
+            ...(userFullName ? [{ salesOwner: userFullName }] : [])
+          ]
+        }).select('_id');
+        const dealIds = userDeals.map(d => d._id.toString());
+        if (dealIds.length > 0) {
+          orConditions.push({ associatedDealId: { $in: dealIds } });
+        }
+      } catch (e) {}
+
+      // Also include tasks associated with user's assigned contacts
+      try {
+        const userContacts = await PipelineContact.find({
+          $or: [
+            { assignedTo: user._id },
+            ...(userFullName ? [{ owner: userFullName }] : [])
+          ]
+        }).select('_id');
+        const contactIds = userContacts.map(c => c._id.toString());
+        if (contactIds.length > 0) {
+          orConditions.push({ associatedContactId: { $in: contactIds } });
+        }
+      } catch (e) {}
+
       query.$or = orConditions;
     }
 
@@ -160,7 +218,7 @@ router.get('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    if (!isTaskOwnedByUser(task, user, hasFullAccess, isAdmin)) {
+    if (!(await isTaskOwnedByUser(task, user, hasFullAccess, isAdmin))) {
       return res.status(403).json({ message: 'Access denied. You can only view your own tasks.' });
     }
 
@@ -270,7 +328,7 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    if (!isTaskOwnedByUser(task, user, hasFullAccess, isAdmin)) {
+    if (!(await isTaskOwnedByUser(task, user, hasFullAccess, isAdmin))) {
       return res.status(403).json({ message: 'Access denied. You can only update your own tasks.' });
     }
 
@@ -354,7 +412,7 @@ router.delete('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    if (!isTaskOwnedByUser(task, user, hasFullAccess, isAdmin)) {
+    if (!(await isTaskOwnedByUser(task, user, hasFullAccess, isAdmin))) {
       return res.status(403).json({ message: 'Access denied. You can only delete your own tasks.' });
     }
 

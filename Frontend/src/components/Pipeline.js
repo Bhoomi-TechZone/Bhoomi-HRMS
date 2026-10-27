@@ -46,19 +46,22 @@ import {
   Info,
   Clock,
   AlertCircle,
-  Check
+  Check,
+  Bell,
+  Loader2
 } from 'lucide-react';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from './NotificationBell';
 import './Pipeline.css';
 
-// Navigation Tabs for Left Sub-Sidebar (Deals, Contacts, Companies, Tasks)
+// Navigation Tabs for Left Sub-Sidebar (Deals, Contacts, Companies, Tasks, Reminders)
 const SIDEBAR_TABS = [
   { id: 'deals', label: 'Deals', icon: Briefcase },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'companies', label: 'Companies', icon: Building2 },
-  { id: 'tasks', label: 'Tasks', icon: CheckSquare }
+  { id: 'tasks', label: 'Tasks', icon: CheckSquare },
+  { id: 'reminders', label: 'Reminders', icon: Bell }
 ];
 
 const TASK_PRIORITY_OPTIONS = ['High', 'Medium', 'Low'];
@@ -2417,14 +2420,25 @@ const DATA_CUTOFF_DATE = new Date('2026-10-17T00:00:00+05:30');
 // Safe item date extractor
 const getItemCreationDate = (item) => {
   if (!item) return new Date(0);
-  const raw = item.createdAt || item.createdTime || item.date || item.addedOn;
-  if (!raw) return new Date(0);
-  const d = new Date(raw);
-  return isNaN(d.getTime()) ? new Date(0) : d;
+  const raw = item.createdAt || item.createdTime || item.date || item.addedOn || item.createdDate || item.dueDate;
+  if (!raw) {
+    if (item._id && (item._id.toString().startsWith('task-') || item.title)) {
+      return new Date();
+    }
+    return new Date(0);
+  }
+  let d = new Date(raw);
+  if (isNaN(d.getTime()) && typeof raw === 'string') {
+    const parts = raw.split(/[-/]/);
+    if (parts.length === 3 && parts[2].length === 4) {
+      d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+    }
+  }
+  return isNaN(d.getTime()) ? (item.title ? new Date() : new Date(0)) : d;
 };
 
 function Pipeline() {
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, setActiveToast } = useAuth();
 
   const roleName = useMemo(() => {
     return (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
@@ -2507,6 +2521,9 @@ function Pipeline() {
     } catch (e) {}
   }, []);
 
+  const [deals, setDeals] = useState([]);
+  const [contacts, setContacts] = useState([]);
+
   // Ownership verification for data isolation
   const isItemOwnedByUser = useCallback((item, type = 'deal') => {
     if (!item) return false;
@@ -2564,15 +2581,29 @@ function Pipeline() {
       if (userEmail && owner === userEmail) return true;
     } else if (type === 'task') {
       const assignee = (item.assignee || '').trim().toLowerCase();
-      if (userFullName && assignee === userFullName) return true;
+      if (userFullName && (assignee === userFullName || assignee === 'admin system')) return true;
       if (userEmail && assignee === userEmail) return true;
+      if (userOfficialEmail && assignee === userOfficialEmail) return true;
+      if (userId && (assignedId === userId || createdId === userId)) return true;
+
+      // Universal Tasks: check if task is linked to a deal owned by or assigned to user
+      if (item.associatedDealId) {
+        const deal = deals.find(d => String(d._id) === String(item.associatedDealId));
+        if (deal && isItemOwnedByUser(deal, 'deal')) return true;
+      }
+      // Check if task is linked to a contact owned by or assigned to user
+      if (item.associatedContactId) {
+        const contact = contacts.find(c => String(c._id) === String(item.associatedContactId));
+        if (contact && isItemOwnedByUser(contact, 'contact')) return true;
+      }
+
+      if (hasFullAccess) return true;
     }
 
     return false;
-  }, [user, hasFullAccess, isAdmin, adminDataViewMode]);
+  }, [user, hasFullAccess, isAdmin, adminDataViewMode, deals, contacts]);
 
   const [isLoading, setIsLoading] = useState(true);
-  const [deals, setDeals] = useState([]);
   const [pipelines, setPipelines] = useState(() => {
     try {
       const deleted = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || '[]');
@@ -2839,11 +2870,17 @@ function Pipeline() {
     remarks: ''
   });
   const [isSavingEditFollowUp, setIsSavingEditFollowUp] = useState(false);
+  const [deletingFollowUpId, setDeletingFollowUpId] = useState(null);
 
   const detailedDeal = useMemo(() => {
     if (!detailedDealId) return null;
     return deals.find(d => d._id === detailedDealId) || null;
   }, [deals, detailedDealId]);
+
+  const [showDealRequirementModal, setShowDealRequirementModal] = useState(false);
+  const [isEditingRequirement, setIsEditingRequirement] = useState(false);
+  const [editingRequirementText, setEditingRequirementText] = useState('');
+  const [isSavingRequirement, setIsSavingRequirement] = useState(false);
 
 
   const [isCurrencyOpen, setIsCurrencyOpen] = useState(false);
@@ -2950,7 +2987,6 @@ function Pipeline() {
   const [addStageModalName, setAddStageModalName] = useState('');
 
   // Contacts Management State
-  const [contacts, setContacts] = useState([]);
   const [contactStages, setContactStages] = useState(() => {
     const legacyDummyNames = ['marketing qualified (mql)', 'marketing qualified', 'sales qualified (sql)', 'sales qualified', 'opportunity', 'opportunity stage', 'customer', 'retention & customer'];
     try {
@@ -3240,7 +3276,24 @@ function Pipeline() {
       }));
       try {
         if (cleanContactId && !cleanContactId.startsWith('contact-')) {
-          await api.post(`/pipeline-contacts/${cleanContactId}/activities`, newActivity);
+          const res = await api.post(`/pipeline-contacts/${cleanContactId}/activities`, newActivity);
+          if (res?.data?._id) {
+            const saved = res.data;
+            setContacts(prev => prev.map(c => {
+              if (c._id === cleanContactId || c._id === targetId) {
+                const acts = (c.activities || []).map(a => (a.id === newActivity.id ? { ...saved, id: saved._id } : a));
+                return { ...c, activities: acts };
+              }
+              return c;
+            }));
+            setDealActivities(prev => {
+              const currentList = prev[targetId] || [];
+              return {
+                ...prev,
+                [targetId]: currentList.map(a => (a.id === newActivity.id ? { ...saved, id: saved._id } : a))
+              };
+            });
+          }
         }
       } catch (err) {
         console.warn('API sync contact activity:', err.message);
@@ -3255,7 +3308,24 @@ function Pipeline() {
       }));
       try {
         if (targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
-          await api.post(`/deals/${targetId}/activities`, newActivity);
+          const res = await api.post(`/deals/${targetId}/activities`, newActivity);
+          if (res?.data?._id) {
+            const saved = res.data;
+            setDeals(prev => prev.map(d => {
+              if (d._id === targetId) {
+                const acts = (d.activities || []).map(a => (a.id === newActivity.id ? { ...saved, id: saved._id } : a));
+                return { ...d, activities: acts };
+              }
+              return d;
+            }));
+            setDealActivities(prev => {
+              const currentList = prev[targetId] || [];
+              return {
+                ...prev,
+                [targetId]: currentList.map(a => (a.id === newActivity.id ? { ...saved, id: saved._id } : a))
+              };
+            });
+          }
         }
       } catch (err) {
         console.warn('API sync deal activity:', err.message);
@@ -3922,6 +3992,31 @@ function Pipeline() {
     associatedContactIds: []
   });
 
+  // Reminders Management State
+  const [reminderSearchQuery, setReminderSearchQuery] = useState('');
+  const [reminderStatusFilter, setReminderStatusFilter] = useState('all');
+  const [reminderChannelFilter, setReminderChannelFilter] = useState('all');
+  const [reminderTimingFilter, setReminderTimingFilter] = useState('all'); // 'all' | 'today' | 'upcoming' | 'overdue'
+  const [reminderSortBy, setReminderSortBy] = useState('date_asc');
+  const [reminderViewMode, setReminderViewMode] = useState('list'); // 'list' | 'kanban'
+  const [isRemindersToolbarMenuOpen, setIsRemindersToolbarMenuOpen] = useState(false);
+  const [showCreateReminderModal, setShowCreateReminderModal] = useState(false);
+  const [editingReminder, setEditingReminder] = useState(null);
+  const [isSubmittingReminder, setIsSubmittingReminder] = useState(false);
+  const [deletingReminderId, setDeletingReminderId] = useState(null);
+  const [togglingReminderId, setTogglingReminderId] = useState(null);
+  const [reminderFormData, setReminderFormData] = useState({
+    targetType: 'deal',
+    targetId: '',
+    title: '',
+    channel: 'Call',
+    status: 'Scheduled',
+    followUpDate: new Date().toISOString().slice(0, 10),
+    followUpTime: '11:00 AM',
+    nextFollowUpDate: '',
+    remarks: ''
+  });
+
   // Helper to extract strictly the contacts associated with a given deal
   const getDealAssociatedContacts = (targetDealIdOrObj) => {
     if (!targetDealIdOrObj) return [];
@@ -4027,13 +4122,13 @@ function Pipeline() {
     });
   };
 
-  const filteredTasks = useMemo(() => {
-    return tasks
-      .filter(t => {
-        if (!isItemOwnedByUser(t, 'task')) {
-          return false;
-        }
+  const userAccessibleTasks = useMemo(() => {
+    return tasks.filter(t => isItemOwnedByUser(t, 'task'));
+  }, [tasks, isItemOwnedByUser]);
 
+  const filteredTasks = useMemo(() => {
+    return userAccessibleTasks
+      .filter(t => {
         if (taskSearchQuery.trim()) {
           const q = taskSearchQuery.toLowerCase();
           const title = (t.title || '').toLowerCase();
@@ -4071,26 +4166,378 @@ function Pipeline() {
         }
         return 0;
       });
-  }, [tasks, taskSearchQuery, taskStatusFilter, taskPriorityFilter, taskTypeFilter, taskSortBy, isItemOwnedByUser]);
+  }, [userAccessibleTasks, taskSearchQuery, taskStatusFilter, taskPriorityFilter, taskTypeFilter, taskSortBy]);
 
   const dealSpecificTasks = useMemo(() => {
     if (!detailedDeal) return [];
-    return tasks.filter(
-      t =>
-        t.associatedDealId === detailedDeal._id ||
-        (t.associatedDealName && (t.associatedDealName.toLowerCase() === (detailedDeal.dealName || '').toLowerCase() || t.associatedDealName.toLowerCase() === (detailedDeal.clientName || '').toLowerCase()))
-    );
+    const dealIdStr = String(detailedDeal._id);
+    const dealNameLower = (detailedDeal.dealName || '').toLowerCase().trim();
+    const clientNameLower = (detailedDeal.clientName || '').toLowerCase().trim();
+    return tasks.filter(t => {
+      if (t.associatedDealId && String(t.associatedDealId) === dealIdStr) return true;
+      if (Array.isArray(t.associatedDealIds) && t.associatedDealIds.some(id => String(id) === dealIdStr)) return true;
+      const assocNameLower = (t.associatedDealName || '').toLowerCase().trim();
+      if (assocNameLower && (assocNameLower === dealNameLower || assocNameLower === clientNameLower)) return true;
+      return false;
+    });
   }, [detailedDeal, tasks]);
 
   const contactSpecificTasks = useMemo(() => {
     if (!detailedContact) return [];
+    const contactIdStr = String(detailedContact._id);
     const contactFullName = `${detailedContact.firstName || ''} ${detailedContact.lastName || ''}`.trim().toLowerCase();
-    return tasks.filter(
-      t =>
-        t.associatedContactId === detailedContact._id ||
-        (t.associatedContactName && t.associatedContactName.toLowerCase() === contactFullName)
-    );
+    const contactEmail = (detailedContact.email || '').toLowerCase().trim();
+    return tasks.filter(t => {
+      if (t.associatedContactId && String(t.associatedContactId) === contactIdStr) return true;
+      if (Array.isArray(t.associatedContactIds) && t.associatedContactIds.some(id => String(id) === contactIdStr)) return true;
+      const assocName = (t.associatedContactName || '').toLowerCase().trim();
+      if (assocName && (assocName === contactFullName || (contactEmail && assocName === contactEmail))) return true;
+      return false;
+    });
   }, [detailedContact, tasks]);
+
+  // Reminders / Follow-ups Computation
+  const isReminderOverdue = useCallback((r) => {
+    if (!r.followUpDate || r.status === 'Completed' || r.status === 'Cancelled') return false;
+    const now = new Date();
+    const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    let dateStr = r.followUpDate;
+    if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(dateStr)) {
+      const parts = dateStr.split(/[-/]/);
+      dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return dateStr < todayYMD;
+  }, []);
+
+  const isReminderToday = useCallback((r) => {
+    if (!r.followUpDate) return false;
+    const now = new Date();
+    const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    let dateStr = r.followUpDate;
+    if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(dateStr)) {
+      const parts = dateStr.split(/[-/]/);
+      dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return dateStr === todayYMD;
+  }, []);
+
+  const allReminders = useMemo(() => {
+    const list = [];
+    const seen = new Set();
+    const seenSignatures = new Set();
+
+    const userId = (user?._id || user?.id || '').toString();
+    const userFullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim().toLowerCase();
+    const userEmail = (user?.email || '').trim().toLowerCase();
+    const userOfficialEmail = (user?.officialEmail || '').trim().toLowerCase();
+    const username = (user?.username || '').trim().toLowerCase();
+
+    // Check if a reminder/activity belongs to the user
+    // Admin sees ALL reminders.
+    // Regular users see ONLY their own reminders:
+    //  - Reminders they personally created (act.createdBy === userId || act.author === user)
+    //  - Reminders assigned to them (act.assignedTo === userId || act.assignedToName === user)
+    //  - Reminders on deals/contacts assigned to or owned by them (entity.assignedTo === userId || entity.salesOwner/owner === user)
+    const isReminderBelongingToUser = (act, entity, entityType) => {
+      if (isAdmin) return true;
+      if (!user) return false;
+
+      // 1. Created by this user
+      const actCreatedById = (act?.createdBy?._id || act?.createdBy || '').toString();
+      if (userId && actCreatedById && actCreatedById === userId) return true;
+
+      // 2. Author matches this user
+      const author = (act?.author || '').trim().toLowerCase();
+      if (userFullName && author === userFullName) return true;
+      if (userEmail && author === userEmail) return true;
+      if (userOfficialEmail && author === userOfficialEmail) return true;
+      if (username && author === username) return true;
+
+      // 3. Reminder explicitly assigned to this user
+      const actAssignedId = (act?.assignedTo?._id || act?.assignedTo || '').toString();
+      if (userId && actAssignedId && actAssignedId === userId) return true;
+      const actAssignedName = (act?.assignedToName || act?.assignee || '').trim().toLowerCase();
+      if (userFullName && actAssignedName === userFullName) return true;
+
+      // 4. Deal or Contact is assigned to or owned by this user
+      if (entity) {
+        const entityAssignedId = (entity.assignedTo?._id || entity.assignedTo || '').toString();
+        const entityCreatedId = (entity.createdBy?._id || entity.createdBy || '').toString();
+        if (userId && (entityAssignedId === userId || entityCreatedId === userId)) return true;
+
+        if (entityType === 'deal') {
+          const salesOwner = (entity.salesOwner || '').trim().toLowerCase();
+          const addedBy = (entity.addedBy || '').trim().toLowerCase();
+          const email = (entity.email || '').trim().toLowerCase();
+          if (userFullName && (salesOwner === userFullName || addedBy === userFullName)) return true;
+          if (userEmail && (salesOwner === userEmail || addedBy === userEmail || email === userEmail)) return true;
+          if (userOfficialEmail && (salesOwner === userOfficialEmail || email === userOfficialEmail)) return true;
+        } else if (entityType === 'contact') {
+          const owner = (entity.owner || '').trim().toLowerCase();
+          const addedBy = (entity.addedBy || '').trim().toLowerCase();
+          const email = (entity.email || '').trim().toLowerCase();
+          if (userFullName && (owner === userFullName || addedBy === userFullName)) return true;
+          if (userEmail && (owner === userEmail || addedBy === userEmail || email === userEmail)) return true;
+          if (userOfficialEmail && (owner === userOfficialEmail || email === userOfficialEmail)) return true;
+        }
+      }
+
+      return false;
+    };
+
+    // From Deals
+    deals.forEach(d => {
+      const dDate = getItemCreationDate(d);
+      if (isAdmin) {
+        if (adminDataViewMode === 'new' && dDate < DATA_CUTOFF_DATE) return;
+        if (adminDataViewMode === 'old' && dDate >= DATA_CUTOFF_DATE) return;
+      } else {
+        if (dDate < DATA_CUTOFF_DATE) return;
+      }
+
+      const custom = dealActivities[d._id] || [];
+      const backend = Array.isArray(d.activities) ? d.activities : [];
+      // Prioritize backend records that possess official Mongo _id
+      const combined = [...backend, ...custom];
+
+      // Resolve associated contact details for this deal
+      const assocContact = contacts.find(c =>
+        (c._id && d.associatedContactId && String(c._id) === String(d.associatedContactId)) ||
+        (d.associatedContact && `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === d.associatedContact.trim().toLowerCase()) ||
+        (d.clientName && `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === d.clientName.trim().toLowerCase()) ||
+        (c.email && d.email && c.email.toLowerCase() === d.email.toLowerCase())
+      );
+
+      const contactName = assocContact
+        ? `${assocContact.firstName || ''} ${assocContact.lastName || ''}`.trim()
+        : (d.associatedContact || d.clientName || '');
+      const contactEmail = assocContact?.email || d.email || d.clientEmail || d.contactEmail || '';
+      const contactPhone = assocContact?.phone || assocContact?.mobile || d.phone || d.clientPhone || d.contactPhone || '';
+      const contactId = assocContact?._id || d.associatedContactId || null;
+
+      combined.forEach(act => {
+        if (!act || act.type !== 'followup') return;
+        if (!isReminderBelongingToUser(act, d, 'deal')) return;
+
+        const idKey = act._id ? String(act._id) : (act.id ? String(act.id) : '');
+        const normTitle = (act.title || '').trim().toLowerCase();
+        const normChannel = (act.channel || '').trim().toLowerCase();
+        const normDate = (act.followUpDate || act.date || '').trim();
+        const normTime = (act.followUpTime || act.time || '').trim().toLowerCase();
+        const normRemarks = (act.remarks || act.content || '').trim().toLowerCase();
+        const signature = `deal-${d._id}-${normTitle}-${normChannel}-${normDate}-${normTime}-${normRemarks}`;
+
+        if ((idKey && seen.has(idKey)) || seenSignatures.has(signature)) return;
+        if (idKey) seen.add(idKey);
+        seenSignatures.add(signature);
+
+        list.push({
+          ...act,
+          _id: act._id || act.id || idKey || `deal-act-${d._id}-${signature}`,
+          id: act.id || act._id || idKey || `deal-act-${d._id}-${signature}`,
+          entityType: 'deal',
+          entityId: d._id,
+          entityName: d.dealName || d.clientName || 'Untitled Deal',
+          dealName: d.dealName || d.clientName || '',
+          clientName: d.clientName || '',
+          dealStage: d.stage || '',
+          owner: d.salesOwner || d.addedBy || '',
+          contactName: contactName,
+          contactEmail: contactEmail,
+          contactPhone: contactPhone,
+          contactId: contactId,
+          status: act.status || 'Scheduled',
+          channel: act.channel || 'Call',
+          followUpDate: act.followUpDate || act.date || '',
+          followUpTime: act.followUpTime || act.time || '',
+          nextFollowUpDate: act.nextFollowUpDate || '',
+          remarks: act.remarks || act.content || '',
+          author: act.author || d.salesOwner || 'Admin System'
+        });
+      });
+    });
+
+    // From Contacts
+    contacts.forEach(c => {
+      const cDate = getItemCreationDate(c);
+      if (isAdmin) {
+        if (adminDataViewMode === 'new' && cDate < DATA_CUTOFF_DATE) return;
+        if (adminDataViewMode === 'old' && cDate >= DATA_CUTOFF_DATE) return;
+      } else {
+        if (cDate < DATA_CUTOFF_DATE) return;
+      }
+
+      const custom = dealActivities[c._id] || [];
+      const backend = Array.isArray(c.activities) ? c.activities : [];
+      // Prioritize backend records that possess official Mongo _id
+      const combined = [...backend, ...custom];
+
+      const contactName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || 'Untitled Contact';
+      const contactEmail = c.email || '';
+      const contactPhone = c.phone || c.mobile || '';
+
+      combined.forEach(act => {
+        if (!act || act.type !== 'followup') return;
+        if (!isReminderBelongingToUser(act, c, 'contact')) return;
+
+        const idKey = act._id ? String(act._id) : (act.id ? String(act.id) : '');
+        const normTitle = (act.title || '').trim().toLowerCase();
+        const normChannel = (act.channel || '').trim().toLowerCase();
+        const normDate = (act.followUpDate || act.date || '').trim();
+        const normTime = (act.followUpTime || act.time || '').trim().toLowerCase();
+        const normRemarks = (act.remarks || act.content || '').trim().toLowerCase();
+        const signature = `contact-${c._id}-${normTitle}-${normChannel}-${normDate}-${normTime}-${normRemarks}`;
+
+        if ((idKey && seen.has(idKey)) || seenSignatures.has(signature)) return;
+        if (idKey) seen.add(idKey);
+        seenSignatures.add(signature);
+
+        list.push({
+          ...act,
+          _id: act._id || act.id || idKey || `contact-act-${c._id}-${signature}`,
+          id: act.id || act._id || idKey || `contact-act-${c._id}-${signature}`,
+          entityType: 'contact',
+          entityId: c._id,
+          entityName: contactName,
+          contactName: contactName,
+          contactStage: c.leadStage || '',
+          owner: c.owner || c.addedBy || '',
+          contactEmail: contactEmail,
+          contactPhone: contactPhone,
+          contactId: c._id,
+          status: act.status || 'Scheduled',
+          channel: act.channel || 'Call',
+          followUpDate: act.followUpDate || act.date || '',
+          followUpTime: act.followUpTime || act.time || '',
+          nextFollowUpDate: act.nextFollowUpDate || '',
+          remarks: act.remarks || act.content || '',
+          author: act.author || c.owner || 'Admin System'
+        });
+      });
+    });
+
+    return list;
+  }, [deals, contacts, dealActivities, isAdmin, user, adminDataViewMode]);
+
+  const activeRemindersCount = useMemo(() => {
+    return allReminders.length;
+  }, [allReminders]);
+
+  const notifiedRemindersRef = useRef(new Set());
+
+  // Real-time follow-up due alert: checks every 5 seconds so notifications pop up instantly at the scheduled minute
+  useEffect(() => {
+    const checkDueReminders = () => {
+      if (!Array.isArray(allReminders) || allReminders.length === 0 || !setActiveToast) return;
+
+      const now = new Date();
+      const todayStr = formatDateDDMMYYYY(now);
+      const nowH = now.getHours();
+      const nowM = now.getMinutes();
+      const nowTotalMin = nowH * 60 + nowM;
+
+      allReminders.forEach(reminder => {
+        if (reminder.status === 'Completed' || reminder.status === 'Missed') return;
+        const rDate = reminder.followUpDate ? formatDateDDMMYYYY(reminder.followUpDate) : '';
+        if (rDate !== todayStr) return;
+
+        const rTimeStr = reminder.followUpTime || '';
+        if (!rTimeStr) return;
+
+        const ampmMatch = rTimeStr.match(/^(\d{1,2})[:.](\d{2})\s*(AM|PM)?$/i);
+        if (!ampmMatch) return;
+
+        let rH = parseInt(ampmMatch[1], 10);
+        const rM = parseInt(ampmMatch[2], 10);
+        const period = ampmMatch[3] ? ampmMatch[3].toUpperCase() : null;
+        if (period === 'PM' && rH !== 12) rH += 12;
+        if (period === 'AM' && rH === 12) rH = 0;
+
+        const rTotalMin = rH * 60 + rM;
+
+        // If reminder is due right now (within current minute or up to 2 min overdue)
+        if (nowTotalMin >= rTotalMin && nowTotalMin <= rTotalMin + 2) {
+          const reminderKey = `${reminder._id || reminder.id}-${todayStr}-${rTimeStr}`;
+          if (notifiedRemindersRef.current.has(reminderKey)) return;
+          notifiedRemindersRef.current.add(reminderKey);
+
+          const entityName = reminder.dealName || reminder.clientName || reminder.contactName || 'Client';
+          const channel = reminder.channel || 'Follow-up';
+
+          setActiveToast({
+            _id: `due-toast-${Date.now()}`,
+            type: 'Follow-up',
+            title: `Follow-up Due: ${channel} with ${entityName}`,
+            message: `Your scheduled ${channel} follow-up for "${entityName}" is due now (${reminder.followUpTime}). Purpose: ${reminder.title || 'Touchpoint'}${reminder.remarks ? ` | Notes: "${reminder.remarks}"` : ''}`,
+            link: reminder.entityType === 'contact'
+              ? `/pipeline/crm/overview?ref=sidebar&tab=contacts&view=list&detailTab=followups&stage=all`
+              : `/pipeline/crm/overview?ref=sidebar&tab=deals&view=kanban&detailTab=followups&stage=all`
+          });
+
+          // Play notification audio chime
+          try {
+            const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.toUpperCase().indexOf('MAC') >= 0;
+            const soundUrl = isMac ? '/sounds/that-was-quick-606.m4r' : '/sounds/that-was-quick-606.mp3';
+            const audio = new Audio(soundUrl);
+            audio.play().catch(() => {});
+          } catch (e) {}
+
+          // Native Desktop Notification
+          if ("Notification" in window && Notification.permission === "granted") {
+            try {
+              new Notification(`Follow-up Due: ${channel} with ${entityName}`, {
+                body: `Scheduled touchpoint is due now (${reminder.followUpTime}).`
+              });
+            } catch (e) {}
+          }
+        }
+      });
+    };
+
+    checkDueReminders();
+    const interval = setInterval(checkDueReminders, 5000);
+    return () => clearInterval(interval);
+  }, [allReminders, setActiveToast]);
+
+  const filteredReminders = useMemo(() => {
+    return allReminders
+      .filter(r => {
+        if (reminderSearchQuery.trim()) {
+          const q = reminderSearchQuery.toLowerCase();
+          const title = (r.title || '').toLowerCase();
+          const remarks = (r.remarks || '').toLowerCase();
+          const entity = (r.entityName || '').toLowerCase();
+          const channel = (r.channel || '').toLowerCase();
+          const author = (r.author || '').toLowerCase();
+          const dateStr = (r.followUpDate || '').toLowerCase();
+          if (!title.includes(q) && !remarks.includes(q) && !entity.includes(q) && !channel.includes(q) && !author.includes(q) && !dateStr.includes(q)) {
+            return false;
+          }
+        }
+        if (reminderStatusFilter !== 'all') {
+          if (r.status !== reminderStatusFilter) return false;
+        }
+        if (reminderChannelFilter !== 'all') {
+          if ((r.channel || '').toLowerCase() !== reminderChannelFilter.toLowerCase()) return false;
+        }
+        if (reminderTimingFilter !== 'all') {
+          if (reminderTimingFilter === 'today' && !isReminderToday(r)) return false;
+          if (reminderTimingFilter === 'overdue' && !isReminderOverdue(r)) return false;
+          if (reminderTimingFilter === 'upcoming') {
+            if (r.status === 'Completed' || isReminderOverdue(r)) return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const da = a.followUpDate || '9999';
+        const db = b.followUpDate || '9999';
+        if (reminderSortBy === 'date_asc') {
+          return da.localeCompare(db);
+        }
+        return db.localeCompare(da);
+      });
+  }, [allReminders, reminderSearchQuery, reminderStatusFilter, reminderChannelFilter, reminderTimingFilter, reminderSortBy, isReminderToday, isReminderOverdue]);
 
   const currentDealActivities = useMemo(() => {
     if (!detailedDeal) return [];
@@ -4228,7 +4675,73 @@ function Pipeline() {
       };
     });
 
-    const all = [...custom, ...backendActivities, ...taskActs, ...paymentActs, ...baseActs];
+    // Synthesize notes from detailedDeal.notes or detailedDeal.relatedLead?.notes if not already in activities
+    const rawDealNotes = (detailedDeal.notes || detailedDeal.relatedLead?.notes || '').trim();
+    const leadNoteActs = [];
+    if (rawDealNotes) {
+      const pattern = /\[(\d{1,2}\s+[A-Za-z]{3}\s+\d{4}(?:\s+\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)?)\s*-\s*([^\]]+)\]:\s*([\s\S]*?)(?=(?:\[\d{1,2}\s+[A-Za-z]{3}\s+\d{4})|$)/g;
+      let match;
+      let matchedAny = false;
+      while ((match = pattern.exec(rawDealNotes)) !== null) {
+        matchedAny = true;
+        const timeStr = match[1].trim();
+        const noteAuthor = match[2].trim() || 'Admin System';
+        const noteContent = match[3].trim();
+        if (noteContent && !backendActivities.some(b => (b.content || '').trim() === noteContent.trim())) {
+          const d = new Date(timeStr);
+          const isValidDate = !isNaN(d.getTime());
+          leadNoteActs.push({
+            id: `lead-note-${detailedDeal._id}-${leadNoteActs.length}`,
+            type: 'note',
+            title: 'Lead Note',
+            content: noteContent,
+            author: noteAuthor,
+            time: isValidDate ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : timeStr,
+            date: isValidDate ? formatDateDDMMYYYY(d) : timeStr.slice(0, 11),
+            createdAt: isValidDate ? d : new Date()
+          });
+        }
+      }
+      if (!matchedAny && rawDealNotes.trim() && !rawDealNotes.startsWith('Moved from') && !rawDealNotes.startsWith('Lead updated')) {
+        if (!backendActivities.some(b => (b.content || '').trim() === rawDealNotes.trim())) {
+          leadNoteActs.push({
+            id: `lead-note-${detailedDeal._id}-single`,
+            type: 'note',
+            title: 'Lead Note',
+            content: rawDealNotes.trim(),
+            author: detailedDeal.addedBy || 'Admin System',
+            time: '12:00 PM',
+            date: formatDateDDMMYYYY(detailedDeal.createdAt || new Date()),
+            createdAt: detailedDeal.createdAt || new Date()
+          });
+        }
+      }
+    }
+
+    // Also check detailedDeal.relatedLead?.history for any notes
+    if (Array.isArray(detailedDeal.relatedLead?.history)) {
+      detailedDeal.relatedLead.history.forEach((h, hIdx) => {
+        if (h && (h.action === 'Note Added' || h.action === 'Note') && h.details) {
+          const content = String(h.details).trim();
+          if (content && !backendActivities.some(b => (b.content || '').trim() === content) && !leadNoteActs.some(a => a.content === content)) {
+            const hDate = h.date ? new Date(h.date) : new Date();
+            const author = (h.by && (h.by.firstName ? `${h.by.firstName} ${h.by.lastName || ''}`.trim() : h.by.name)) || 'Admin System';
+            leadNoteActs.push({
+              id: `lead-hist-note-${detailedDeal._id}-${hIdx}`,
+              type: 'note',
+              title: 'Lead Note',
+              content,
+              author,
+              time: hDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+              date: formatDateDDMMYYYY(hDate),
+              createdAt: hDate
+            });
+          }
+        }
+      });
+    }
+
+    const all = [...custom, ...backendActivities, ...taskActs, ...paymentActs, ...baseActs, ...leadNoteActs];
     const seen = new Set();
     const unique = all.filter(a => {
       if (!a) return false;
@@ -4237,7 +4750,9 @@ function Pipeline() {
       // Admin, Sales Head, and Sales Manager can see ALL follow-ups.
       if (!canUserViewActivity(a, user, hasFullAccess)) return false;
 
-      const contentKey = `${a.type || ''}-${(a.title || '').trim()}-${(a.content || a.remarks || '').trim()}-${(a.date || '').trim()}-${(a.time || '').trim()}`;
+      const contentKey = a.type === 'note'
+        ? `note-${(a.content || '').trim()}`
+        : `${a.type || ''}-${(a.title || '').trim()}-${(a.content || a.remarks || '').trim()}`;
       if (seen.has(contentKey)) return false;
       seen.add(contentKey);
       return true;
@@ -5550,10 +6065,15 @@ function Pipeline() {
 
   const handleToggleTaskComplete = async (taskId, e) => {
     if (e) e.stopPropagation();
-    const task = tasks.find(t => t._id === taskId);
+    const task = tasks.find(t => String(t._id) === String(taskId));
     if (!task) return;
     const nextCompleted = !task.completed;
     const nextStatus = nextCompleted ? 'Completed' : 'Pending';
+
+    // Optimistically update React state immediately for instant feedback
+    setTasks(prev =>
+      prev.map(t => (String(t._id) === String(taskId) ? { ...t, completed: nextCompleted, status: nextStatus } : t))
+    );
 
     try {
       if (taskId && !taskId.toString().startsWith('task-')) {
@@ -5562,10 +6082,6 @@ function Pipeline() {
     } catch (err) {
       console.warn('Toggle task API sync:', err.message);
     }
-
-    setTasks(prev =>
-      prev.map(t => (t._id === taskId ? { ...t, completed: nextCompleted, status: nextStatus } : t))
-    );
 
     if (task.associatedDealId) {
       logActivity(task.associatedDealId, {
@@ -5583,15 +6099,30 @@ function Pipeline() {
     }
   };
 
+  const handleUpdateTaskStatus = async (taskId, nextStatus) => {
+    const isCompleted = nextStatus === 'Completed';
+    setTasks(prev =>
+      prev.map(t => (String(t._id) === String(taskId) ? { ...t, status: nextStatus, completed: isCompleted } : t))
+    );
+
+    try {
+      if (taskId && !taskId.toString().startsWith('task-')) {
+        await api.put(`/pipeline-tasks/${taskId}`, { status: nextStatus, completed: isCompleted });
+      }
+    } catch (err) {
+      console.warn('Update task status API sync:', err.message);
+    }
+  };
+
   const handleOpenCreateTask = (presetDealId = '', presetContactId = '') => {
     setEditingTask(null);
     setIsAssignCustom(false);
 
     const effectiveDealId = presetDealId || detailedDealId || (detailedDeal ? detailedDeal._id : '');
-    const matchedDeal = deals.find(d => d._id === effectiveDealId);
+    const matchedDeal = deals.find(d => String(d._id) === String(effectiveDealId));
 
     const effectiveContactId = presetContactId || detailedContactId || (detailedContact ? detailedContact._id : '');
-    const matchedContact = contacts.find(c => c._id === effectiveContactId);
+    const matchedContact = contacts.find(c => String(c._id) === String(effectiveContactId));
 
     // Get strictly the associated contacts of this deal (if deal is primary)
     const dealAssocContacts = effectiveDealId ? getDealAssociatedContacts(matchedDeal || effectiveDealId) : [];
@@ -5677,8 +6208,9 @@ function Pipeline() {
       alert('You do not have permission to delete tasks.');
       return;
     }
-    const taskToDelete = tasks.find(t => t._id === taskId);
+    const taskToDelete = tasks.find(t => String(t._id) === String(taskId));
     if (window.confirm('Are you sure you want to delete this task?')) {
+      setTasks(prev => prev.filter(t => String(t._id) !== String(taskId)));
       try {
         if (taskId && !taskId.toString().startsWith('task-')) {
           await api.delete(`/pipeline-tasks/${taskId}`);
@@ -5686,7 +6218,6 @@ function Pipeline() {
       } catch (err) {
         console.warn('Delete task API sync:', err.message);
       }
-      setTasks(prev => prev.filter(t => t._id !== taskId));
 
       if (taskToDelete && taskToDelete.associatedDealId) {
         logActivity(taskToDelete.associatedDealId, {
@@ -5766,7 +6297,7 @@ function Pipeline() {
         if (editingTask._id && !editingTask._id.toString().startsWith('task-')) {
           const res = await api.put(`/pipeline-tasks/${editingTask._id}`, payload);
           if (res.data) {
-            setTasks(prev => prev.map(t => (t._id === editingTask._id ? res.data : t)));
+            setTasks(prev => prev.map(t => (String(t._id) === String(editingTask._id) ? res.data : t)));
           }
         }
       } catch (err) {
@@ -5775,7 +6306,7 @@ function Pipeline() {
 
       setTasks(prev =>
         prev.map(t =>
-          t._id === editingTask._id ? { ...t, ...payload } : t
+          String(t._id) === String(editingTask._id) ? { ...t, ...payload } : t
         )
       );
 
@@ -5807,7 +6338,7 @@ function Pipeline() {
         const contactDisplayName = contactObj ? `${contactObj.firstName || ''} ${contactObj.lastName || ''}`.trim() || contactObj.email || contactObj.company : '';
 
         for (const dId of selectedDealIds) {
-          const currentDeal = deals.find(d => d._id === dId);
+          const currentDeal = deals.find(d => String(d._id) === String(dId));
           const dealTitle = currentDeal ? (currentDeal.dealName || currentDeal.clientName) : '';
 
           const payload = {
@@ -5824,7 +6355,8 @@ function Pipeline() {
             associatedDealName: dealTitle,
             associatedContactId: (contactId && !contactId.startsWith('raw_')) ? contactId : '',
             associatedContactIds: [contactId].filter(Boolean),
-            associatedContactName: contactDisplayName
+            associatedContactName: contactDisplayName,
+            createdAt: new Date().toISOString()
           };
 
           let savedTask = null;
@@ -5842,6 +6374,7 @@ function Pipeline() {
             const newTask = {
               _id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               ...payload,
+              createdAt: new Date().toISOString(),
               createdDate: formatDateDDMMYYYY(new Date())
             };
             newTasksList.push(newTask);
@@ -5867,7 +6400,7 @@ function Pipeline() {
         // Targets: multiple contacts (or 1 deal + 1 contact)
         const targets = selectedContactIds.length > 0 ? selectedContactIds : [''];
         const primaryDealId = selectedDealIds[0] || effectiveDealId || '';
-        const currentDeal = deals.find(d => d._id === primaryDealId);
+        const currentDeal = deals.find(d => String(d._id) === String(primaryDealId));
         const dealTitle = currentDeal ? (currentDeal.dealName || currentDeal.clientName) : '';
 
         for (const cId of targets) {
@@ -5888,7 +6421,8 @@ function Pipeline() {
             associatedDealName: dealTitle,
             associatedContactId: (cId && !cId.startsWith('raw_')) ? cId : '',
             associatedContactIds: [cId].filter(Boolean),
-            associatedContactName: contactDisplayName
+            associatedContactName: contactDisplayName,
+            createdAt: new Date().toISOString()
           };
 
           let savedTask = null;
@@ -5906,6 +6440,7 @@ function Pipeline() {
             const newTask = {
               _id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               ...payload,
+              createdAt: new Date().toISOString(),
               createdDate: formatDateDDMMYYYY(new Date())
             };
             newTasksList.push(newTask);
@@ -6098,38 +6633,40 @@ function Pipeline() {
   };
 
   const handleDeleteFollowUp = async (actId) => {
+    if (deletingFollowUpId === actId) return;
     if (!window.confirm('Are you sure you want to delete this follow-up?')) return;
-    const isContactAct = activeTab === 'contacts' || (!detailedDealId && !!detailedContactId);
-    const targetId = isContactAct ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : (detailedContact ? detailedContact._id : null));
-    if (!targetId) return;
-
-    setDealActivities(prev => {
-      const currentList = prev[targetId] || [];
-      return {
-        ...prev,
-        [targetId]: currentList.filter(a => a.id !== actId && a._id !== actId)
-      };
-    });
-
-    if (isContactAct) {
-      setContacts(prev => prev.map(c => {
-        if (c._id === targetId) {
-          const acts = (c.activities || []).filter(a => a.id !== actId && a._id !== actId);
-          return { ...c, activities: acts };
-        }
-        return c;
-      }));
-    } else {
-      setDeals(prev => prev.map(d => {
-        if (d._id === targetId) {
-          const acts = (d.activities || []).filter(a => a.id !== actId && a._id !== actId);
-          return { ...d, activities: acts };
-        }
-        return d;
-      }));
-    }
-
+    setDeletingFollowUpId(actId);
     try {
+      const isContactAct = activeTab === 'contacts' || (!detailedDealId && !!detailedContactId);
+      const targetId = isContactAct ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : (detailedContact ? detailedContact._id : null));
+      if (!targetId) return;
+
+      setDealActivities(prev => {
+        const currentList = prev[targetId] || [];
+        return {
+          ...prev,
+          [targetId]: currentList.filter(a => a.id !== actId && a._id !== actId)
+        };
+      });
+
+      if (isContactAct) {
+        setContacts(prev => prev.map(c => {
+          if (c._id === targetId) {
+            const acts = (c.activities || []).filter(a => a.id !== actId && a._id !== actId);
+            return { ...c, activities: acts };
+          }
+          return c;
+        }));
+      } else {
+        setDeals(prev => prev.map(d => {
+          if (d._id === targetId) {
+            const acts = (d.activities || []).filter(a => a.id !== actId && a._id !== actId);
+            return { ...d, activities: acts };
+          }
+          return d;
+        }));
+      }
+
       if (!isContactAct && targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
         await api.delete(`/deals/${targetId}/activities/${actId}`);
       } else if (isContactAct && targetId && !targetId.toString().startsWith('contact-')) {
@@ -6137,7 +6674,295 @@ function Pipeline() {
       }
     } catch (err) {
       console.warn('API delete follow-up error:', err.message);
+    } finally {
+      setDeletingFollowUpId(null);
     }
+  };
+
+  const handleToggleReminderStatus = async (reminder, e) => {
+    if (e) e.stopPropagation();
+    if (!reminder) return;
+    const actId = reminder._id || reminder.id;
+    if (togglingReminderId === actId) return;
+
+    setTogglingReminderId(actId);
+    const targetId = reminder.entityId;
+    const isContactAct = reminder.entityType === 'contact';
+    const nextStatus = reminder.status === 'Completed' ? 'Scheduled' : 'Completed';
+
+    // Optimistically update React state immediately for instant feedback
+    setDealActivities(prev => {
+      const currentList = prev[targetId] || [];
+      return {
+        ...prev,
+        [targetId]: currentList.map(a => (String(a.id) === String(actId) || String(a._id) === String(actId)) ? { ...a, status: nextStatus } : a)
+      };
+    });
+
+    if (isContactAct) {
+      setContacts(prev => prev.map(c => {
+        if (String(c._id) === String(targetId)) {
+          const acts = (c.activities || []).map(a => (String(a.id) === String(actId) || String(a._id) === String(actId)) ? { ...a, status: nextStatus } : a);
+          return { ...c, activities: acts };
+        }
+        return c;
+      }));
+    } else {
+      setDeals(prev => prev.map(d => {
+        if (String(d._id) === String(targetId)) {
+          const acts = (d.activities || []).map(a => (String(a.id) === String(actId) || String(a._id) === String(actId)) ? { ...a, status: nextStatus } : a);
+          return { ...d, activities: acts };
+        }
+        return d;
+      }));
+    }
+
+    try {
+      if (isContactAct && targetId && !targetId.toString().startsWith('contact-')) {
+        await api.patch(`/pipeline-contacts/${targetId}/activities/${actId}`, { status: nextStatus });
+      } else if (!isContactAct && targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
+        await api.patch(`/deals/${targetId}/activities/${actId}`, { status: nextStatus });
+      }
+    } catch (err) {
+      console.warn('API update reminder status error:', err.message);
+    } finally {
+      setTogglingReminderId(null);
+    }
+  };
+
+  const handleDeleteReminder = async (reminder, e) => {
+    if (e) e.stopPropagation();
+    if (!canDelete) {
+      alert('You do not have permission to delete reminders.');
+      return;
+    }
+    const actId = reminder._id || reminder.id;
+    if (deletingReminderId === actId) return;
+
+    if (!window.confirm('Are you sure you want to delete this follow-up reminder?')) return;
+    setDeletingReminderId(actId);
+
+    const targetId = reminder.entityId;
+    const isContactAct = reminder.entityType === 'contact';
+
+    setDealActivities(prev => {
+      const currentList = prev[targetId] || [];
+      return {
+        ...prev,
+        [targetId]: currentList.filter(a => String(a.id) !== String(actId) && String(a._id) !== String(actId))
+      };
+    });
+
+    if (isContactAct) {
+      setContacts(prev => prev.map(c => {
+        if (String(c._id) === String(targetId)) {
+          const acts = (c.activities || []).filter(a => String(a.id) !== String(actId) && String(a._id) !== String(actId));
+          return { ...c, activities: acts };
+        }
+        return c;
+      }));
+    } else {
+      setDeals(prev => prev.map(d => {
+        if (String(d._id) === String(targetId)) {
+          const acts = (d.activities || []).filter(a => String(a.id) !== String(actId) && String(a._id) !== String(actId));
+          return { ...d, activities: acts };
+        }
+        return d;
+      }));
+    }
+
+    try {
+      if (isContactAct && targetId && !targetId.toString().startsWith('contact-')) {
+        await api.delete(`/pipeline-contacts/${targetId}/activities/${actId}`);
+      } else if (!isContactAct && targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
+        await api.delete(`/deals/${targetId}/activities/${actId}`);
+      }
+    } catch (err) {
+      console.warn('API delete reminder error:', err.message);
+    } finally {
+      setDeletingReminderId(null);
+    }
+  };
+
+  const handleOpenCreateReminder = (presetType = 'deal', presetId = '') => {
+    setEditingReminder(null);
+    const initialTargetId = presetId || (presetType === 'deal' ? (deals[0]?._id || '') : (contacts[0]?._id || ''));
+    setReminderFormData({
+      targetType: presetType,
+      targetId: initialTargetId,
+      title: '',
+      channel: 'Call',
+      status: 'Scheduled',
+      followUpDate: new Date().toISOString().slice(0, 10),
+      followUpTime: '11:00 AM',
+      nextFollowUpDate: '',
+      remarks: ''
+    });
+    setShowCreateReminderModal(true);
+  };
+
+  const handleOpenEditReminder = (reminder, e) => {
+    if (e) e.stopPropagation();
+    setEditingReminder(reminder);
+    setReminderFormData({
+      targetType: reminder.entityType,
+      targetId: reminder.entityId,
+      title: reminder.title || '',
+      channel: reminder.channel || 'Call',
+      status: reminder.status || 'Scheduled',
+      followUpDate: reminder.followUpDate || '',
+      followUpTime: reminder.followUpTime || '11:00 AM',
+      nextFollowUpDate: reminder.nextFollowUpDate || '',
+      remarks: reminder.remarks || reminder.content || ''
+    });
+    setShowCreateReminderModal(true);
+  };
+
+  const handleSubmitReminder = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (isSubmittingReminder) return;
+
+    if (!reminderFormData.targetId) {
+      alert('Please select an associated Deal or Contact.');
+      return;
+    }
+    if (!reminderFormData.remarks || !reminderFormData.remarks.trim()) {
+      alert('Please enter remarks for this follow-up reminder.');
+      return;
+    }
+
+    setIsSubmittingReminder(true);
+    try {
+      const isContactAct = reminderFormData.targetType === 'contact';
+      const targetId = reminderFormData.targetId;
+      const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+      const authorRoleName = user?.role?.name || user?.role || (roleName ? roleName.charAt(0).toUpperCase() + roleName.slice(1) : 'Sales Executive');
+
+      const formatTime12H = (val) => {
+        if (!val) return '';
+        if (/am|pm/i.test(val)) return val;
+        const [h, m] = val.split(':');
+        let hours = parseInt(h, 10);
+        if (isNaN(hours)) return val;
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+        const hh = hours < 10 ? `0${hours}` : `${hours}`;
+        return `${hh}:${m || '00'} ${ampm}`;
+      };
+
+      if (editingReminder) {
+        const actId = editingReminder._id || editingReminder.id;
+        const updatePayload = {
+          title: reminderFormData.title.trim() || `${reminderFormData.channel} Follow-up`,
+          channel: reminderFormData.channel,
+          status: reminderFormData.status,
+          followUpDate: reminderFormData.followUpDate,
+          followUpTime: formatTime12H(reminderFormData.followUpTime),
+          nextFollowUpDate: reminderFormData.nextFollowUpDate || '',
+          remarks: reminderFormData.remarks.trim(),
+          content: reminderFormData.remarks.trim()
+        };
+
+        setDealActivities(prev => {
+          const currentList = prev[targetId] || [];
+          return {
+            ...prev,
+            [targetId]: currentList.map(a => (String(a.id) === String(actId) || String(a._id) === String(actId)) ? { ...a, ...updatePayload } : a)
+          };
+        });
+
+        if (isContactAct) {
+          setContacts(prev => prev.map(c => {
+            if (String(c._id) === String(targetId)) {
+              const acts = (c.activities || []).map(a => (String(a.id) === String(actId) || String(a._id) === String(actId)) ? { ...a, ...updatePayload } : a);
+              return { ...c, activities: acts };
+            }
+            return c;
+          }));
+        } else {
+          setDeals(prev => prev.map(d => {
+            if (String(d._id) === String(targetId)) {
+              const acts = (d.activities || []).map(a => (String(a.id) === String(actId) || String(a._id) === String(actId)) ? { ...a, ...updatePayload } : a);
+              return { ...d, activities: acts };
+            }
+            return d;
+          }));
+        }
+
+        try {
+          if (isContactAct && targetId && !targetId.toString().startsWith('contact-')) {
+            await api.patch(`/pipeline-contacts/${targetId}/activities/${actId}`, updatePayload);
+          } else if (!isContactAct && targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
+            await api.patch(`/deals/${targetId}/activities/${actId}`, updatePayload);
+          }
+        } catch (err) {
+          console.warn('API edit reminder error:', err.message);
+        }
+      } else {
+        const now = new Date();
+        const formattedDate = formatDateDDMMYYYY(now);
+        const formattedTime = now.toLocaleTimeString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        }).toUpperCase();
+
+        const newAct = {
+          id: `followup-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          type: 'followup',
+          title: reminderFormData.title.trim() || `${reminderFormData.channel} Follow-up`,
+          channel: reminderFormData.channel,
+          status: reminderFormData.status,
+          followUpDate: reminderFormData.followUpDate,
+          followUpTime: formatTime12H(reminderFormData.followUpTime),
+          nextFollowUpDate: reminderFormData.nextFollowUpDate || '',
+          remarks: reminderFormData.remarks.trim(),
+          content: reminderFormData.remarks.trim(),
+          author: authorName,
+          authorRole: authorRoleName,
+          createdBy: user?._id || user?.id || null,
+          time: formattedTime,
+          date: formattedDate,
+          createdAt: now.toISOString(),
+          timestamp: Date.now()
+        };
+
+        await logActivity(targetId, newAct, isContactAct);
+      }
+
+      setShowCreateReminderModal(false);
+      setEditingReminder(null);
+    } finally {
+      setIsSubmittingReminder(false);
+    }
+  };
+
+  const handleExportReminders = () => {
+    if (!filteredReminders.length) {
+      alert('No reminders available to export.');
+      return;
+    }
+    const dataToExport = filteredReminders.map(r => ({
+      'Entity Type': r.entityType === 'deal' ? 'Deal' : 'Contact',
+      'Entity Name': r.entityName || '',
+      'Title / Purpose': r.title || '',
+      'Channel': r.channel || '',
+      'Status': r.status || 'Scheduled',
+      'Scheduled Date': r.followUpDate ? formatDateDDMMYYYY(r.followUpDate) : '',
+      'Scheduled Time': r.followUpTime || '',
+      'Next Follow-up Date': r.nextFollowUpDate ? formatDateDDMMYYYY(r.nextFollowUpDate) : '',
+      'Remarks': r.remarks || r.content || '',
+      'Created By': r.author || '',
+      'Contact Email': r.contactEmail || '',
+      'Contact Phone': r.contactPhone || ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Reminders & Follow-ups');
+    XLSX.writeFile(workbook, `Reminders_Followups_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const convertTimeTo24H = (timeStr) => {
@@ -7519,8 +8344,8 @@ function Pipeline() {
   }, [companies, isItemOwnedByUser]);
 
   const activeTasksCount = useMemo(() => {
-    return tasks.filter(t => isItemOwnedByUser(t, 'task')).length;
-  }, [tasks, isItemOwnedByUser]);
+    return userAccessibleTasks.length;
+  }, [userAccessibleTasks]);
 
   // Counts per pipeline
   const pipelineCounts = useMemo(() => {
@@ -7951,6 +8776,52 @@ function Pipeline() {
     setActiveMenuId(null);
     setMoveSubmenuDealId(null);
     setShowCreateModal(true);
+  };
+
+  // Save updated requirement for the detailed deal
+  const handleSaveDealRequirement = async (e) => {
+    if (e) e.preventDefault();
+    if (!detailedDeal?._id) return;
+
+    setIsSavingRequirement(true);
+    const updatedText = editingRequirementText.trim();
+
+    try {
+      if (!detailedDeal._id.toString().startsWith('deal-sample-') && !detailedDeal._id.toString().startsWith('deal-')) {
+        await api.put(`/deals/${detailedDeal._id}`, {
+          requirements: updatedText,
+          description: updatedText || detailedDeal.notes || ''
+        });
+
+        // Sync to related lead in background if present
+        const relatedLeadId = detailedDeal.relatedLead?._id || (typeof detailedDeal.relatedLead === 'string' ? detailedDeal.relatedLead : null);
+        if (relatedLeadId) {
+          api.put(`/leads/${relatedLeadId}`, {
+            requirement: updatedText,
+            requirements: updatedText
+          }).catch(err => console.warn('Sync requirement to lead:', err.message));
+        }
+      }
+
+      setDeals(prev => prev.map(d => String(d._id) === String(detailedDeal._id) ? {
+        ...d,
+        requirements: updatedText,
+        description: updatedText || d.notes || ''
+      } : d));
+
+      logActivity(detailedDeal._id, {
+        type: 'deal',
+        title: 'Requirement Updated',
+        content: `Deal requirement was updated.`
+      });
+
+      setIsEditingRequirement(false);
+    } catch (err) {
+      console.error('Save deal requirement error:', err);
+      alert(err.response?.data?.message || 'Failed to update requirement. Please try again.');
+    } finally {
+      setIsSavingRequirement(false);
+    }
   };
 
   // Open modal with preselected pipeline / stage
@@ -9670,6 +10541,9 @@ function Pipeline() {
                   {!isSidebarCollapsed && tab.id === 'tasks' && (
                     <span className="pipeline-sub-sidebar-count">{activeTasksCount}</span>
                   )}
+                  {!isSidebarCollapsed && tab.id === 'reminders' && (
+                    <span className="pipeline-sub-sidebar-count">{activeRemindersCount}</span>
+                  )}
                 </li>
               );
             })}
@@ -10071,6 +10945,39 @@ function Pipeline() {
                           <div className="pipeline-detail-kv-row">
                             <span className="pipeline-detail-k-label">Location / Territory</span>
                             <span className="pipeline-detail-v-val">{dealDisplayLocation}</span>
+                          </div>
+
+                          {/* Lead Requirement field with View button just before Deal Owner */}
+                          <div className="pipeline-detail-kv-row" style={{ alignItems: 'center' }}>
+                            <span className="pipeline-detail-k-label">Requirement</span>
+                            <div className="pipeline-detail-v-val" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <button
+                                type="button"
+                                className="pipeline-owner-pill-badge-btn"
+                                onClick={() => {
+                                  setIsEditingRequirement(false);
+                                  setShowDealRequirementModal(true);
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '2.5px 9px',
+                                  borderRadius: '999px',
+                                  background: '#e0f2fe',
+                                  border: '1px solid #bae6fd',
+                                  color: '#0284c7',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                title="Click to view full requirement details"
+                              >
+                                <Eye size={12} style={{ color: '#0284c7' }} />
+                                <span>View</span>
+                              </button>
+                            </div>
                           </div>
 
                           {/* Interactive Dealer Name Pill Badge with Hover / Click Popover */}
@@ -10809,15 +11716,6 @@ function Pipeline() {
                         </button>
                         <button
                           type="button"
-                          className={`pipeline-act-tab-btn ${detailActiveTab === 'messages' ? 'active' : ''}`}
-                          onClick={() => setDetailActiveTab('messages')}
-                        >
-                          <MessageSquare size={14} />
-                          <span>Messages</span>
-                          <span className="pipeline-act-tab-badge">{currentDealActivities.filter(a => a.type === 'message').length}</span>
-                        </button>
-                        <button
-                          type="button"
                           className={`pipeline-act-tab-btn ${detailActiveTab === 'tasks' ? 'active' : ''}`}
                           onClick={() => setDetailActiveTab('tasks')}
                         >
@@ -10866,18 +11764,6 @@ function Pipeline() {
                             <span>Log Email</span>
                           </button>
                         )}
-                        {detailActiveTab === 'messages' && (
-                          <button
-                            type="button"
-                            className="pipeline-btn-add-activity-tab"
-                            disabled
-                            style={{ opacity: 0.55, cursor: 'not-allowed' }}
-                            title="Feature not implemented yet"
-                          >
-                            <Plus size={13} />
-                            <span>Log Message</span>
-                          </button>
-                        )}
                         {detailActiveTab === 'tasks' && (
                           <button
                             type="button"
@@ -10896,8 +11782,7 @@ function Pipeline() {
                     {/* Inline Activity Composer */}
                     {isComposingActivity && (
                       (detailActiveTab === 'notes' && newActivityType === 'note') ||
-                      (detailActiveTab === 'emails' && newActivityType === 'email') ||
-                      (detailActiveTab === 'messages' && newActivityType === 'message')
+                      (detailActiveTab === 'emails' && newActivityType === 'email')
                     ) && (
                         <form onSubmit={handleAddActivity} className="pipeline-activity-composer">
                           <div className="pipeline-activity-composer-header">
@@ -11382,9 +12267,15 @@ function Pipeline() {
                                             type="button"
                                             className="pipeline-mini-icon-btn danger"
                                             title="Delete Follow-up"
+                                            disabled={deletingFollowUpId === (act.id || act._id)}
                                             onClick={() => handleDeleteFollowUp(act.id || act._id)}
+                                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                           >
-                                            <Trash2 size={12} />
+                                            {deletingFollowUpId === (act.id || act._id) ? (
+                                              <Loader2 size={12} className="pipeline-spinner-icon" />
+                                            ) : (
+                                              <Trash2 size={12} />
+                                            )}
                                           </button>
                                         </div>
                                       </div>
@@ -11398,18 +12289,12 @@ function Pipeline() {
                       </div>
                     ) : (
                       /* Activity Timeline Feed */
-                      <div className="pipeline-activity-timeline-feed" style={{ marginTop: (isComposingActivity && ((detailActiveTab === 'notes' && newActivityType === 'note') || (detailActiveTab === 'emails' && newActivityType === 'email') || (detailActiveTab === 'messages' && newActivityType === 'message'))) ? '16px' : '0' }}>
+                      <div className="pipeline-activity-timeline-feed" style={{ marginTop: (isComposingActivity && ((detailActiveTab === 'notes' && newActivityType === 'note') || (detailActiveTab === 'emails' && newActivityType === 'email'))) ? '16px' : '0' }}>
                         {detailActiveTab === 'emails' ? (
                           <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
                             <Mail size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
                             <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
                             <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Email integration and logging will be available soon.</p>
-                          </div>
-                        ) : detailActiveTab === 'messages' ? (
-                          <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
-                            <MessageSquare size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
-                            <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
-                            <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Message and SMS logging will be available soon.</p>
                           </div>
                         ) : currentDealActivities.filter(act => {
                           if (detailActiveTab === 'all') return true;
@@ -11494,7 +12379,7 @@ function Pipeline() {
                                     )}
                                   </div>
                                 ) : (
-                                  <p className="pipeline-timeline-body-text">{act.content}</p>
+                                  <p className="pipeline-timeline-body-text" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{act.content}</p>
                                 )}
                               </div>
                             </div>
@@ -13999,15 +14884,6 @@ function Pipeline() {
                         </button>
                         <button
                           type="button"
-                          className={`pipeline-act-tab-btn ${detailActiveTab === 'messages' ? 'active' : ''}`}
-                          onClick={() => setDetailActiveTab('messages')}
-                        >
-                          <MessageSquare size={14} />
-                          <span>Messages</span>
-                          <span className="pipeline-act-tab-badge">{currentContactActivities.filter(a => a.type === 'message').length}</span>
-                        </button>
-                        <button
-                          type="button"
                           className={`pipeline-act-tab-btn ${detailActiveTab === 'tasks' ? 'active' : ''}`}
                           onClick={() => setDetailActiveTab('tasks')}
                         >
@@ -14056,18 +14932,6 @@ function Pipeline() {
                             <span>Log Email</span>
                           </button>
                         )}
-                        {detailActiveTab === 'messages' && (
-                          <button
-                            type="button"
-                            className="pipeline-btn-add-activity-tab"
-                            disabled
-                            style={{ opacity: 0.55, cursor: 'not-allowed' }}
-                            title="Feature not implemented yet"
-                          >
-                            <Plus size={13} />
-                            <span>Log Message</span>
-                          </button>
-                        )}
                         {detailActiveTab === 'tasks' && (
                           <button
                             type="button"
@@ -14086,8 +14950,7 @@ function Pipeline() {
                     {/* Inline Activity Composer */}
                     {isComposingActivity && (
                       (detailActiveTab === 'notes' && newActivityType === 'note') ||
-                      (detailActiveTab === 'emails' && newActivityType === 'email') ||
-                      (detailActiveTab === 'messages' && newActivityType === 'message')
+                      (detailActiveTab === 'emails' && newActivityType === 'email')
                     ) && (
                         <form onSubmit={handleAddActivity} className="pipeline-activity-composer">
                           <div className="pipeline-activity-composer-header">
@@ -14572,9 +15435,15 @@ function Pipeline() {
                                             type="button"
                                             className="pipeline-mini-icon-btn danger"
                                             title="Delete Follow-up"
+                                            disabled={deletingFollowUpId === (act.id || act._id)}
                                             onClick={() => handleDeleteFollowUp(act.id || act._id)}
+                                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                           >
-                                            <Trash2 size={12} />
+                                            {deletingFollowUpId === (act.id || act._id) ? (
+                                              <Loader2 size={12} className="pipeline-spinner-icon" />
+                                            ) : (
+                                              <Trash2 size={12} />
+                                            )}
                                           </button>
                                         </div>
                                       </div>
@@ -14588,18 +15457,12 @@ function Pipeline() {
                       </div>
                     ) : (
                       /* Timeline Stream */
-                      <div className="pipeline-activity-timeline-feed" style={{ marginTop: (isComposingActivity && ((detailActiveTab === 'notes' && newActivityType === 'note') || (detailActiveTab === 'emails' && newActivityType === 'email') || (detailActiveTab === 'messages' && newActivityType === 'message'))) ? '16px' : '0' }}>
+                      <div className="pipeline-activity-timeline-feed" style={{ marginTop: (isComposingActivity && ((detailActiveTab === 'notes' && newActivityType === 'note') || (detailActiveTab === 'emails' && newActivityType === 'email'))) ? '16px' : '0' }}>
                         {detailActiveTab === 'emails' ? (
                           <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
                             <Mail size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
                             <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
                             <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Email integration and logging will be available soon.</p>
-                          </div>
-                        ) : detailActiveTab === 'messages' ? (
-                          <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
-                            <MessageSquare size={32} style={{ marginBottom: '8px', opacity: 0.6 }} />
-                            <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
-                            <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Message and SMS logging will be available soon.</p>
                           </div>
                         ) : currentContactActivities.filter(act => {
                           if (detailActiveTab === 'all') return true;
@@ -14684,7 +15547,7 @@ function Pipeline() {
                                     )}
                                   </div>
                                 ) : (
-                                  <p className="pipeline-timeline-body-text">{act.content}</p>
+                                  <p className="pipeline-timeline-body-text" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{act.content}</p>
                                 )}
                               </div>
                             </div>
@@ -17482,7 +18345,7 @@ function Pipeline() {
                 </div>
                 <div>
                   <span className="pipeline-task-stat-label">Total Tasks</span>
-                  <h4 className="pipeline-task-stat-value">{tasks.length}</h4>
+                  <h4 className="pipeline-task-stat-value">{userAccessibleTasks.length}</h4>
                 </div>
               </div>
               <div className="pipeline-task-stat-card">
@@ -17491,7 +18354,7 @@ function Pipeline() {
                 </div>
                 <div>
                   <span className="pipeline-task-stat-label">Pending / In Progress</span>
-                  <h4 className="pipeline-task-stat-value">{tasks.filter(t => !t.completed).length}</h4>
+                  <h4 className="pipeline-task-stat-value">{userAccessibleTasks.filter(t => !t.completed && t.status !== 'Completed').length}</h4>
                 </div>
               </div>
               <div className="pipeline-task-stat-card">
@@ -17500,7 +18363,7 @@ function Pipeline() {
                 </div>
                 <div>
                   <span className="pipeline-task-stat-label">Completed</span>
-                  <h4 className="pipeline-task-stat-value">{tasks.filter(t => t.completed).length}</h4>
+                  <h4 className="pipeline-task-stat-value">{userAccessibleTasks.filter(t => t.completed || t.status === 'Completed').length}</h4>
                 </div>
               </div>
               <div className="pipeline-task-stat-card">
@@ -17509,7 +18372,7 @@ function Pipeline() {
                 </div>
                 <div>
                   <span className="pipeline-task-stat-label">High Priority</span>
-                  <h4 className="pipeline-task-stat-value">{tasks.filter(t => t.priority === 'High' && !t.completed).length}</h4>
+                  <h4 className="pipeline-task-stat-value">{userAccessibleTasks.filter(t => (t.priority || '').toLowerCase() === 'high' && !t.completed && t.status !== 'Completed').length}</h4>
                 </div>
               </div>
             </div>
@@ -17540,7 +18403,7 @@ function Pipeline() {
                 </div>
               ) : taskViewMode === 'list' ? (
                 /* Table List View */
-                <div className="pipeline-table-view">
+                <div className="pipeline-table-view" style={{ minWidth: 0, maxWidth: '100%', width: '100%', padding: 0 }}>
                   <div className="pipeline-table-card">
                     <table className="pipeline-table compact-table">
                       <thead>
@@ -17729,7 +18592,25 @@ function Pipeline() {
                       return !t.completed && t.status !== 'In Progress';
                     });
                     return (
-                      <div key={colStatus} className="pipeline-task-kanban-col">
+                      <div
+                        key={colStatus}
+                        className="pipeline-task-kanban-col"
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.currentTarget.classList.add('pipeline-drag-over');
+                        }}
+                        onDragLeave={(e) => {
+                          e.currentTarget.classList.remove('pipeline-drag-over');
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.currentTarget.classList.remove('pipeline-drag-over');
+                          const taskId = e.dataTransfer.getData('text/plain');
+                          if (taskId) {
+                            handleUpdateTaskStatus(taskId, colStatus);
+                          }
+                        }}
+                      >
                         <div className="pipeline-task-kanban-col-header">
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span className={`pipeline-task-status-dot ${colStatus.toLowerCase().replace(/\s+/g, '-')}`} />
@@ -17740,7 +18621,14 @@ function Pipeline() {
 
                         <div className="pipeline-task-kanban-col-body">
                           {colTasks.map(task => (
-                            <div key={task._id} className={`pipeline-task-kanban-card ${task.completed ? 'completed' : ''}`}>
+                            <div
+                              key={task._id}
+                              className={`pipeline-task-kanban-card ${task.completed ? 'completed' : ''}`}
+                              draggable={canUpdate}
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData('text/plain', task._id);
+                              }}
+                            >
                               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
                                 <span className={`pipeline-task-type-badge ${(task.type || 'follow-up').toLowerCase()}`}>
                                   {task.type || 'Follow-up'}
@@ -17772,14 +18660,42 @@ function Pipeline() {
                               {(task.associatedDealName || task.associatedContactName) && (
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', margin: '8px 0' }}>
                                   {task.associatedDealName && (
-                                    <span className="pipeline-task-entity-link deal">
+                                    <button
+                                      type="button"
+                                      className="pipeline-task-entity-link deal"
+                                      style={{ border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const matchedD = deals.find(d => String(d._id) === String(task.associatedDealId) || (d.dealName || d.clientName) === task.associatedDealName);
+                                        if (matchedD) {
+                                          setDetailedContactId(null);
+                                          setDetailedDealId(matchedD._id);
+                                          setActiveTab('deals');
+                                        }
+                                      }}
+                                      title="Open Deal Details"
+                                    >
                                       <Briefcase size={10} /> {task.associatedDealName}
-                                    </span>
+                                    </button>
                                   )}
                                   {task.associatedContactName && (
-                                    <span className="pipeline-task-entity-link contact">
+                                    <button
+                                      type="button"
+                                      className="pipeline-task-entity-link contact"
+                                      style={{ border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const matchedC = contacts.find(c => String(c._id) === String(task.associatedContactId) || `${c.firstName || ''} ${c.lastName || ''}`.trim() === task.associatedContactName);
+                                        if (matchedC) {
+                                          setDetailedDealId(null);
+                                          setDetailedContactId(matchedC._id);
+                                          setActiveTab('contacts');
+                                        }
+                                      }}
+                                      title="Open Contact Details"
+                                    >
                                       <User size={10} /> {task.associatedContactName}
-                                    </span>
+                                    </button>
                                   )}
                                 </div>
                               )}
@@ -17821,6 +18737,456 @@ function Pipeline() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ====================================================================
+            5. REMINDERS MANAGEMENT TAB VIEW
+            ==================================================================== */}
+        {activeTab === 'reminders' && (
+          <div className="pipeline-tab-page-view">
+            {/* Top Header */}
+            <div className="pipeline-top-header" style={{ padding: '16px 28px', borderBottom: '1px solid #f1f5f9' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <h1 className="pipeline-deals-count-title" style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#0f172a' }}>
+                  Reminders & Follow-ups
+                </h1>
+                <span className="pipeline-badge-filter" style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 600 }}>
+                  {filteredReminders.length} {filteredReminders.length === 1 ? 'Reminder' : 'Reminders'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <NotificationBell filterType="CRM" />
+              </div>
+            </div>
+
+            {/* Action Toolbar */}
+            <div className="pipeline-toolbar-row">
+              <div className="pipeline-toolbar-left">
+                {/* Search Reminders */}
+                <div className="pipeline-contacts-search-box">
+                  <Search size={14} className="pipeline-search-icon" />
+                  <input
+                    type="text"
+                    placeholder="Search reminders, deals, contacts..."
+                    value={reminderSearchQuery}
+                    onChange={e => setReminderSearchQuery(e.target.value)}
+                    className="pipeline-contacts-search-input"
+                  />
+                  {reminderSearchQuery && (
+                    <button
+                      type="button"
+                      className="pipeline-search-clear-btn"
+                      onClick={() => setReminderSearchQuery('')}
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter by Status */}
+                <button
+                  type="button"
+                  className="pipeline-tool-btn"
+                  onClick={() => {
+                    const stList = ['all', 'Scheduled', 'Completed', 'Follow-up Needed', 'Rescheduled', 'Missed'];
+                    const idx = stList.indexOf(reminderStatusFilter);
+                    setReminderStatusFilter(stList[(idx + 1) % stList.length]);
+                  }}
+                  title="Filter by Status"
+                >
+                  <CheckCircle size={14} />
+                  <span>{reminderStatusFilter === 'all' ? 'All Statuses' : reminderStatusFilter}</span>
+                  <ChevronDown size={13} style={{ color: '#94a3b8' }} />
+                </button>
+
+                {/* Filter by Channel */}
+                <button
+                  type="button"
+                  className="pipeline-tool-btn"
+                  onClick={() => {
+                    const chList = ['all', 'Call', 'Meeting', 'WhatsApp', 'Email', 'Demo', 'Visit'];
+                    const idx = chList.indexOf(reminderChannelFilter);
+                    setReminderChannelFilter(chList[(idx + 1) % chList.length]);
+                  }}
+                  title="Filter by Channel"
+                >
+                  <Phone size={14} />
+                  <span>{reminderChannelFilter === 'all' ? 'All Channels' : `${reminderChannelFilter}`}</span>
+                  <ChevronDown size={13} style={{ color: '#94a3b8' }} />
+                </button>
+
+                {/* Filter by Timing */}
+                <button
+                  type="button"
+                  className="pipeline-tool-btn"
+                  onClick={() => {
+                    const tmList = ['all', 'today', 'upcoming', 'overdue'];
+                    const idx = tmList.indexOf(reminderTimingFilter);
+                    setReminderTimingFilter(tmList[(idx + 1) % tmList.length]);
+                  }}
+                  title="Filter by Timing"
+                >
+                  <Clock size={14} />
+                  <span>
+                    {reminderTimingFilter === 'all'
+                      ? 'All Timing'
+                      : reminderTimingFilter === 'today'
+                        ? 'Scheduled Today'
+                        : reminderTimingFilter === 'upcoming'
+                          ? 'Upcoming'
+                          : 'Overdue'}
+                  </span>
+                  <ChevronDown size={13} style={{ color: '#94a3b8' }} />
+                </button>
+
+                {/* Sort by */}
+                <button
+                  type="button"
+                  className="pipeline-tool-btn"
+                  onClick={() => {
+                    setReminderSortBy(prev => (prev === 'date_asc' ? 'date_desc' : 'date_asc'));
+                  }}
+                  title="Sort Reminders"
+                >
+                  <ArrowUpDown size={14} />
+                  <span>Sort: {reminderSortBy === 'date_asc' ? 'Due Soonest' : 'Due Latest'}</span>
+                </button>
+              </div>
+
+              <div className="pipeline-toolbar-right">
+                {/* Export Reminders */}
+                <button
+                  type="button"
+                  className="pipeline-btn-export"
+                  onClick={handleExportReminders}
+                  title="Export Reminders to Excel"
+                >
+                  <Download size={14} />
+                  <span>Export</span>
+                </button>
+
+                {/* Set Reminder Button */}
+                {canCreate && (
+                  <button
+                    type="button"
+                    className="pipeline-btn-create-deal"
+                    onClick={() => handleOpenCreateReminder('deal')}
+                    title="Set new reminder"
+                  >
+                    <Plus size={15} />
+                    <span>Set Reminder</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Metrics Row */}
+            <div className="pipeline-tasks-metrics-row">
+              <div className="pipeline-task-stat-card">
+                <div className="pipeline-task-stat-icon total">
+                  <Bell size={18} />
+                </div>
+                <div>
+                  <span className="pipeline-task-stat-label">Total Reminders</span>
+                  <h4 className="pipeline-task-stat-value">{allReminders.length}</h4>
+                </div>
+              </div>
+              <div className="pipeline-task-stat-card">
+                <div className="pipeline-task-stat-icon pending">
+                  <Clock size={18} />
+                </div>
+                <div>
+                  <span className="pipeline-task-stat-label">Scheduled / Upcoming</span>
+                  <h4 className="pipeline-task-stat-value">
+                    {allReminders.filter(r => r.status === 'Scheduled' || !r.status || r.status === 'Follow-up Needed').length}
+                  </h4>
+                </div>
+              </div>
+              <div className="pipeline-task-stat-card">
+                <div className="pipeline-task-stat-icon high">
+                  <AlertCircle size={18} />
+                </div>
+                <div>
+                  <span className="pipeline-task-stat-label">Due Today / Overdue</span>
+                  <h4 className="pipeline-task-stat-value">
+                    {allReminders.filter(r => isReminderToday(r) || isReminderOverdue(r)).length}
+                  </h4>
+                </div>
+              </div>
+              <div className="pipeline-task-stat-card">
+                <div className="pipeline-task-stat-icon completed">
+                  <CheckCircle size={18} />
+                </div>
+                <div>
+                  <span className="pipeline-task-stat-label">Completed</span>
+                  <h4 className="pipeline-task-stat-value">
+                    {allReminders.filter(r => r.status === 'Completed').length}
+                  </h4>
+                </div>
+              </div>
+            </div>
+
+            {/* Content Body: List Table View */}
+            <div className="pipeline-board-container" style={{ padding: '0 28px 40px 28px' }}>
+              {isLoading ? (
+                renderTaskListSkeleton(7)
+              ) : filteredReminders.length === 0 ? (
+                <div className="pipeline-empty-state-card" style={{ maxWidth: '480px', margin: '40px auto' }}>
+                  <div className="pipeline-empty-icon-wrap" style={{ background: '#f0fdf4', color: '#16a34a' }}>
+                    <Bell size={28} />
+                  </div>
+                  <h3 className="pipeline-empty-title">No Reminders Found</h3>
+                  <p className="pipeline-empty-desc">
+                    {reminderSearchQuery || reminderStatusFilter !== 'all' || reminderChannelFilter !== 'all' || reminderTimingFilter !== 'all'
+                      ? 'No follow-up reminders match your search or filter criteria. Try clearing some filters.'
+                      : 'You do not have any scheduled follow-up reminders yet. Set follow-ups for your deals and contacts to stay on track.'}
+                  </p>
+                  {canCreate && (
+                    <button
+                      type="button"
+                      className="pipeline-btn-create-deal"
+                      style={{ marginTop: '14px' }}
+                      onClick={() => handleOpenCreateReminder('deal')}
+                    >
+                      <Plus size={14} />
+                      <span>Set First Reminder</span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                /* Table / List View */
+                <div className="pipeline-table-view" style={{ minWidth: 0, maxWidth: '100%', width: '100%', padding: 0 }}>
+                  <div className="pipeline-table-card pipeline-reminders-table-card">
+                    <table className="pipeline-table compact-table pipeline-reminders-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '42px', textAlign: 'center', whiteSpace: 'nowrap' }}>Done</th>
+                          <th style={{ minWidth: '220px', whiteSpace: 'nowrap' }}>Follow-up / Purpose</th>
+                          <th style={{ minWidth: '100px', whiteSpace: 'nowrap' }}>Channel</th>
+                          <th style={{ minWidth: '180px', whiteSpace: 'nowrap' }}>Associated Deal</th>
+                          <th style={{ minWidth: '190px', whiteSpace: 'nowrap' }}>Associated Contact</th>
+                          <th style={{ minWidth: '190px', whiteSpace: 'nowrap' }}>Scheduled Date & Time</th>
+                          <th style={{ minWidth: '130px', whiteSpace: 'nowrap' }}>Next Follow-up</th>
+                          <th style={{ minWidth: '120px', whiteSpace: 'nowrap' }}>Status</th>
+                          <th style={{ minWidth: '150px', whiteSpace: 'nowrap' }}>Set By</th>
+                          <th style={{ textAlign: 'right', whiteSpace: 'nowrap', minWidth: '90px' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredReminders.map(reminder => {
+                          const isDone = reminder.status === 'Completed';
+                          const isOverdue = isReminderOverdue(reminder);
+                          const isToday = isReminderToday(reminder);
+
+                          return (
+                            <tr key={reminder._id} className={isDone ? 'pipeline-row-completed' : ''}>
+                              {/* Checkbox */}
+                              <td style={{ textAlign: 'center' }}>
+                                <label className="pipeline-task-checkbox-wrap" onClick={e => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isDone}
+                                    disabled={!canUpdate || togglingReminderId === (reminder._id || reminder.id)}
+                                    onChange={(e) => canUpdate && togglingReminderId !== (reminder._id || reminder.id) && handleToggleReminderStatus(reminder, e)}
+                                  />
+                                  <span className="pipeline-task-checkmark"></span>
+                                </label>
+                              </td>
+
+                              {/* Title & Remarks */}
+                              <td>
+                                <div>
+                                  <span className={`pipeline-task-row-title ${isDone ? 'done' : ''}`} style={{ fontWeight: 600, color: '#0f172a' }}>
+                                    {reminder.title || 'Follow-up Discussion'}
+                                  </span>
+                                  {reminder.remarks && (
+                                    <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#64748b', maxWidth: '320px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={reminder.remarks}>
+                                      {reminder.remarks}
+                                    </p>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Channel */}
+                              <td>
+                                <span className={`pipeline-task-type-badge ${(reminder.channel || 'call').toLowerCase()}`}>
+                                  {getFollowUpChannelIcon(reminder.channel, 12)}
+                                  <span style={{ marginLeft: '4px' }}>{reminder.channel || 'Call'}</span>
+                                </span>
+                              </td>
+
+                              {/* Associated Deal (Clean text only, hover underline & blue) */}
+                              <td>
+                                {reminder.dealName || (reminder.entityType === 'deal' && reminder.entityName) ? (
+                                  <button
+                                    type="button"
+                                    className="pipeline-clean-text-link"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const dealId = reminder.entityType === 'deal' ? reminder.entityId : (deals.find(d => (d.dealName || d.clientName) === reminder.dealName)?._id);
+                                      if (dealId) {
+                                        setDetailedContactId(null);
+                                        setDetailedDealId(dealId);
+                                        setActiveTab('deals');
+                                      }
+                                    }}
+                                    title="Open Deal Details"
+                                  >
+                                    {reminder.dealName || reminder.entityName}
+                                  </button>
+                                ) : (
+                                  <span style={{ color: '#cbd5e1' }}>—</span>
+                                )}
+                              </td>
+
+                              {/* Associated Contact (Only number and email in text, hover underline & blue) */}
+                              <td>
+                                {(() => {
+                                  const phone = reminder.contactPhone;
+                                  const email = reminder.contactEmail;
+
+                                  if (!phone && !email) {
+                                    return <span style={{ color: '#cbd5e1' }}>—</span>;
+                                  }
+
+                                  const contactId = reminder.entityType === 'contact'
+                                    ? reminder.entityId
+                                    : (reminder.contactId || contacts.find(c =>
+                                        (c.email && email && c.email.toLowerCase() === email.toLowerCase()) ||
+                                        (c.phone && phone && c.phone === phone) ||
+                                        (reminder.contactName && `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === reminder.contactName.toLowerCase())
+                                      )?._id);
+
+                                  return (
+                                    <button
+                                      type="button"
+                                      className="pipeline-contact-details-link"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (contactId) {
+                                          setDetailedDealId(null);
+                                          setDetailedContactId(contactId);
+                                          setActiveTab('contacts');
+                                        }
+                                      }}
+                                      title={contactId ? "Open Contact Details" : ""}
+                                    >
+                                      {phone && (
+                                        <span className="pipeline-contact-info-item">
+                                          <Phone size={11} style={{ color: '#64748b' }} /> {phone}
+                                        </span>
+                                      )}
+                                      {email && (
+                                        <span className="pipeline-contact-info-item">
+                                          <Mail size={11} style={{ color: '#64748b' }} /> {email}
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })()}
+                              </td>
+
+                              {/* Scheduled Date & Time */}
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ fontSize: '12.5px', fontWeight: 600, color: isOverdue ? '#dc2626' : (isToday ? '#16a34a' : '#334155') }}>
+                                      {reminder.followUpDate ? formatDateDDMMYYYY(reminder.followUpDate) : 'Not scheduled'}
+                                    </span>
+                                    {isOverdue && (
+                                      <span style={{ fontSize: '10px', fontWeight: 700, background: '#fee2e2', color: '#dc2626', padding: '1px 5px', borderRadius: '4px' }}>
+                                        OVERDUE
+                                      </span>
+                                    )}
+                                    {isToday && (
+                                      <span style={{ fontSize: '10px', fontWeight: 700, background: '#dcfce7', color: '#16a34a', padding: '1px 5px', borderRadius: '4px' }}>
+                                        TODAY
+                                      </span>
+                                    )}
+                                  </div>
+                                  {reminder.followUpTime && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748b' }}>
+                                      <Clock size={11} />
+                                      <span>{reminder.followUpTime}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Next Follow-up */}
+                              <td>
+                                {reminder.nextFollowUpDate ? (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#0284c7' }}>
+                                    <Calendar size={12} />
+                                    <span>{formatDateDDMMYYYY(reminder.nextFollowUpDate)}</span>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: '#cbd5e1' }}>—</span>
+                                )}
+                              </td>
+
+                              {/* Status */}
+                              <td>
+                                <span className={`pipeline-task-status-badge ${(reminder.status || 'scheduled').toLowerCase().replace(/\s+/g, '-')}`}>
+                                  {reminder.status || 'Scheduled'}
+                                </span>
+                              </td>
+
+                              {/* Set By / Author */}
+                              <td>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <div className="pipeline-owner-pill-avatar" style={{ width: '22px', height: '22px', fontSize: '10px' }} title={reminder.author}>
+                                    {(reminder.author || 'A').charAt(0).toUpperCase()}
+                                  </div>
+                                  <span style={{ fontSize: '12px', color: '#334155', fontWeight: 500 }}>
+                                    {reminder.author || 'Admin System'}
+                                  </span>
+                                </div>
+                              </td>
+
+                              {/* Actions */}
+                              <td style={{ textAlign: 'right' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                                  {canUpdate && (
+                                    <button
+                                      type="button"
+                                      className="pipeline-mini-icon-btn"
+                                      style={{ width: '24px', height: '24px' }}
+                                      onClick={(e) => handleOpenEditReminder(reminder, e)}
+                                      disabled={deletingReminderId === (reminder._id || reminder.id) || isSubmittingReminder}
+                                      title="Edit Reminder"
+                                    >
+                                      <Edit2 size={11} />
+                                    </button>
+                                  )}
+                                  {canDelete && (
+                                    <button
+                                      type="button"
+                                      className="pipeline-mini-icon-btn danger"
+                                      style={{ width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                      onClick={(e) => handleDeleteReminder(reminder, e)}
+                                      disabled={deletingReminderId === (reminder._id || reminder.id)}
+                                      title="Delete Reminder"
+                                    >
+                                      {deletingReminderId === (reminder._id || reminder.id) ? (
+                                        <Loader2 size={11} className="pipeline-spinner-icon" />
+                                      ) : (
+                                        <Trash2 size={11} />
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>
@@ -20615,6 +21981,264 @@ function Pipeline() {
         )
       }
 
+      {/* ------------------------------------------------------------------
+        Create / Edit Follow-up Reminder Modal
+        ------------------------------------------------------------------ */}
+      {
+        showCreateReminderModal && (
+          <div className="pipeline-modal-backdrop" onClick={() => { setShowCreateReminderModal(false); setEditingReminder(null); }}>
+            <div className="pipeline-modal-card" style={{ maxWidth: '680px', width: '92%' }} onClick={e => e.stopPropagation()}>
+              <div className="pipeline-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div className="pipeline-modal-icon-badge" style={{ background: '#f0fdf4', color: '#16a34a' }}>
+                    <Bell size={18} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>
+                      {editingReminder ? 'Edit Follow-up Reminder' : 'Set New Follow-up Reminder'}
+                    </h3>
+                    <p className="pipeline-modal-subtitle">Schedule client calls, meetings, WhatsApp follow-ups, demos, or visits</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-modal-close-btn"
+                  onClick={() => { setShowCreateReminderModal(false); setEditingReminder(null); }}
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmitReminder}>
+                <div className="pipeline-modal-body" style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                  {/* Target Entity Type Selector (Deal vs Contact) */}
+                  {!editingReminder && (
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Link Follow-up To</label>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button
+                          type="button"
+                          className={`pipeline-channel-btn ${reminderFormData.targetType === 'deal' ? 'active' : ''}`}
+                          style={{ flex: 1, justifyContent: 'center', padding: '8px 14px' }}
+                          onClick={() => {
+                            setReminderFormData(prev => ({
+                              ...prev,
+                              targetType: 'deal',
+                              targetId: deals[0]?._id || ''
+                            }));
+                          }}
+                        >
+                          <Briefcase size={14} />
+                          <span>Deal Follow-up</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pipeline-channel-btn ${reminderFormData.targetType === 'contact' ? 'active' : ''}`}
+                          style={{ flex: 1, justifyContent: 'center', padding: '8px 14px' }}
+                          onClick={() => {
+                            setReminderFormData(prev => ({
+                              ...prev,
+                              targetType: 'contact',
+                              targetId: contacts[0]?._id || ''
+                            }));
+                          }}
+                        >
+                          <User size={14} />
+                          <span>Contact Follow-up</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Target Entity Picker Dropdown with CreatableSelect */}
+                  {!editingReminder && (
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">
+                        Select {reminderFormData.targetType === 'deal' ? 'Deal' : 'Contact'} <span className="required-star">*</span>
+                      </label>
+                      {reminderFormData.targetType === 'deal' ? (
+                        <CreatableSelect
+                          value={(() => {
+                            const d = deals.find(item => String(item._id) === String(reminderFormData.targetId));
+                            return d ? `${d.dealName || d.clientName}${d.dealValue ? ` (₹${Number(d.dealValue).toLocaleString('en-IN')})` : ''}` : '';
+                          })()}
+                          onChange={val => {
+                            const matched = deals.find(item => String(item._id) === String(val) || (item.dealName || item.clientName) === val || `${item.dealName || item.clientName}${item.dealValue ? ` (₹${Number(item.dealValue).toLocaleString('en-IN')})` : ''}` === val);
+                            setReminderFormData(prev => ({
+                              ...prev,
+                              targetId: matched ? matched._id : val
+                            }));
+                          }}
+                          options={deals.filter(d => isItemOwnedByUser(d, 'deal')).map(d => ({
+                            id: d._id,
+                            label: `${d.dealName || d.clientName}${d.dealValue ? ` (₹${Number(d.dealValue).toLocaleString('en-IN')})` : ''}`
+                          }))}
+                          placeholder="Select or Type Deal..."
+                          isSearchable={true}
+                          isCreatable={false}
+                          required={true}
+                        />
+                      ) : (
+                        <CreatableSelect
+                          value={(() => {
+                            const c = contacts.find(item => String(item._id) === String(reminderFormData.targetId));
+                            return c ? `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.company || c.email : '';
+                          })()}
+                          onChange={val => {
+                            const matched = contacts.find(item => String(item._id) === String(val) || `${item.firstName || ''} ${item.lastName || ''}`.trim() === val);
+                            setReminderFormData(prev => ({
+                              ...prev,
+                              targetId: matched ? matched._id : val
+                            }));
+                          }}
+                          options={contacts.filter(c => isItemOwnedByUser(c, 'contact')).map(c => ({
+                            id: c._id,
+                            label: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.company || c.email || 'Contact'
+                          }))}
+                          placeholder="Select or Type Contact..."
+                          isSearchable={true}
+                          isCreatable={false}
+                          required={true}
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Channel Selector Pills */}
+                  <div className="pipeline-form-group">
+                    <label className="pipeline-form-label">Touchpoint / Channel</label>
+                    <div className="pipeline-followup-channels-bar" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {[
+                        { key: 'Call', label: 'Phone Call', icon: <Phone size={13} />, className: 'channel-call' },
+                        { key: 'Meeting', label: 'Meeting', icon: <Users size={13} />, className: 'channel-meeting' },
+                        { key: 'WhatsApp', label: 'WhatsApp', icon: <MessageSquare size={13} />, className: 'channel-whatsapp' },
+                        { key: 'Email', label: 'Email', icon: <Mail size={13} />, className: 'channel-email' },
+                        { key: 'Demo', label: 'Product Demo', icon: <Briefcase size={13} />, className: 'channel-demo' },
+                        { key: 'Visit', label: 'Site Visit', icon: <Building2 size={13} />, className: 'channel-visit' }
+                      ].map(ch => (
+                        <button
+                          key={ch.key}
+                          type="button"
+                          className={`pipeline-channel-btn ${ch.className} ${reminderFormData.channel === ch.key ? 'active' : ''}`}
+                          onClick={() => setReminderFormData(prev => ({ ...prev, channel: ch.key }))}
+                        >
+                          {ch.icon}
+                          <span>{ch.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Title & Scheduled Date/Time Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Title / Purpose</label>
+                      <input
+                        type="text"
+                        className="pipeline-form-input"
+                        placeholder={`e.g. ${reminderFormData.channel} regarding proposal`}
+                        value={reminderFormData.title}
+                        onChange={e => setReminderFormData(prev => ({ ...prev, title: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">
+                        Scheduled Date <span className="required-star">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        className="pipeline-form-input"
+                        value={reminderFormData.followUpDate}
+                        onChange={e => setReminderFormData(prev => ({ ...prev, followUpDate: e.target.value }))}
+                        required
+                      />
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Time</label>
+                      <input
+                        type="time"
+                        className="pipeline-form-input"
+                        value={convertTimeTo24H(reminderFormData.followUpTime)}
+                        onChange={e => setReminderFormData(prev => ({ ...prev, followUpTime: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Status</label>
+                      <select
+                        className="pipeline-form-input"
+                        value={reminderFormData.status}
+                        onChange={e => setReminderFormData(prev => ({ ...prev, status: e.target.value }))}
+                      >
+                        <option value="Scheduled">Scheduled / Upcoming</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Follow-up Needed">Follow-up Needed</option>
+                        <option value="Rescheduled">Rescheduled</option>
+                        <option value="Missed">Missed</option>
+                      </select>
+                    </div>
+
+                    <div className="pipeline-form-group">
+                      <label className="pipeline-form-label">Next Follow-up Date (Optional)</label>
+                      <input
+                        type="date"
+                        className="pipeline-form-input"
+                        value={reminderFormData.nextFollowUpDate}
+                        onChange={e => setReminderFormData(prev => ({ ...prev, nextFollowUpDate: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Remarks Field */}
+                  <div className="pipeline-form-group">
+                    <label className="pipeline-form-label">
+                      Remarks & Discussion Details <span className="required-star">*</span>
+                    </label>
+                    <textarea
+                      className="pipeline-activity-composer-textarea"
+                      style={{ minHeight: '100px', fontSize: '13.5px', lineHeight: '1.5' }}
+                      placeholder="Enter discussion notes, agreed next steps, objections raised, or client feedback..."
+                      value={reminderFormData.remarks}
+                      onChange={e => setReminderFormData(prev => ({ ...prev, remarks: e.target.value }))}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="pipeline-modal-footer">
+                  <button
+                    type="button"
+                    className="pipeline-btn-cancel"
+                    disabled={isSubmittingReminder}
+                    onClick={() => { setShowCreateReminderModal(false); setEditingReminder(null); }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="pipeline-btn-save"
+                    disabled={!reminderFormData.remarks.trim() || isSubmittingReminder}
+                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                  >
+                    {isSubmittingReminder ? (
+                      <>
+                        <Loader2 size={14} className="pipeline-spinner-icon" />
+                        <span>{editingReminder ? 'Updating...' : 'Saving...'}</span>
+                      </>
+                    ) : (
+                      <span>{editingReminder ? 'Update Reminder' : 'Save Reminder'}</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
       {/* ====================================================================
           MILESTONE PAYMENT RECORDS MODAL
           ==================================================================== */}
@@ -21606,7 +23230,11 @@ function Pipeline() {
                       })()
                     }}
                   >
-                    <Check size={14} />
+                    {isSavingEditFollowUp ? (
+                      <Loader2 size={14} className="pipeline-spinner-icon" />
+                    ) : (
+                      <Check size={14} />
+                    )}
                     <span>{isSavingEditFollowUp ? 'Saving Changes...' : 'Save Changes'}</span>
                   </button>
                 </div>
@@ -21616,6 +23244,264 @@ function Pipeline() {
           document.body
         )
       }
+
+      {/* Lead Requirement Details & Edit Modal */}
+      {showDealRequirementModal && detailedDeal && createPortal(
+        <div
+          className="pipeline-modal-backdrop"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 99999,
+            padding: '20px'
+          }}
+          onClick={() => {
+            if (!isSavingRequirement) setShowDealRequirementModal(false);
+          }}
+        >
+          <div
+            className="pipeline-requirement-modal-card"
+            style={{
+              width: '100%',
+              maxWidth: '620px',
+              background: '#ffffff',
+              borderRadius: '16px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              overflow: 'hidden',
+              border: '1px solid #e2e8f0',
+              animation: 'fadeInScale 0.2s ease-out'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #f1f5f9',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: '#f8fafc'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '8px',
+                  background: isEditingRequirement ? '#fef3c7' : '#e0f2fe',
+                  color: isEditingRequirement ? '#b45309' : '#0284c7',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  {isEditingRequirement ? <Edit2 size={17} /> : <FileText size={17} />}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                    {isEditingRequirement ? 'Edit Requirement' : 'Requirement Details'}
+                  </h3>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                    {detailedDeal.dealName || detailedDeal.clientName || 'Deal Details'}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isSavingRequirement) setShowDealRequirementModal(false);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    padding: '6px',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = '#0f172a'; e.currentTarget.style.background = '#e2e8f0'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'none'; }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px', maxHeight: '62vh', overflowY: 'auto' }}>
+              {isEditingRequirement ? (
+                <form id="deal-requirement-edit-form" onSubmit={handleSaveDealRequirement}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>
+                    Requirement / Product Scope
+                  </label>
+                  <textarea
+                    rows={10}
+                    value={editingRequirementText}
+                    onChange={e => setEditingRequirementText(e.target.value)}
+                    placeholder="Enter or update the lead requirement details..."
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      padding: '12px 14px',
+                      fontSize: '13px',
+                      lineHeight: '1.6',
+                      borderRadius: '10px',
+                      border: '1.5px solid #0284c7',
+                      outline: 'none',
+                      fontFamily: 'inherit',
+                      resize: 'vertical',
+                      background: '#ffffff',
+                      color: '#0f172a'
+                    }}
+                    autoFocus
+                  />
+                </form>
+              ) : (
+                <div style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '10px',
+                  padding: '16px',
+                  fontSize: '13px',
+                  lineHeight: '1.6',
+                  color: '#334155',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontFamily: 'inherit'
+                }}>
+                  {detailedDeal.requirements || detailedDeal.requirement || detailedDeal.description || detailedDeal.relatedLead?.requirements || detailedDeal.relatedLead?.requirement || 'No requirement details recorded.'}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '12px 20px',
+              borderTop: '1px solid #f1f5f9',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: '#fafafa'
+            }}>
+              <div>
+                {isEditingRequirement && (
+                  <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                    Changes will be saved to this deal and synced to the pipeline.
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {isEditingRequirement ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isSavingRequirement}
+                      onClick={() => setIsEditingRequirement(false)}
+                      style={{
+                        padding: '7px 16px',
+                        borderRadius: '8px',
+                        background: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        color: '#475569',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: isSavingRequirement ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      form="deal-requirement-edit-form"
+                      disabled={isSavingRequirement}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '7px 18px',
+                        borderRadius: '8px',
+                        background: '#0284c7',
+                        color: '#ffffff',
+                        border: 'none',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: isSavingRequirement ? 'not-allowed' : 'pointer',
+                        transition: 'background 0.15s ease'
+                      }}
+                      onMouseEnter={e => { if (!isSavingRequirement) e.currentTarget.style.background = '#0369a1'; }}
+                      onMouseLeave={e => { if (!isSavingRequirement) e.currentTarget.style.background = '#0284c7'; }}
+                    >
+                      <Check size={14} />
+                      <span>{isSavingRequirement ? 'Saving...' : 'Save Changes'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingRequirement(true);
+                        const currentText = detailedDeal.requirements || detailedDeal.requirement || detailedDeal.description || detailedDeal.relatedLead?.requirements || detailedDeal.relatedLead?.requirement || '';
+                        setEditingRequirementText(currentText);
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '7px 16px',
+                        borderRadius: '8px',
+                        background: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        color: '#334155',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.borderColor = '#94a3b8'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
+                    >
+                      <Edit2 size={13} style={{ color: '#64748b' }} />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDealRequirementModal(false)}
+                      style={{
+                        padding: '7px 20px',
+                        borderRadius: '8px',
+                        background: '#0284c7',
+                        color: '#ffffff',
+                        border: 'none',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'background 0.15s ease'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#0369a1'}
+                      onMouseLeave={e => e.currentTarget.style.background = '#0284c7'}
+                    >
+                      Close
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div >
   );
 }

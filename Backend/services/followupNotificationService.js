@@ -288,9 +288,13 @@ async function checkAndSendFollowUpReminders(io) {
 
             const creatorId = await resolveCreatorUserId(act, deal);
 
-            // Target recipients: Creator + All Admins
+            // Target recipients: Creator + All Admins + Assigned Deal Owner
             const recipients = new Set([...adminUserIds]);
             if (creatorId) recipients.add(creatorId);
+            if (deal.assignedTo) {
+              const assignedId = (deal.assignedTo._id || deal.assignedTo).toString();
+              if (assignedId) recipients.add(assignedId);
+            }
 
             for (const recipientId of recipients) {
               const isCreator = creatorId && recipientId === creatorId;
@@ -361,8 +365,13 @@ async function checkAndSendFollowUpReminders(io) {
 
             const creatorId = await resolveCreatorUserId(act, contact);
 
+            // Target recipients: Creator + All Admins + Assigned Contact Owner
             const recipients = new Set([...adminUserIds]);
             if (creatorId) recipients.add(creatorId);
+            if (contact.assignedTo) {
+              const assignedId = (contact.assignedTo._id || contact.assignedTo).toString();
+              if (assignedId) recipients.add(assignedId);
+            }
 
             for (const recipientId of recipients) {
               const isCreator = creatorId && recipientId === creatorId;

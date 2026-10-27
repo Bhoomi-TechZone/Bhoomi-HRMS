@@ -119,9 +119,9 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     let newSocket;
     const token = localStorage.getItem('token');
-    
+
     if (user && token) {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:9410/api';
+      const apiUrl = process.env.REACT_APP_API_URL;
       const defaultSocketUrl = apiUrl.replace('/api', '');
       newSocket = io(process.env.REACT_APP_SOCKET_URL || defaultSocketUrl, {
         auth: { token },
@@ -164,7 +164,7 @@ export const AuthProvider = ({ children }) => {
     return () => {
       if (newSocket) newSocket.close();
     };
-  }, [user]);
+  }, [user?._id]);
 
   // Fetch initial notifications globally and poll periodically
   useEffect(() => {
@@ -188,7 +188,7 @@ export const AuthProvider = ({ children }) => {
             }
             return fetchedNotifications;
           });
-          
+
           if (!initialLoadRef.current) {
             initialLoadRef.current = true;
             const unread = fetchedNotifications.filter(n => !n.isRead);
@@ -202,7 +202,7 @@ export const AuthProvider = ({ children }) => {
                   link: '/notifications'
                 });
               }
-              
+
               const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.toUpperCase().indexOf('MAC') >= 0;
               const soundUrl = isMac ? '/sounds/that-was-quick-606.m4r' : '/sounds/that-was-quick-606.mp3';
               const audio = new Audio(soundUrl);
@@ -232,18 +232,18 @@ export const AuthProvider = ({ children }) => {
       const response = await api.post('/auth/login', { email, password });
       console.log('AuthContext: Login response received', response.data);
       const { token, user } = response.data;
-      
+
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
       setUser(user);
-      
+
       console.log('AuthContext: User state updated', user);
       return { success: true };
     } catch (error) {
       console.error('AuthContext: Login error', error);
-      return { 
-        success: false, 
-        message: error.response?.data?.message || 'Login failed' 
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Login failed'
       };
     }
   };
@@ -262,7 +262,7 @@ export const AuthProvider = ({ children }) => {
 
   const hasPermission = useCallback((module, action) => {
     if (!user || !user.role) return false;
-    
+
     const roleObj = user.role;
     const roleName = (typeof roleObj === 'object' && roleObj !== null ? roleObj.name : roleObj || '').toLowerCase().trim();
     const designation = (user.designation || '').toLowerCase().trim();
