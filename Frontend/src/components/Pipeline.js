@@ -2580,7 +2580,20 @@ function Pipeline() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          let filtered = parsed.filter(p => !deleted.includes((p.name || p.id || '').toLowerCase()));
+          let filtered = parsed
+            .filter(p => !deleted.includes((p.name || p.id || '').toLowerCase()))
+            .map((p, idx) => ({
+              ...p,
+              id: p.id || p.name || `pipeline-${idx}`,
+              name: p.name || p.id || `Stage ${idx + 1}`
+            }));
+          const seen = new Set();
+          filtered = filtered.filter(p => {
+            const key = (p.name || p.id || '').toLowerCase().trim();
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
           if (!filtered.some(p => (p.name || p.id || '').toLowerCase() === 'new lead') && !deleted.includes('new lead')) {
             filtered = [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new' }, ...filtered];
           }
@@ -2671,6 +2684,7 @@ function Pipeline() {
   const [newPipelineName, setNewPipelineName] = useState('');
   const [editingPipelineId, setEditingPipelineId] = useState(null);
   const [editingPipelineName, setEditingPipelineName] = useState('');
+  const [editingStageModal, setEditingStageModal] = useState(null); // { type: 'pipeline' | 'contactStage', id, name, originalName, index }
   const [{ tab: activeTab, view: viewMode, detailTab: detailActiveTab, stage: selectedStageFilter, dealId: queryDealId, contactId: queryContactId }, setQueryState] = useContextualQueryState({
     tab: 'deals',
     view: 'kanban',
@@ -2964,7 +2978,13 @@ function Pipeline() {
         .map(d => d.toLowerCase().trim());
     } catch (e) { }
 
-    let stages = contactStages.filter(s => !deleted.includes((s.name || s.id || '').toLowerCase().trim()));
+    let stages = (contactStages || [])
+      .filter(s => !deleted.includes((s.name || s.id || '').toLowerCase().trim()))
+      .map((s, idx) => ({
+        ...s,
+        id: s.id || s.name || `contact-stage-${idx}`,
+        name: s.name || s.id || `Stage ${idx + 1}`
+      }));
     const existingNames = new Set(stages.map(s => (s.name || s.id || '').toLowerCase().trim()));
 
     // Dynamically include any stage present on existing contacts ONLY if NOT deleted
@@ -3360,7 +3380,20 @@ function Pipeline() {
             try { localStorage.setItem('crm_lead_stages', JSON.stringify(cleanedLeadStages)); } catch (e) { }
           }
           if (Array.isArray(cfg.pipelines) && cfg.pipelines.length > 0) {
-            const cleanedPipelines = cfg.pipelines.filter(p => !deletedPipelines.includes((p.name || p.id || '').toLowerCase()));
+            const seen = new Set();
+            const cleanedPipelines = cfg.pipelines
+              .filter(p => !deletedPipelines.includes((p.name || p.id || '').toLowerCase()))
+              .map((p, idx) => ({
+                ...p,
+                id: p.id || p.name || `pipeline-${idx}`,
+                name: p.name || p.id || `Stage ${idx + 1}`
+              }))
+              .filter(p => {
+                const key = (p.name || p.id || '').toLowerCase().trim();
+                if (!key || seen.has(key)) return false;
+                seen.add(key);
+                return true;
+              });
             setPipelines(cleanedPipelines);
             try { localStorage.setItem('crm_pipelines', JSON.stringify(cleanedPipelines)); } catch (e) { }
           }
@@ -6483,37 +6516,48 @@ function Pipeline() {
     }
   };
 
-  const handleStartEditPipeline = (pipeline, e) => {
+  const handleStartEditPipeline = (pipeline, index, e) => {
     if (e) e.stopPropagation();
     if (!hasFullAccess) {
       alert('Only Admin, Sales Head, and Sales Manager can edit stage names.');
       return;
     }
-    setEditingPipelineId(pipeline.id);
-    setEditingPipelineName(pipeline.name);
+    const key = `pipeline-col-${index}`;
+    setEditingPipelineId(key);
+    setEditingPipelineName(pipeline.name || '');
     setActiveColMenuId(null);
   };
 
-  const handleSaveEditPipeline = async (pipelineId) => {
+  const handleSaveEditPipeline = async (pipelineId, targetIndex, overrideName, overrideOldName) => {
     if (!hasFullAccess) {
       alert('Only Admin, Sales Head, and Sales Manager can edit stage names.');
       setEditingPipelineId(null);
       return;
     }
-    const trimmed = editingPipelineName.trim();
+    const trimmed = (typeof overrideName === 'string' ? overrideName : editingPipelineName).trim();
     if (!trimmed) {
       setEditingPipelineId(null);
       return;
     }
-    const oldPipeline = pipelines.find(p => p.id === pipelineId);
-    const oldName = oldPipeline ? oldPipeline.name : pipelineId;
+    const target = (typeof targetIndex === 'number' && targetIndex >= 0 && pipelines[targetIndex])
+      ? pipelines[targetIndex]
+      : pipelines.find((p, idx) => (p._id && p._id === pipelineId) || (`pipeline-col-${idx}` === pipelineId));
 
-    const nextPipelines = pipelines.map(p => (p.id === pipelineId ? { ...p, name: trimmed, id: trimmed } : p));
+    const oldName = overrideOldName || (target ? target.name : pipelineId);
+    const oldId = target ? (target.id || target._id) : pipelineId;
+
+    const nextPipelines = pipelines.map((p, idx) => {
+      const isMatch = (typeof targetIndex === 'number' && targetIndex >= 0)
+        ? idx === targetIndex
+        : ((p._id && p._id === pipelineId) || (`pipeline-col-${idx}` === pipelineId));
+      return isMatch ? { ...p, name: trimmed, id: trimmed } : p;
+    });
     const nextOptions = pipelineOptions.map(p => (p === oldName ? trimmed : p));
+    if (!nextOptions.includes(trimmed)) nextOptions.push(trimmed);
 
     setPipelines(nextPipelines);
     setPipelineOptions(nextOptions);
-    setDeals(prev => prev.map(d => (d.pipeline === oldName || d.pipeline === pipelineId ? { ...d, pipeline: trimmed } : d)));
+    setDeals(prev => prev.map(d => (d.pipeline === oldName || d.pipeline === oldId ? { ...d, pipeline: trimmed } : d)));
     setEditingPipelineId(null);
     setEditingPipelineName('');
 
@@ -6521,7 +6565,7 @@ function Pipeline() {
       localStorage.setItem('crm_pipelines', JSON.stringify(nextPipelines));
       localStorage.setItem('crm_pipeline_options', JSON.stringify(nextOptions));
 
-      const affected = deals.filter(d => d.pipeline === oldName || d.pipeline === pipelineId);
+      const affected = deals.filter(d => d.pipeline === oldName || d.pipeline === oldId);
       for (const d of affected) {
         if (d._id && !d._id.toString().startsWith('deal-')) {
           await api.put(`/deals/${d._id}`, { pipeline: trimmed });
@@ -6537,17 +6581,24 @@ function Pipeline() {
     }
   };
 
-  const handleDeletePipeline = async (pipelineId, e) => {
+  const handleDeletePipeline = async (pipelineId, e, targetIndex, fallbackName) => {
     if (e) e.stopPropagation();
     if (!hasFullAccess) {
       alert('You do not have permission to delete stages. Only Admin, Sales Head, and Sales Manager can delete stages.');
       return;
     }
-    const pipeline = pipelines.find(p => p.id === pipelineId);
-    const pipelineName = pipeline ? pipeline.name : pipelineId;
+    const target = (typeof targetIndex === 'number' && targetIndex >= 0 && pipelines[targetIndex])
+      ? pipelines[targetIndex]
+      : pipelines.find((p, idx) => (p._id && p._id === pipelineId) || (p.id && p.id === pipelineId) || (`pipeline-col-${idx}` === pipelineId));
+    const pipelineName = fallbackName || (target ? target.name : pipelineId);
 
     if (window.confirm(`Are you sure you want to delete the "${pipelineName}" stage?`)) {
-      const remaining = pipelines.filter(p => p.id !== pipelineId && p.name !== pipelineName);
+      const remaining = pipelines.filter((p, idx) => {
+        if (typeof targetIndex === 'number' && targetIndex >= 0) {
+          return idx !== targetIndex;
+        }
+        return p.id !== pipelineId && p.name !== pipelineName && `pipeline-col-${idx}` !== pipelineId;
+      });
       const remainingOptions = pipelineOptions.filter(p => p !== pipelineName && p !== pipelineId);
       setPipelines(remaining);
       setPipelineOptions(remainingOptions);
@@ -6557,7 +6608,7 @@ function Pipeline() {
         deletedPipelines = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || '[]');
       } catch (err) { }
       deletedPipelines.push(pipelineName.toLowerCase());
-      deletedPipelines.push(pipelineId.toLowerCase());
+      deletedPipelines.push(String(pipelineId).toLowerCase());
       const uniqueDeleted = Array.from(new Set(deletedPipelines));
 
       try {
@@ -6585,7 +6636,7 @@ function Pipeline() {
           deletedPipelines: uniqueDeleted
         });
       } catch (err) {
-        console.warn('Sync deleted pipeline to backend:', err.message);
+        console.warn('Save deleted pipeline to backend:', err.message);
       }
     }
   };
@@ -6635,37 +6686,55 @@ function Pipeline() {
     }
   };
 
-  const handleStartEditContactStage = (stage, e) => {
+  const handleStartEditContactStage = (stage, index, e) => {
     if (e) e.stopPropagation();
     if (!hasFullAccess) {
       alert('Only Admin, Sales Head, and Sales Manager can edit stage names.');
       return;
     }
-    setEditingContactStageId(stage.id);
-    setEditingContactStageName(stage.name);
+    const key = `contact-stage-col-${index}`;
+    setEditingContactStageId(key);
+    setEditingContactStageName(stage.name || '');
     setActiveColMenuId(null);
   };
 
-  const handleSaveEditContactStage = async (stageId) => {
+  const handleSaveEditContactStage = async (stageId, targetIndex, overrideName, overrideOldName) => {
     if (!hasFullAccess) {
       alert('Only Admin, Sales Head, and Sales Manager can edit stage names.');
       setEditingContactStageId(null);
       return;
     }
-    const trimmed = editingContactStageName.trim();
+    const trimmed = (typeof overrideName === 'string' ? overrideName : editingContactStageName).trim();
     if (!trimmed) {
       setEditingContactStageId(null);
       return;
     }
-    const oldStage = contactStages.find(s => s.id === stageId);
-    const oldName = oldStage ? oldStage.name : stageId;
+    const target = (typeof targetIndex === 'number' && targetIndex >= 0 && effectiveContactStages[targetIndex])
+      ? effectiveContactStages[targetIndex]
+      : effectiveContactStages.find((s, idx) => (s._id && s._id === stageId) || (`contact-stage-col-${idx}` === stageId));
 
-    const nextStages = contactStages.map(s => (s.id === stageId ? { ...s, name: trimmed, id: trimmed } : s));
+    const oldName = overrideOldName || (target ? target.name : stageId);
+    const oldId = target ? (target.id || target._id) : stageId;
+
+    let foundInExisting = false;
+    const nextStages = contactStages.map((s, idx) => {
+      const isMatch = (typeof targetIndex === 'number' && targetIndex >= 0)
+        ? idx === targetIndex
+        : ((s._id && s._id === stageId) || (`contact-stage-col-${idx}` === stageId));
+      if (isMatch) foundInExisting = true;
+      return isMatch ? { ...s, name: trimmed, id: trimmed } : s;
+    });
+
+    if (!foundInExisting && !nextStages.some(s => (s.name || s.id || '').toLowerCase() === trimmed.toLowerCase())) {
+      nextStages.push({ id: trimmed, name: trimmed, badgeClass: 'new', isCustom: true });
+    }
+
     const nextLeadStages = leadStages.map(s => (s === oldName ? trimmed : s));
+    if (!nextLeadStages.includes(trimmed)) nextLeadStages.push(trimmed);
 
     setContactStages(nextStages);
     setLeadStages(nextLeadStages);
-    setContacts(prev => prev.map(c => ((c.leadStage || '').toLowerCase() === oldName.toLowerCase() ? { ...c, leadStage: trimmed } : c)));
+    setContacts(prev => prev.map(c => ((c.leadStage || '').toLowerCase() === oldName.toLowerCase() || (c.leadStage || '').toLowerCase() === String(oldId).toLowerCase() ? { ...c, leadStage: trimmed } : c)));
     setEditingContactStageId(null);
     setEditingContactStageName('');
 
@@ -6673,7 +6742,7 @@ function Pipeline() {
       localStorage.setItem('crm_contact_stages', JSON.stringify(nextStages));
       localStorage.setItem('crm_lead_stages', JSON.stringify(nextLeadStages));
 
-      const affected = contacts.filter(c => (c.leadStage || '').toLowerCase() === oldName.toLowerCase());
+      const affected = contacts.filter(c => (c.leadStage || '').toLowerCase() === oldName.toLowerCase() || (c.leadStage || '').toLowerCase() === String(oldId).toLowerCase());
       for (const c of affected) {
         if (c._id && !c._id.toString().startsWith('contact-')) {
           await api.put(`/pipeline-contacts/${c._id}`, { leadStage: trimmed });
@@ -6689,21 +6758,27 @@ function Pipeline() {
     }
   };
 
-  const handleDeleteContactStage = async (stageId, e) => {
+  const handleDeleteContactStage = async (stageId, e, targetIndex, fallbackName) => {
     if (e) e.stopPropagation();
     if (!hasFullAccess) {
       alert('You do not have permission to delete stages. Only Admin, Sales Head, and Sales Manager can delete stages.');
       return;
     }
     const cleanId = String(stageId || '').trim();
-    const stageToDelete = contactStages.find(s => (s.id || '').toLowerCase() === cleanId.toLowerCase() || (s.name || '').toLowerCase() === cleanId.toLowerCase());
-    const stageName = stageToDelete ? stageToDelete.name : cleanId;
+    const stageToDelete = (typeof targetIndex === 'number' && targetIndex >= 0 && effectiveContactStages[targetIndex])
+      ? effectiveContactStages[targetIndex]
+      : contactStages.find((s, idx) => (s.id || '').toLowerCase() === cleanId.toLowerCase() || (s.name || '').toLowerCase() === cleanId.toLowerCase() || `contact-stage-col-${idx}` === cleanId);
+    const stageName = fallbackName || (stageToDelete ? stageToDelete.name : cleanId);
 
     if (window.confirm(`Are you sure you want to delete stage "${stageName}"?`)) {
-      const remaining = contactStages.filter(s =>
-        (s.id || '').toLowerCase() !== cleanId.toLowerCase() &&
-        (s.name || '').toLowerCase() !== stageName.toLowerCase()
-      );
+      const remaining = contactStages.filter((s, idx) => {
+        if (typeof targetIndex === 'number' && targetIndex >= 0) {
+          return idx !== targetIndex;
+        }
+        return (s.id || '').toLowerCase() !== cleanId.toLowerCase() &&
+               (s.name || '').toLowerCase() !== stageName.toLowerCase() &&
+               `contact-stage-col-${idx}` !== cleanId;
+      });
       const remainingLeadStages = leadStages.filter(s =>
         String(s).toLowerCase() !== cleanId.toLowerCase() &&
         String(s).toLowerCase() !== stageName.toLowerCase()
@@ -6757,8 +6832,26 @@ function Pipeline() {
           deletedStages: uniqueDeleted
         });
       } catch (err) {
-        console.warn('Sync deleted stage to backend:', err.message);
+        console.warn('Backend delete contact stage sync:', err.message);
       }
+    }
+  };
+
+  const handleSaveEditStageModal = async (e) => {
+    if (e) e.preventDefault();
+    if (!editingStageModal) return;
+    const trimmed = (editingStageModal.name || '').trim();
+    if (!trimmed) {
+      alert('Stage name cannot be empty.');
+      return;
+    }
+    const { type, id, index, originalName } = editingStageModal;
+    setEditingStageModal(null);
+
+    if (type === 'pipeline') {
+      await handleSaveEditPipeline(id, index, trimmed, originalName);
+    } else {
+      await handleSaveEditContactStage(id, index, trimmed, originalName);
     }
   };
 
@@ -12328,145 +12421,157 @@ function Pipeline() {
                       });
                       const count = pipelineDeals.length;
                       const totalStageAmountINR = pipelineDeals.reduce((sum, d) => sum + getDealValueInINR(d), 0);
+                      const colKey = `pipeline-col-${pIndex}`;
+                      const isColEditing = editingPipelineId === colKey;
 
                       return (
                         <div
-                          key={pipeline.id}
-                          className={`pipeline-column ${dragOverColumnId === pipeline.id ? 'drag-over' : ''}`}
-                          onDragOver={e => handleDragOver(e, pipeline.id)}
-                          onDragLeave={e => handleDragLeave(e, pipeline.id)}
-                          onDrop={e => handleDrop(e, pipeline.name)}
-                        >
-                          {/* Column Header */}
-                          <div className="pipeline-column-header">
-                            {editingPipelineId === pipeline.id ? (
-                              <div className="pipeline-inline-edit-wrap">
-                                <input
-                                  type="text"
-                                  className="pipeline-inline-edit-input"
-                                  value={editingPipelineName}
-                                  autoFocus
-                                  onChange={e => setEditingPipelineName(e.target.value)}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') handleSaveEditPipeline(pipeline.id);
-                                    if (e.key === 'Escape') setEditingPipelineId(null);
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  className="pipeline-inline-save-btn"
-                                  onClick={() => handleSaveEditPipeline(pipeline.id)}
-                                  title="Save stage name"
-                                >
-                                  <CheckCircle size={13} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="pipeline-inline-cancel-btn"
-                                  onClick={() => setEditingPipelineId(null)}
-                                  title="Cancel"
-                                >
-                                  <X size={13} />
-                                </button>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="pipeline-stage-info">
-                                  <h3 className="pipeline-stage-name" title={pipeline.name}>
-                                    {pipeline.name}
-                                  </h3>
-                                  <span className={`pipeline-stage-badge ${pipeline.badgeClass || 'new'}`}>
-                                    {count}
-                                  </span>
-                                  {(() => {
-                                    const stageSelectedCount = pipelineDeals.filter(d => selectedKanbanDealIds.includes(d._id)).length;
-                                    return stageSelectedCount > 0 ? (
-                                      <span className="pipeline-stage-selected-pill" title={`${stageSelectedCount} of ${count} deals selected`}>
-                                        <Check size={10} strokeWidth={3} />
-                                        <span>{stageSelectedCount}</span>
-                                      </span>
-                                    ) : null;
-                                  })()}
-                                </div>
-
-                                <div className="pipeline-col-header-actions" style={{ position: 'relative' }}>
-                                  {(() => {
-                                    const stageSelectedCount = pipelineDeals.filter(d => selectedKanbanDealIds.includes(d._id)).length;
-                                    const isAllStageSelected = count > 0 && stageSelectedCount === count;
-                                    if (count > 0 && (selectedKanbanDealIds.length > 0 || stageSelectedCount > 0)) {
-                                      return (
-                                        <button
-                                          type="button"
-                                          className={`pipeline-stage-select-all-btn ${isAllStageSelected ? 'all-selected' : ''}`}
-                                          onClick={(e) => handleToggleStageSelection(pipelineDeals, e)}
-                                          title={isAllStageSelected ? "Deselect all deals in this stage" : "Select all deals in this stage"}
-                                        >
-                                          {isAllStageSelected ? 'Deselect' : 'Select all'}
-                                        </button>
-                                      );
-                                    }
-                                    return null;
-                                  })()}
+                          key={colKey}
+                            className={`pipeline-column ${dragOverColumnId === colKey ? 'drag-over' : ''}`}
+                            onDragOver={e => handleDragOver(e, colKey)}
+                            onDragLeave={e => handleDragLeave(e, colKey)}
+                            onDrop={e => handleDrop(e, pipeline.name)}
+                          >
+                            {/* Column Header */}
+                            <div className="pipeline-column-header">
+                              {isColEditing ? (
+                                <div className="pipeline-inline-edit-wrap">
+                                  <input
+                                    type="text"
+                                    className="pipeline-inline-edit-input"
+                                    value={editingPipelineName}
+                                    autoFocus
+                                    onChange={e => setEditingPipelineName(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleSaveEditPipeline(colKey, pIndex);
+                                      if (e.key === 'Escape') setEditingPipelineId(null);
+                                    }}
+                                  />
                                   <button
                                     type="button"
-                                    className="pipeline-col-action-btn more"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setActiveColMenuId(activeColMenuId === pipeline.id ? null : pipeline.id);
-                                    }}
-                                    title="Stage options"
+                                    className="pipeline-inline-save-btn"
+                                    onClick={() => handleSaveEditPipeline(colKey, pIndex)}
+                                    title="Save stage name"
                                   >
-                                    <MoreHorizontal size={14} />
+                                    <CheckCircle size={13} />
                                   </button>
+                                  <button
+                                    type="button"
+                                    className="pipeline-inline-cancel-btn"
+                                    onClick={() => setEditingPipelineId(null)}
+                                    title="Cancel"
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="pipeline-stage-info">
+                                    <h3 className="pipeline-stage-name" title={pipeline.name}>
+                                      {pipeline.name}
+                                    </h3>
+                                    <span className={`pipeline-stage-badge ${pipeline.badgeClass || 'new'}`}>
+                                      {count}
+                                    </span>
+                                    {(() => {
+                                      const stageSelectedCount = pipelineDeals.filter(d => selectedKanbanDealIds.includes(d._id)).length;
+                                      return stageSelectedCount > 0 ? (
+                                        <span className="pipeline-stage-selected-pill" title={`${stageSelectedCount} of ${count} deals selected`}>
+                                          <Check size={10} strokeWidth={3} />
+                                          <span>{stageSelectedCount}</span>
+                                        </span>
+                                      ) : null;
+                                    })()}
+                                  </div>
 
-                                  {activeColMenuId === pipeline.id && (
-                                    <div
-                                      className="pipeline-card-dropdown-menu"
-                                      style={{ top: 'calc(100% + 4px)', right: 0, minWidth: '160px', zIndex: 90 }}
-                                      onClick={e => e.stopPropagation()}
-                                    >
-                                      {canCreate && (
-                                        <button
-                                          type="button"
-                                          className="pipeline-card-menu-item"
-                                          onClick={() => {
-                                            setActiveColMenuId(null);
-                                            handleOpenAddDeal(pipeline.name);
-                                          }}
-                                        >
-                                          <div className="pipeline-card-menu-item-left">
-                                            <Plus size={13} style={{ color: '#0284c7' }} />
-                                            <span>Add Deal</span>
-                                          </div>
-                                        </button>
-                                      )}
-                                      {hasFullAccess && (
-                                        <button
-                                          type="button"
-                                          className="pipeline-card-menu-item"
-                                          onClick={(e) => handleStartEditPipeline(pipeline, e)}
-                                        >
-                                          <div className="pipeline-card-menu-item-left">
-                                            <Edit2 size={13} style={{ color: '#64748b' }} />
-                                            <span>Edit Stage</span>
-                                          </div>
-                                        </button>
-                                      )}
-                                      {hasFullAccess && (
-                                        <>
-                                          <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                  <div className="pipeline-col-header-actions" style={{ position: 'relative' }}>
+                                    {(() => {
+                                      const stageSelectedCount = pipelineDeals.filter(d => selectedKanbanDealIds.includes(d._id)).length;
+                                      const isAllStageSelected = count > 0 && stageSelectedCount === count;
+                                      if (count > 0 && (selectedKanbanDealIds.length > 0 || stageSelectedCount > 0)) {
+                                        return (
                                           <button
                                             type="button"
-                                            className="pipeline-card-menu-item danger"
-                                            onClick={(e) => handleDeletePipeline(pipeline.id, e)}
+                                            className={`pipeline-stage-select-all-btn ${isAllStageSelected ? 'all-selected' : ''}`}
+                                            onClick={(e) => handleToggleStageSelection(pipelineDeals, e)}
+                                            title={isAllStageSelected ? "Deselect all deals in this stage" : "Select all deals in this stage"}
+                                          >
+                                            {isAllStageSelected ? 'Deselect' : 'Select all'}
+                                          </button>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
+                                    <button
+                                      type="button"
+                                      className="pipeline-col-action-btn more"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveColMenuId(activeColMenuId === colKey ? null : colKey);
+                                      }}
+                                      title="Stage options"
+                                    >
+                                      <MoreHorizontal size={14} />
+                                    </button>
+
+                                    {activeColMenuId === colKey && (
+                                      <div
+                                        className="pipeline-card-dropdown-menu"
+                                        style={{ top: 'calc(100% + 4px)', right: 0, minWidth: '160px', zIndex: 90 }}
+                                        onClick={e => e.stopPropagation()}
+                                      >
+                                        {canCreate && (
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-menu-item"
+                                            onClick={() => {
+                                              setActiveColMenuId(null);
+                                              handleOpenAddDeal(pipeline.name);
+                                            }}
                                           >
                                             <div className="pipeline-card-menu-item-left">
-                                              <Trash2 size={13} />
-                                              <span>Delete Stage</span>
+                                              <Plus size={13} style={{ color: '#0284c7' }} />
+                                              <span>Add Deal</span>
                                             </div>
                                           </button>
-                                        </>
-                                      )}
+                                        )}
+                                        {hasFullAccess && (
+                                          <button
+                                            type="button"
+                                            className="pipeline-card-menu-item"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setActiveColMenuId(null);
+                                              setEditingStageModal({
+                                                type: 'pipeline',
+                                                id: colKey,
+                                                name: pipeline.name,
+                                                originalName: pipeline.name,
+                                                index: pIndex
+                                              });
+                                            }}
+                                          >
+                                            <div className="pipeline-card-menu-item-left">
+                                              <Edit2 size={13} style={{ color: '#64748b' }} />
+                                              <span>Edit Stage</span>
+                                            </div>
+                                          </button>
+                                        )}
+                                        {hasFullAccess && (
+                                          <>
+                                            <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #f1f5f9' }} />
+                                            <button
+                                              type="button"
+                                              className="pipeline-card-menu-item danger"
+                                              onClick={(e) => handleDeletePipeline(colKey, e, pIndex, pipeline.name)}
+                                            >
+                                              <div className="pipeline-card-menu-item-left">
+                                                <Trash2 size={13} />
+                                                <span>Delete Stage</span>
+                                              </div>
+                                            </button>
+                                          </>
+                                        )}
 
                                       {pipelineDeals.length > 0 && (
                                         <>
@@ -12545,7 +12650,7 @@ function Pipeline() {
                           {/* Deal Cards Scroll Container */}
                           <div
                             className="pipeline-cards-list"
-                            onDragOver={e => handleDragOver(e, pipeline.id)}
+                            onDragOver={e => handleDragOver(e, colKey)}
                             onDrop={e => handleDrop(e, pipeline.name)}
                           >
                             {pipelineDeals.map(deal => {
@@ -15673,17 +15778,20 @@ function Pipeline() {
                           return false;
                         });
 
+                        const stageColKey = `contact-stage-col-${sIndex}`;
+                        const isStageEditing = editingContactStageId === stageColKey;
+
                         return (
                           <div
-                            key={stage.id}
-                            className={`pipeline-column ${dragOverContactColumnId === stage.id ? 'drag-over' : ''}`}
-                            onDragOver={e => handleContactDragOver(e, stage.id)}
-                            onDragLeave={e => handleContactDragLeave(e, stage.id)}
+                            key={stageColKey}
+                            className={`pipeline-column ${dragOverContactColumnId === stageColKey ? 'drag-over' : ''}`}
+                            onDragOver={e => handleContactDragOver(e, stageColKey)}
+                            onDragLeave={e => handleContactDragLeave(e, stageColKey)}
                             onDrop={e => handleContactDrop(e, stage.name)}
                           >
                             {/* Column Header */}
                             <div className="pipeline-column-header">
-                              {editingContactStageId === stage.id ? (
+                              {isStageEditing ? (
                                 <div className="pipeline-inline-edit-wrap">
                                   <input
                                     type="text"
@@ -15692,14 +15800,14 @@ function Pipeline() {
                                     autoFocus
                                     onChange={e => setEditingContactStageName(e.target.value)}
                                     onKeyDown={e => {
-                                      if (e.key === 'Enter') handleSaveEditContactStage(stage.id);
+                                      if (e.key === 'Enter') handleSaveEditContactStage(stageColKey, sIndex);
                                       if (e.key === 'Escape') setEditingContactStageId(null);
                                     }}
                                   />
                                   <button
                                     type="button"
                                     className="pipeline-inline-save-btn"
-                                    onClick={() => handleSaveEditContactStage(stage.id)}
+                                    onClick={() => handleSaveEditContactStage(stageColKey, sIndex)}
                                     title="Save stage name"
                                   >
                                     <CheckCircle size={13} />
@@ -15756,14 +15864,14 @@ function Pipeline() {
                                       className="pipeline-col-action-btn more"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setActiveColMenuId(activeColMenuId === stage.id ? null : stage.id);
+                                        setActiveColMenuId(activeColMenuId === stageColKey ? null : stageColKey);
                                       }}
                                       title="Stage options"
                                     >
                                       <MoreHorizontal size={14} />
                                     </button>
 
-                                    {activeColMenuId === stage.id && (
+                                    {activeColMenuId === stageColKey && (
                                       <div
                                         className="pipeline-card-dropdown-menu"
                                         style={{ top: 'calc(100% + 4px)', right: 0, minWidth: '160px', zIndex: 90 }}
@@ -15789,7 +15897,17 @@ function Pipeline() {
                                           <button
                                             type="button"
                                             className="pipeline-card-menu-item"
-                                            onClick={(e) => handleStartEditContactStage(stage, e)}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setActiveColMenuId(null);
+                                              setEditingStageModal({
+                                                type: 'contactStage',
+                                                id: stageColKey,
+                                                name: stage.name,
+                                                originalName: stage.name,
+                                                index: sIndex
+                                              });
+                                            }}
                                           >
                                             <div className="pipeline-card-menu-item-left">
                                               <Edit2 size={13} style={{ color: '#64748b' }} />
@@ -15803,7 +15921,7 @@ function Pipeline() {
                                             <button
                                               type="button"
                                               className="pipeline-card-menu-item danger"
-                                              onClick={(e) => handleDeleteContactStage(stage.id, e)}
+                                              onClick={(e) => handleDeleteContactStage(stageColKey, e, sIndex, stage.name)}
                                             >
                                               <div className="pipeline-card-menu-item-left">
                                                 <Trash2 size={13} />
@@ -19864,6 +19982,77 @@ function Pipeline() {
                     disabled={!addStageModalName.trim()}
                   >
                     Create Stage
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
+      {/* ------------------------------------------------------------------
+        Edit Stage Modal
+        ------------------------------------------------------------------ */}
+      {
+        editingStageModal && (
+          <div className="pipeline-modal-backdrop" onClick={() => setEditingStageModal(null)}>
+            <div className="pipeline-modal-card" style={{ maxWidth: '440px' }} onClick={e => e.stopPropagation()}>
+              <div className="pipeline-modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div className="pipeline-modal-icon-badge" style={{ background: '#f0f9ff', color: '#0284c7' }}>
+                    <Edit2 size={18} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>
+                      {editingStageModal.type === 'contactStage' ? 'Edit Contact Stage' : 'Edit Deal Stage'}
+                    </h3>
+                    <p className="pipeline-modal-subtitle">
+                      Update the name for this stage column
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-modal-close-btn"
+                  onClick={() => setEditingStageModal(null)}
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEditStageModal}>
+                <div className="pipeline-modal-body" style={{ padding: '20px 24px' }}>
+                  <div className="pipeline-form-group">
+                    <label className="pipeline-form-label">
+                      Stage Name <span className="required-star">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="pipeline-form-input"
+                      placeholder="Enter stage name"
+                      value={editingStageModal.name || ''}
+                      onChange={e => setEditingStageModal(prev => ({ ...prev, name: e.target.value }))}
+                      autoFocus
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="pipeline-modal-footer">
+                  <button
+                    type="button"
+                    className="pipeline-btn-cancel"
+                    onClick={() => setEditingStageModal(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="pipeline-btn-save"
+                    disabled={!editingStageModal.name?.trim()}
+                  >
+                    Save Changes
                   </button>
                 </div>
               </form>

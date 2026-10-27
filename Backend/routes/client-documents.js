@@ -60,49 +60,114 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// POST upload client document
-router.post('/', auth, upload.single('document'), async (req, res) => {
+// POST upload client document(s) - supports single or multiple files
+router.post('/', auth, (req, res, next) => {
+  upload.any()(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        return res.status(400).json({ message: `Upload error: ${err.message}` });
+      }
+      return res.status(400).json({ message: err.message || 'File upload error' });
+    }
+    next();
+  });
+}, async (req, res) => {
+  const files = req.files || (req.file ? [req.file] : []);
+
   try {
-    if (!req.file) {
+    if (!files || files.length === 0) {
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    const { clientId, category, title, description } = req.body;
+    const { clientId, category, title, description, metadata } = req.body;
 
     if (!clientId) {
-      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      files.forEach(f => {
+        if (f.path && fs.existsSync(f.path)) {
+          try { fs.unlinkSync(f.path); } catch (e) {}
+        }
+      });
       return res.status(400).json({ message: 'Client ID is required' });
     }
 
     const client = await Client.findById(clientId);
     if (!client) {
-      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      files.forEach(f => {
+        if (f.path && fs.existsSync(f.path)) {
+          try { fs.unlinkSync(f.path); } catch (e) {}
+        }
+      });
       return res.status(404).json({ message: 'Client not found' });
     }
 
-    const docCategory = category || 'Other';
-    const docTitle = title || `${docCategory} - ${client.name || client.company || 'Client'}`;
+    let parsedMeta = [];
+    if (metadata) {
+      try {
+        parsedMeta = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+      } catch (e) {
+        parsedMeta = [];
+      }
+    }
 
-    const document = await ClientDocument.create({
-      client: clientId,
-      title: docTitle,
-      category: docCategory,
-      description: description || '',
-      filename: req.file.originalname,
-      filepath: req.file.path,
-      filesize: req.file.size,
-      mimetype: req.file.mimetype,
-      uploadedBy: req.user._id,
-      status: 'approved'
+    const validCategories = ['Aadhar Card', 'PAN Card', 'Agreement', 'Receipts', 'Other'];
+    const createdDocs = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const itemMeta = (Array.isArray(parsedMeta) && parsedMeta[i]) ? parsedMeta[i] : {};
+
+      let docCategory = itemMeta.category || category || 'Other';
+      if (!validCategories.includes(docCategory)) {
+        docCategory = 'Other';
+      }
+
+      const defaultTitle = files.length === 1 && title
+        ? title
+        : (itemMeta.title || `${docCategory} - ${file.originalname}`);
+      const docDescription = itemMeta.description !== undefined ? itemMeta.description : (description || '');
+
+      const document = await ClientDocument.create({
+        client: clientId,
+        title: defaultTitle,
+        category: docCategory,
+        description: docDescription,
+        filename: file.originalname,
+        filepath: file.path,
+        filesize: file.size,
+        mimetype: file.mimetype,
+        uploadedBy: req.user._id,
+        status: 'approved'
+      });
+
+      await document.populate('client');
+      await document.populate('uploadedBy', 'firstName lastName email');
+      createdDocs.push(document);
+    }
+
+    if (createdDocs.length === 1) {
+      const singleDocObj = createdDocs[0].toObject ? createdDocs[0].toObject() : createdDocs[0];
+      return res.status(201).json({
+        ...singleDocObj,
+        documents: createdDocs,
+        count: 1
+      });
+    }
+
+    const firstDocObj = createdDocs[0].toObject ? createdDocs[0].toObject() : createdDocs[0];
+    return res.status(201).json({
+      success: true,
+      message: `${createdDocs.length} client documents uploaded successfully`,
+      count: createdDocs.length,
+      documents: createdDocs,
+      ...firstDocObj
     });
-
-    await document.populate('client');
-    await document.populate('uploadedBy', 'firstName lastName email');
-
-    res.status(201).json(document);
   } catch (error) {
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    if (files && files.length > 0) {
+      files.forEach(f => {
+        if (f.path && fs.existsSync(f.path)) {
+          try { fs.unlinkSync(f.path); } catch (e) {}
+        }
+      });
     }
     console.error('Upload client document error:', error);
     res.status(500).json({ message: 'Error uploading client document', error: error.message });

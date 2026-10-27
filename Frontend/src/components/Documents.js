@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import { useContextualQueryState } from '../utils/routeUtils';
@@ -158,6 +158,62 @@ const getCategoryIconSvg = (category) => {
   }
 };
 
+// ── File Size and Type Formatting Helpers ──
+const formatFileSize = (bytes) => {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
+const getFileIconSvg = (fileName = '', mime = '') => {
+  const ext = (fileName || '').split('.').pop().toLowerCase();
+  if (ext === 'pdf' || mime?.includes('pdf')) {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="9" y1="13" x2="15" y2="13" />
+        <line x1="9" y1="17" x2="15" y2="17" />
+      </svg>
+    );
+  }
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(ext) || mime?.startsWith('image/')) {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <polyline points="21 15 16 10 5 21" />
+      </svg>
+    );
+  }
+  if (['doc', 'docx'].includes(ext)) {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <path d="M9 13h6M9 17h4" />
+      </svg>
+    );
+  }
+  if (['xls', 'xlsx', 'csv'].includes(ext)) {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <path d="M8 13l8 4M16 13l-8 4" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+    </svg>
+  );
+};
+
 function Documents() {
   const { hasPermission } = useAuth();
 
@@ -240,6 +296,7 @@ function Documents() {
   const [clientCategorySearchText, setClientCategorySearchText] = useState('');
 
   // Client Upload Modal State
+  const fileInputRef = useRef(null);
   const [showClientUploadModal, setShowClientUploadModal] = useState(false);
   const [showUploadClientDropdown, setShowUploadClientDropdown] = useState(false);
   const [uploadClientSearchText, setUploadClientSearchText] = useState('');
@@ -247,9 +304,12 @@ function Documents() {
     clientId: '',
     category: 'Aadhar Card',
     title: '',
-    description: '',
-    file: null
+    description: ''
   });
+  const [clientStagedFiles, setClientStagedFiles] = useState([]);
+  const [stagedPreviewFile, setStagedPreviewFile] = useState(null);
+  const [uploadSuccessResult, setUploadSuccessResult] = useState(null);
+  const [isDragOverClientUpload, setIsDragOverClientUpload] = useState(false);
   const [uploadingClientDoc, setUploadingClientDoc] = useState(false);
 
   // Client View/Preview & Client Details Modal State
@@ -257,6 +317,9 @@ function Documents() {
   const [viewClientDocLoading, setViewClientDocLoading] = useState(false);
   const [viewClientDocUrl, setViewClientDocUrl] = useState(null);
   const [selectedClientDetails, setSelectedClientDetails] = useState(null);
+  const [selectedClientForDocs, setSelectedClientForDocs] = useState(null);
+  const [selectedClientDocsList, setSelectedClientDocsList] = useState([]);
+  const [showClientDocsModal, setShowClientDocsModal] = useState(false);
 
   // Permissions
   const canUploadForEmployee = hasPermission('documents', 'create') || hasPermission('my-documents', 'create');
@@ -533,6 +596,12 @@ function Documents() {
     setShowEmployeeModal(true);
   };
 
+  const handleViewClientGroupDocs = (client, docs) => {
+    setSelectedClientForDocs(client);
+    setSelectedClientDocsList(docs || []);
+    setShowClientDocsModal(true);
+  };
+
   const handleEdit = (doc) => {
     setEditingDocument(doc);
     setEditFormData({
@@ -578,6 +647,13 @@ function Documents() {
     try {
       await api.delete(`/client-documents/${id}`);
       alert('Client document deleted successfully.');
+      setSelectedClientDocsList(prev => {
+        const remaining = prev.filter(d => d._id !== id);
+        if (remaining.length === 0) {
+          setShowClientDocsModal(false);
+        }
+        return remaining;
+      });
       fetchClientDocuments();
     } catch (error) {
       alert(error.response?.data?.message || 'Error deleting client document');
@@ -627,10 +703,115 @@ function Documents() {
     return () => {
       if (viewDocumentUrl) URL.revokeObjectURL(viewDocumentUrl);
       if (viewClientDocUrl) URL.revokeObjectURL(viewClientDocUrl);
+      clientStagedFiles.forEach(item => {
+        if (item.previewUrl) {
+          try { URL.revokeObjectURL(item.previewUrl); } catch (e) {}
+        }
+      });
     };
-  }, [viewDocumentUrl, viewClientDocUrl]);
+  }, [viewDocumentUrl, viewClientDocUrl, clientStagedFiles]);
 
+  const clearClientStagedFiles = () => {
+    setClientStagedFiles(prev => {
+      prev.forEach(item => {
+        if (item.previewUrl) {
+          try { URL.revokeObjectURL(item.previewUrl); } catch (e) {}
+        }
+      });
+      return [];
+    });
+  };
 
+  const handleClientFilesSelect = (filesList) => {
+    if (!filesList || filesList.length === 0) return;
+    const incoming = Array.from(filesList);
+    const newItems = incoming.map((f, i) => {
+      const isImg = f.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(f.name);
+      const isPdf = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+      const previewUrl = (isImg || isPdf) ? URL.createObjectURL(f) : null;
+      const cat = clientUploadFormData.category || 'Aadhar Card';
+      const cleanName = f.name.replace(/\.[^/.]+$/, "");
+      return {
+        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${i}`,
+        file: f,
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        category: cat,
+        title: `${cat} - ${cleanName}`,
+        previewUrl,
+        isImg,
+        isPdf
+      };
+    });
+    setClientStagedFiles(prev => [...prev, ...newItems]);
+  };
+
+  const handleRemoveClientStagedFile = (id) => {
+    setClientStagedFiles(prev => {
+      const target = prev.find(item => item.id === id);
+      if (target && target.previewUrl) {
+        try { URL.revokeObjectURL(target.previewUrl); } catch (e) {}
+      }
+      return prev.filter(item => item.id !== id);
+    });
+  };
+
+  const handleUpdateClientStagedFile = (id, field, value) => {
+    setClientStagedFiles(prev => prev.map(item => {
+      if (item.id === id) {
+        const updated = { ...item, [field]: value };
+        if (field === 'category') {
+          const cleanName = item.name.replace(/\.[^/.]+$/, "");
+          if (!item.title || item.title.startsWith(item.category) || item.title === `${item.category} - ${cleanName}`) {
+            updated.title = `${value} - ${cleanName}`;
+          }
+        }
+        return updated;
+      }
+      return item;
+    }));
+  };
+
+  const handleCategorySelectForUpload = (category) => {
+    setClientUploadFormData(prev => ({ ...prev, category }));
+    setClientStagedFiles(prev => prev.map(item => {
+      const cleanName = item.name.replace(/\.[^/.]+$/, "");
+      return {
+        ...item,
+        category,
+        title: `${category} - ${cleanName}`
+      };
+    }));
+  };
+
+  const handleCloseClientUploadModal = () => {
+    clearClientStagedFiles();
+    setShowClientUploadModal(false);
+    setUploadSuccessResult(null);
+    setStagedPreviewFile(null);
+    setIsDragOverClientUpload(false);
+    setClientUploadFormData({
+      clientId: '',
+      category: 'Aadhar Card',
+      title: '',
+      description: ''
+    });
+  };
+
+  const handleOpenClientUploadModal = () => {
+    clearClientStagedFiles();
+    setUploadSuccessResult(null);
+    setStagedPreviewFile(null);
+    setIsDragOverClientUpload(false);
+    setClientUploadFormData({
+      clientId: '',
+      category: 'Aadhar Card',
+      title: '',
+      description: ''
+    });
+    setShowClientUploadModal(true);
+  };
 
   const handleUploadForEmployee = async (e) => {
     e.preventDefault();
@@ -676,40 +857,57 @@ function Documents() {
   };
 
   const handleUploadForClient = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
 
-    if (!clientUploadFormData.clientId || !clientUploadFormData.file) {
-      alert('Please select a client and choose a file');
+    if (!clientUploadFormData.clientId) {
+      alert('Please select a client');
+      return;
+    }
+
+    if (clientStagedFiles.length === 0) {
+      alert('Please choose at least one document to upload');
       return;
     }
 
     setUploadingClientDoc(true);
     try {
       const formData = new FormData();
-      formData.append('document', clientUploadFormData.file);
+      clientStagedFiles.forEach(item => {
+        formData.append('document', item.file);
+      });
       formData.append('clientId', clientUploadFormData.clientId);
       formData.append('category', clientUploadFormData.category || 'Aadhar Card');
-      formData.append('title', clientUploadFormData.title || `${clientUploadFormData.category} - ${clientUploadFormData.file.name}`);
       formData.append('description', clientUploadFormData.description || '');
 
-      await api.post('/client-documents', formData, {
+      const metadata = clientStagedFiles.map(item => ({
+        category: item.category || clientUploadFormData.category || 'Other',
+        title: item.title || `${item.category || 'Document'} - ${item.name}`,
+        description: clientUploadFormData.description || ''
+      }));
+      formData.append('metadata', JSON.stringify(metadata));
+
+      const response = await api.post('/client-documents', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
       });
 
-      alert('Client document uploaded successfully!');
-      setShowClientUploadModal(false);
-      setClientUploadFormData({
-        clientId: '',
-        category: 'Aadhar Card',
-        title: '',
-        description: '',
-        file: null
+      // Refresh documents list
+      await fetchClientDocuments();
+
+      const createdDocs = response.data?.documents || (Array.isArray(response.data) ? response.data : [response.data]);
+      const targetClient = clients.find(c => c._id === clientUploadFormData.clientId);
+
+      // Clean up staged blob URLs
+      clearClientStagedFiles();
+
+      // Show upload success with instant preview
+      setUploadSuccessResult({
+        client: targetClient || { name: 'Client' },
+        docs: createdDocs
       });
-      fetchClientDocuments();
     } catch (error) {
-      alert(error.response?.data?.message || 'Error uploading client document');
+      alert(error.response?.data?.message || 'Error uploading client document(s)');
       console.error('Client upload error:', error);
     } finally {
       setUploadingClientDoc(false);
@@ -1975,10 +2173,7 @@ function Documents() {
 
               <button
                 type="button"
-                onClick={() => {
-                  setClientUploadFormData({ clientId: '', category: 'Aadhar Card', title: '', description: '', file: null });
-                  setShowClientUploadModal(true);
-                }}
+                onClick={handleOpenClientUploadModal}
                 style={{
                   padding: '9px 18px',
                   fontSize: '13px',
@@ -2269,24 +2464,51 @@ function Documents() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredClientDocuments
-                          .slice((clientCurrentPage - 1) * ITEMS_PER_PAGE, clientCurrentPage * ITEMS_PER_PAGE)
-                          .map((doc, idx) => {
-                            const globalIdx = ((clientCurrentPage - 1) * ITEMS_PER_PAGE) + idx + 1;
-                            const clientName = doc.client ? (doc.client.name || doc.client.company || 'Client') : 'N/A';
-                            const clientComp = doc.client?.company && doc.client?.name !== doc.client?.company ? doc.client.company : '';
-                            const badgeStyle = getCategoryBadgeStyle(doc.category);
-                            const uploaderName = doc.uploadedBy ? `${doc.uploadedBy.firstName || ''} ${doc.uploadedBy.lastName || ''}`.trim() || doc.uploadedBy.email : 'System';
+                        {(() => {
+                          const grouped = filteredClientDocuments.reduce((acc, doc) => {
+                            const clientId = doc.client?._id || (typeof doc.client === 'string' ? doc.client : 'unknown');
+                            if (!acc[clientId]) {
+                              const matchedClient = (doc.client && typeof doc.client === 'object' && (doc.client.name || doc.client.company))
+                                ? doc.client
+                                : (clients.find(c => String(c._id) === String(clientId)) || doc.client);
+                              acc[clientId] = { client: matchedClient, docs: [] };
+                            }
+                            acc[clientId].docs.push(doc);
+                            return acc;
+                          }, {});
+
+                          const groups = Object.values(grouped);
+                          if (groups.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={7} style={{ padding: '28px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>No client documents found</td>
+                              </tr>
+                            );
+                          }
+
+                          const paginatedGroups = groups.slice((clientCurrentPage - 1) * ITEMS_PER_PAGE, clientCurrentPage * ITEMS_PER_PAGE);
+
+                          return paginatedGroups.map((grp, gIdx) => {
+                            const globalIdx = ((clientCurrentPage - 1) * ITEMS_PER_PAGE) + gIdx + 1;
+                            const docs = grp.docs || [];
+                            const count = docs.length;
+                            const latest = docs.reduce((a, b) => new Date(a.createdAt) > new Date(b.createdAt) ? a : b, docs[0]);
+                            const first = latest || docs[0] || {};
+                            const categories = Array.from(new Set(docs.map(d => d.category || 'Other')));
+                            const clientObj = grp.client;
+                            const clientName = clientObj ? (clientObj.name || clientObj.company || 'Client') : 'N/A';
+                            const clientComp = clientObj?.company && clientObj?.name !== clientObj?.company ? clientObj.company : '';
+                            const uploaderName = first.uploadedBy ? `${first.uploadedBy.firstName || ''} ${first.uploadedBy.lastName || ''}`.trim() || first.uploadedBy.email : 'System';
 
                             return (
-                              <tr key={doc._id} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#fff' : '#fafcfd' }}>
+                              <tr key={clientObj?._id || gIdx} style={{ borderBottom: '1px solid #f1f5f9', background: gIdx % 2 === 0 ? '#fff' : '#fafcfd' }}>
                                 <td style={{ padding: '14px 18px', color: '#64748b', fontSize: '13px', width: '48px' }}>{globalIdx}</td>
 
                                 {/* Client Name Pill Badge */}
                                 <td style={{ padding: '14px 18px', maxWidth: '240px' }}>
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenClientDetails(doc.client)}
+                                    onClick={() => handleOpenClientDetails(clientObj)}
                                     title="Click to view complete client details"
                                     style={{
                                       border: '1px solid #c7d2fe',
@@ -2321,30 +2543,76 @@ function Documents() {
                                 </td>
 
                                 {/* Title & Filename */}
-                                <td style={{ padding: '14px 18px', maxWidth: '280px' }}>
-                                  <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '13px' }}>
-                                    {doc.title || doc.filename}
-                                  </div>
-                                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                                    {doc.filename}
+                                <td style={{ padding: '14px 18px', maxWidth: '300px' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                      <span style={{ fontWeight: 600, color: '#0f172a', fontSize: '13px' }}>
+                                        {first.title || first.filename || 'Untitled document'}
+                                      </span>
+                                      {count > 1 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleViewClientGroupDocs(grp.client, docs)}
+                                          title={`View all ${count} documents for ${clientName}`}
+                                          style={{
+                                            fontSize: '11px',
+                                            fontWeight: 700,
+                                            color: '#6366f1',
+                                            background: '#eef2ff',
+                                            border: '1px solid #c7d2fe',
+                                            padding: '2px 8px',
+                                            borderRadius: '12px',
+                                            cursor: 'pointer',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '3px',
+                                            transition: 'all 0.15s ease'
+                                          }}
+                                          onMouseEnter={e => { e.currentTarget.style.background = '#6366f1'; e.currentTarget.style.color = '#fff'; }}
+                                          onMouseLeave={e => { e.currentTarget.style.background = '#eef2ff'; e.currentTarget.style.color = '#6366f1'; }}
+                                        >
+                                          +{count - 1} more
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                      {first.filename}
+                                    </div>
                                   </div>
                                 </td>
 
                                 {/* Category Badge */}
                                 <td style={{ padding: '14px 18px' }}>
-                                  <span style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    padding: '5px 12px',
-                                    borderRadius: '20px',
-                                    fontSize: '12px',
-                                    fontWeight: 600,
-                                    ...badgeStyle
-                                  }}>
-                                    {getCategoryIconSvg(doc.category)}
-                                    {doc.category}
-                                  </span>
+                                  {categories.length === 1 ? (
+                                    <span style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      padding: '5px 12px',
+                                      borderRadius: '20px',
+                                      fontSize: '12px',
+                                      fontWeight: 600,
+                                      ...getCategoryBadgeStyle(categories[0])
+                                    }}>
+                                      {getCategoryIconSvg(categories[0])}
+                                      {categories[0]}
+                                    </span>
+                                  ) : (
+                                    <span style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      padding: '5px 12px',
+                                      borderRadius: '20px',
+                                      background: '#f1f5f9',
+                                      color: '#475569',
+                                      border: '1px solid #e2e8f0',
+                                      fontSize: '12px',
+                                      fontWeight: 600
+                                    }}>
+                                      Multiple Categories
+                                    </span>
+                                  )}
                                 </td>
 
                                 {/* Uploaded By */}
@@ -2360,20 +2628,20 @@ function Documents() {
 
                                 {/* Uploaded Date */}
                                 <td style={{ padding: '14px 18px', color: '#64748b', fontSize: '12.5px' }}>
-                                  {formatDocumentDate(doc.createdAt)}
+                                  {formatDocumentDate(first.createdAt)}
                                 </td>
 
                                 {/* Actions */}
                                 <td style={{ padding: '14px 18px', textAlign: 'center' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                                  {count > 1 ? (
                                     <button
                                       type="button"
-                                      onClick={() => handleViewClientDoc(doc)}
-                                      title="View Document"
+                                      onClick={() => handleViewClientGroupDocs(grp.client, docs)}
+                                      title={`View all ${count} documents for ${clientName}`}
                                       style={{
-                                        width: '34px',
-                                        height: '34px',
-                                        borderRadius: '8px',
+                                        width: '36px',
+                                        height: '36px',
+                                        borderRadius: '10px',
                                         border: '1px solid #dbeafe',
                                         background: '#eff6ff',
                                         color: '#1d4ed8',
@@ -2381,77 +2649,132 @@ function Documents() {
                                         display: 'inline-flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
+                                        position: 'relative',
                                         transition: 'all 0.2s',
                                         boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
                                       }}
-                                      onMouseEnter={e => { e.currentTarget.style.background = '#3b82f6'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#3b82f6'; }}
+                                      onMouseEnter={e => { e.currentTarget.style.background = '#3b82f6'; e.currentTarget.style.color = '#ffffff'; e.currentTarget.style.borderColor = '#3b82f6'; }}
                                       onMouseLeave={e => { e.currentTarget.style.background = '#eff6ff'; e.currentTarget.style.color = '#1d4ed8'; e.currentTarget.style.borderColor = '#dbeafe'; }}
                                     >
-                                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDownloadClientDoc(doc._id, doc.filename)}
-                                      title="Download Document"
-                                      style={{
-                                        width: '34px',
-                                        height: '34px',
-                                        borderRadius: '8px',
-                                        border: '1px solid #d1fae5',
-                                        background: '#ecfdf5',
-                                        color: '#047857',
-                                        cursor: 'pointer',
-                                        display: 'inline-flex',
+                                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                        <circle cx="12" cy="12" r="3" />
+                                      </svg>
+                                      <span style={{
+                                        position: 'absolute',
+                                        top: '-4px',
+                                        right: '-4px',
+                                        background: '#3b82f6',
+                                        color: '#ffffff',
+                                        fontSize: '10px',
+                                        fontWeight: '700',
+                                        width: '18px',
+                                        height: '18px',
+                                        borderRadius: '50%',
+                                        display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
-                                        transition: 'all 0.2s',
-                                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
-                                      }}
-                                      onMouseEnter={e => { e.currentTarget.style.background = '#10b981'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#10b981'; }}
-                                      onMouseLeave={e => { e.currentTarget.style.background = '#ecfdf5'; e.currentTarget.style.color = '#047857'; e.currentTarget.style.borderColor = '#d1fae5'; }}
-                                    >
-                                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                                        border: '2px solid #ffffff',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.15)'
+                                      }}>
+                                        {count}
+                                      </span>
                                     </button>
+                                  ) : (
+                                    <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleViewClientDoc(first)}
+                                        title="View Document"
+                                        style={{
+                                          width: '34px',
+                                          height: '34px',
+                                          borderRadius: '8px',
+                                          border: '1px solid #dbeafe',
+                                          background: '#eff6ff',
+                                          color: '#1d4ed8',
+                                          cursor: 'pointer',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          transition: 'all 0.2s',
+                                          boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                                        }}
+                                        onMouseEnter={e => { e.currentTarget.style.background = '#3b82f6'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#3b82f6'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.background = '#eff6ff'; e.currentTarget.style.color = '#1d4ed8'; e.currentTarget.style.borderColor = '#dbeafe'; }}
+                                      >
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                                      </button>
 
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteClientDoc(doc._id)}
-                                      title="Delete Document"
-                                      style={{
-                                        width: '34px',
-                                        height: '34px',
-                                        borderRadius: '8px',
-                                        border: '1px solid rgba(239,68,68,0.25)',
-                                        background: 'rgba(239,68,68,0.08)',
-                                        color: '#b91c1c',
-                                        cursor: 'pointer',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        transition: 'all 0.2s',
-                                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
-                                      }}
-                                      onMouseEnter={e => { e.currentTarget.style.background = '#dc2626'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#dc2626'; }}
-                                      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; e.currentTarget.style.color = '#b91c1c'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.25)'; }}
-                                    >
-                                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
-                                    </button>
-                                  </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDownloadClientDoc(first._id, first.filename)}
+                                        title="Download Document"
+                                        style={{
+                                          width: '34px',
+                                          height: '34px',
+                                          borderRadius: '8px',
+                                          border: '1px solid #d1fae5',
+                                          background: '#ecfdf5',
+                                          color: '#047857',
+                                          cursor: 'pointer',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          transition: 'all 0.2s',
+                                          boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                                        }}
+                                        onMouseEnter={e => { e.currentTarget.style.background = '#10b981'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#10b981'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.background = '#ecfdf5'; e.currentTarget.style.color = '#047857'; e.currentTarget.style.borderColor = '#d1fae5'; }}
+                                      >
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteClientDoc(first._id)}
+                                        title="Delete Document"
+                                        style={{
+                                          width: '34px',
+                                          height: '34px',
+                                          borderRadius: '8px',
+                                          border: '1px solid rgba(239,68,68,0.25)',
+                                          background: 'rgba(239,68,68,0.08)',
+                                          color: '#b91c1c',
+                                          cursor: 'pointer',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          transition: 'all 0.2s',
+                                          boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                                        }}
+                                        onMouseEnter={e => { e.currentTarget.style.background = '#dc2626'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#dc2626'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; e.currentTarget.style.color = '#b91c1c'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.25)'; }}
+                                      >
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                                      </button>
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             );
-                          })}
+                          });
+                        })()}
                       </tbody>
                     </table>
                   </div>
 
                   {/* Client Pagination Footer */}
                   {(() => {
-                    const totalDocs = filteredClientDocuments.length;
-                    const totalPages = Math.ceil(totalDocs / ITEMS_PER_PAGE) || 1;
+                    const grouped = filteredClientDocuments.reduce((acc, doc) => {
+                      const clientId = doc.client?._id || (typeof doc.client === 'string' ? doc.client : 'unknown');
+                      if (!acc[clientId]) acc[clientId] = true;
+                      return acc;
+                    }, {});
+                    const totalGroups = Object.keys(grouped).length;
+                    const totalPages = Math.ceil(totalGroups / ITEMS_PER_PAGE) || 1;
 
-                    if (totalDocs <= 0) return null;
+                    if (totalGroups <= 0) return null;
 
                     return (
                       <div style={{
@@ -2465,7 +2788,7 @@ function Documents() {
                         gap: '12px'
                       }}>
                         <div style={{ fontSize: '12.5px', color: '#64748b', fontWeight: 500 }}>
-                          Showing {((clientCurrentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(clientCurrentPage * ITEMS_PER_PAGE, totalDocs)} of {totalDocs} client documents
+                          Showing {((clientCurrentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(clientCurrentPage * ITEMS_PER_PAGE, totalGroups)} of {totalGroups} client records
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -3084,15 +3407,43 @@ function Documents() {
                         alt={viewClientDocument.filename || viewClientDocument.title}
                         style={{ width: '100%', height: 'auto', maxHeight: '520px', objectFit: 'contain', borderRadius: '6px' }}
                       />
-                    ) : viewClientDocUrl ? (
+                    ) : viewClientDocUrl && !/\.(docx?|xlsx?|zip|rar)$/i.test(viewClientDocument.filename || '') ? (
                       <iframe
                         title="Client Document Preview"
                         src={viewClientDocUrl}
                         style={{ width: '100%', height: '100%', border: 'none', minHeight: '380px', borderRadius: '6px' }}
                       />
                     ) : (
-                      <div style={{ color: '#ef4444', fontSize: '13px', textAlign: 'center' }}>
-                        Unable to load preview. Please download the file to view it.
+                      <div style={{ textAlign: 'center', padding: '36px 20px', color: '#64748b' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
+                          {getFileIconSvg(viewClientDocument.filename, viewClientDocument.mimetype)}
+                        </div>
+                        <div style={{ fontSize: '14.5px', fontWeight: 600, color: '#1e293b', marginBottom: '4px' }}>
+                          {viewClientDocument.filename || viewClientDocument.title}
+                        </div>
+                        <div style={{ fontSize: '12.5px', color: '#64748b', marginBottom: '16px', maxWidth: '320px', margin: '0 auto 16px' }}>
+                          Direct browser preview is not supported for this file format. You can download the file to view its contents.
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadClientDoc(viewClientDocument._id, viewClientDocument.filename)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '8px 16px',
+                            borderRadius: '8px',
+                            background: '#ecfdf5',
+                            border: '1px solid #a7f3d0',
+                            color: '#047857',
+                            fontWeight: 600,
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                          Download to View
+                        </button>
                       </div>
                     )}
                   </div>
@@ -3329,6 +3680,163 @@ function Documents() {
               <div style={{ padding: '12px 18px', borderTop: '1px solid #eef2f7', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button
                   onClick={() => setShowEmployeeModal(false)}
+                  style={{
+                    border: '1px solid #e2e8f0',
+                    background: '#fff',
+                    color: '#475569',
+                    borderRadius: '10px',
+                    padding: '10px 14px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Client Group Documents Modal ── */}
+        {showClientDocsModal && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(15,23,42,0.55)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+              padding: '20px',
+              overflowY: 'auto'
+            }}
+            onClick={() => setShowClientDocsModal(false)}
+          >
+            <div
+              style={{
+                width: '100%',
+                maxWidth: '760px',
+                borderRadius: '18px',
+                background: '#fff',
+                overflow: 'hidden',
+                boxShadow: '0 24px 48px rgba(15,23,42,0.18)',
+                maxHeight: 'calc(100vh - 40px)',
+                display: 'flex',
+                flexDirection: 'column'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ padding: '18px 22px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#0f172a' }}>
+                    {selectedClientForDocs ? (selectedClientForDocs.name || selectedClientForDocs.company || 'Client') : 'Client'} — Documents
+                  </h2>
+                  <p style={{ margin: '6px 0 0', fontSize: '13px', color: '#64748b' }}>All documents uploaded for this client.</p>
+                </div>
+                <button
+                  onClick={() => setShowClientDocsModal(false)}
+                  style={{ border: 'none', background: 'transparent', fontSize: '24px', color: '#64748b', cursor: 'pointer' }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div style={{ padding: '12px 18px', overflowY: 'auto', flex: 1 }}>
+                {selectedClientDocsList.map((doc) => {
+                  const uploaderName = doc.uploadedBy ? `${doc.uploadedBy.firstName || ''} ${doc.uploadedBy.lastName || ''}`.trim() || doc.uploadedBy.email : 'System';
+
+                  return (
+                    <div key={doc._id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 8px', borderBottom: '1px solid #f1f5f9' }}>
+                      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                        <div style={{ width: 42, height: 42, borderRadius: 8, background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6' }}>
+                          {getCategoryIconSvg(doc.category)}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '13.5px' }}>{doc.title || doc.filename || 'Untitled document'}</div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            {doc.category} • Uploaded by <strong style={{ color: '#475569' }}>{uploaderName}</strong> • {formatDocumentDate(doc.createdAt)}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleViewClientDoc(doc)}
+                          title="View Document"
+                          style={{
+                            width: '32px',
+                            height: '32px',
+                            border: '1px solid #dbeafe',
+                            background: '#eff6ff',
+                            color: '#1d4ed8',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#3b82f6'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#3b82f6'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = '#eff6ff'; e.currentTarget.style.color = '#1d4ed8'; e.currentTarget.style.borderColor = '#dbeafe'; }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadClientDoc(doc._id, doc.filename)}
+                          title="Download Document"
+                          style={{
+                            width: '32px',
+                            height: '32px',
+                            border: '1px solid #d1fae5',
+                            background: '#ecfdf5',
+                            color: '#047857',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#10b981'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#10b981'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = '#ecfdf5'; e.currentTarget.style.color = '#047857'; e.currentTarget.style.borderColor = '#d1fae5'; }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteClientDoc(doc._id)}
+                          title="Delete Document"
+                          style={{
+                            width: '32px',
+                            height: '32px',
+                            border: '1px solid rgba(239,68,68,0.25)',
+                            background: 'rgba(239,68,68,0.08)',
+                            color: '#b91c1c',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#dc2626'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#dc2626'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; e.currentTarget.style.color = '#b91c1c'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.25)'; }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ padding: '12px 18px', borderTop: '1px solid #eef2f7', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  onClick={() => setShowClientDocsModal(false)}
                   style={{
                     border: '1px solid #e2e8f0',
                     background: '#fff',
@@ -3874,23 +4382,27 @@ function Documents() {
               left: 0,
               right: 0,
               bottom: 0,
-              background: 'rgba(0,0,0,0.55)',
+              background: 'rgba(15, 23, 42, 0.65)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              zIndex: 1000
+              zIndex: 1000,
+              backdropFilter: 'blur(3px)',
+              padding: '16px'
             }}
-            onClick={() => setShowClientUploadModal(false)}
+            onClick={handleCloseClientUploadModal}
           >
             <div
               className="card"
               style={{
-                maxWidth: '620px',
-                width: '90%',
+                maxWidth: '680px',
+                width: '94%',
                 maxHeight: '90vh',
                 overflow: 'auto',
                 borderRadius: '16px',
-                padding: '24px'
+                padding: '24px',
+                background: '#ffffff',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
               }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -3899,33 +4411,264 @@ function Documents() {
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 marginBottom: '20px',
-                paddingBottom: '15px',
-                borderBottom: '2px solid #e5e7eb'
+                paddingBottom: '14px',
+                borderBottom: '2px solid #f1f5f9'
               }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '700', color: '#0f172a' }}>
-                    Upload Document
+                  <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '700', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {uploadSuccessResult ? (
+                      <>
+                        <span style={{ color: '#16a34a' }}>✓</span> Upload Successful
+                      </>
+                    ) : (
+                      'Upload Client Documents'
+                    )}
                   </h2>
                   <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
-                    Attach Aadhar Card, PAN Card, Agreement or Receipts to a client record.
+                    {uploadSuccessResult ? (
+                      `Uploaded ${uploadSuccessResult.docs?.length || 1} document(s) for ${uploadSuccessResult.client?.name || uploadSuccessResult.client?.company || 'Client'}. Preview them below:`
+                    ) : (
+                      'Attach single or multiple documents (Aadhar Card, PAN Card, Agreement, Receipts) to a client record.'
+                    )}
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowClientUploadModal(false)}
+                  onClick={handleCloseClientUploadModal}
                   style={{
                     background: 'none',
                     border: 'none',
                     fontSize: '24px',
                     cursor: 'pointer',
-                    color: '#666'
+                    color: '#94a3b8',
+                    padding: '4px 8px',
+                    lineHeight: 1
                   }}
+                  onMouseEnter={e => e.currentTarget.style.color = '#0f172a'}
+                  onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
                 >
                   ×
                 </button>
               </div>
 
-              <form onSubmit={handleUploadForClient}>
+              {/* Success Result View (Preview After Uploading) */}
+              {uploadSuccessResult ? (
+                <div>
+                  <div style={{
+                    padding: '16px',
+                    background: '#ecfdf5',
+                    borderRadius: '12px',
+                    border: '1px solid #a7f3d0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    marginBottom: '20px'
+                  }}>
+                    <div style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '50%',
+                      background: '#10b981',
+                      color: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '14.5px', color: '#065f46' }}>
+                        {uploadSuccessResult.docs?.length || 1} Document{uploadSuccessResult.docs?.length > 1 ? 's' : ''} Uploaded Successfully
+                      </div>
+                      <div style={{ fontSize: '12.5px', color: '#047857', marginTop: '2px' }}>
+                        Attached to <strong>{uploadSuccessResult.client?.name || uploadSuccessResult.client?.company || 'Client'}</strong>. Preview or download your uploaded documents below:
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* List of Uploaded Documents with Preview & Download Actions */}
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    marginBottom: '24px',
+                    maxHeight: '340px',
+                    overflowY: 'auto'
+                  }}>
+                    {uploadSuccessResult.docs?.map((doc, idx) => {
+                      const badgeStyle = getCategoryBadgeStyle(doc.category);
+                      return (
+                        <div
+                          key={doc._id || idx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '12px 16px',
+                            borderRadius: '12px',
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                            gap: '12px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                            <div style={{
+                              width: '42px',
+                              height: '42px',
+                              borderRadius: '8px',
+                              background: '#fff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '1px solid #e2e8f0',
+                              flexShrink: 0
+                            }}>
+                              {getFileIconSvg(doc.filename, doc.mimetype)}
+                            </div>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: 600, fontSize: '13.5px', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {doc.title || doc.filename}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
+                                <span style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '2px 8px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  ...badgeStyle
+                                }}>
+                                  {getCategoryIconSvg(doc.category)}
+                                  {doc.category}
+                                </span>
+                                {doc.filesize && (
+                                  <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                                    {formatFileSize(doc.filesize)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                            <button
+                              type="button"
+                              onClick={() => handleViewClientDoc(doc)}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '7px 12px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                borderRadius: '8px',
+                                border: '1px solid #3b82f6',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s'
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                              Preview
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadClientDoc(doc._id, doc.filename)}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '7px 12px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                borderRadius: '8px',
+                                border: '1px solid #d1fae5',
+                                background: '#ecfdf5',
+                                color: '#047857',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s'
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                              Download
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Footer Actions */}
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap', paddingTop: '14px', borderTop: '1px solid #f1f5f9' }}>
+                    {uploadSuccessResult.docs?.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleViewClientDoc(uploadSuccessResult.docs[0])}
+                        style={{
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%)',
+                          color: '#fff',
+                          borderRadius: '8px',
+                          padding: '9px 18px',
+                          fontWeight: 600,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          boxShadow: '0 2px 6px rgba(37,99,235,0.25)'
+                        }}
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                        {uploadSuccessResult.docs.length === 1 ? 'Preview Document' : 'Preview First Document'}
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadSuccessResult(null);
+                        clearClientStagedFiles();
+                      }}
+                      style={{
+                        border: '1px solid #cbd5e1',
+                        background: '#fff',
+                        color: '#334155',
+                        borderRadius: '8px',
+                        padding: '9px 16px',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      + Upload More
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCloseClientUploadModal}
+                      style={{
+                        border: 'none',
+                        background: 'linear-gradient(135deg, #3b775e 0%, #56a07a 100%)',
+                        color: '#fff',
+                        borderRadius: '8px',
+                        padding: '9px 20px',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Done / View in List
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleUploadForClient}>
                 {/* Select Client */}
                 <div style={{ marginBottom: '16px' }}>
                   <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', fontSize: '13px', color: '#334155' }}>
@@ -4043,7 +4786,7 @@ function Documents() {
                       <button
                         type="button"
                         key={cat}
-                        onClick={() => setClientUploadFormData({ ...clientUploadFormData, category: cat })}
+                        onClick={() => handleCategorySelectForUpload(cat)}
                         style={{
                           padding: '10px 14px',
                           borderRadius: '8px',
@@ -4065,21 +4808,6 @@ function Documents() {
                   </div>
                 </div>
 
-                {/* Title */}
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', fontSize: '13px', color: '#334155' }}>
-                    Document Title
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={clientUploadFormData.title}
-                    onChange={(e) => setClientUploadFormData({ ...clientUploadFormData, title: e.target.value })}
-                    placeholder={`e.g. ${clientUploadFormData.category} Document`}
-                    style={{ borderRadius: '8px', padding: '9px 12px' }}
-                  />
-                </div>
-
                 {/* Description */}
                 <div style={{ marginBottom: '16px' }}>
                   <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', fontSize: '13px', color: '#334155' }}>
@@ -4089,35 +4817,277 @@ function Documents() {
                     className="form-control"
                     value={clientUploadFormData.description}
                     onChange={(e) => setClientUploadFormData({ ...clientUploadFormData, description: e.target.value })}
-                    placeholder="Enter details or notes about this client document..."
-                    rows="3"
+                    placeholder="Enter details or notes about these documents..."
+                    rows="2"
                     style={{ borderRadius: '8px', padding: '9px 12px' }}
                   />
                 </div>
 
-                {/* Choose File */}
-                <div style={{ marginBottom: '20px' }}>
+                {/* Hidden File Input supporting multiple files */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.zip"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    handleClientFilesSelect(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+
+                {/* Drag and Drop Zone */}
+                <div style={{ marginBottom: '16px' }}>
                   <label style={{ display: 'block', marginBottom: '6px', fontWeight: '600', fontSize: '13px', color: '#334155' }}>
-                    Choose File <span style={{ color: 'red' }}>*</span>
+                    Choose Document(s) <span style={{ color: 'red' }}>*</span>
                   </label>
-                  <input
-                    type="file"
-                    className="form-control"
-                    onChange={(e) => setClientUploadFormData({ ...clientUploadFormData, file: e.target.files[0] })}
-                    accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.zip"
-                    required
-                    style={{ borderRadius: '8px', padding: '8px 10px' }}
-                  />
-                  <small style={{ color: '#64748b', fontSize: '12px', display: 'block', marginTop: '4px' }}>
-                    Supported formats: PDF, JPG, PNG, DOC, DOCX, XLSX, ZIP (Max 15MB)
-                  </small>
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDragOverClientUpload(true);
+                    }}
+                    onDragLeave={() => setIsDragOverClientUpload(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragOverClientUpload(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        handleClientFilesSelect(e.dataTransfer.files);
+                      }
+                    }}
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      border: isDragOverClientUpload ? '2px dashed #3b82f6' : '2px dashed #cbd5e1',
+                      background: isDragOverClientUpload ? '#eff6ff' : '#f8fafc',
+                      borderRadius: '12px',
+                      padding: '22px 16px',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <div style={{
+                      width: '44px',
+                      height: '44px',
+                      borderRadius: '10px',
+                      background: '#e0f2fe',
+                      color: '#0284c7',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto 10px'
+                    }}>
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="17 8 12 3 7 8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
+                      </svg>
+                    </div>
+                    <div style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b' }}>
+                      Click to select or drag & drop files here
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                      Upload multiple files: PDF, JPG, PNG, WEBP, DOCX, XLSX, ZIP (Max 25MB each)
+                    </div>
+                  </div>
                 </div>
 
+                {/* Staged Files List (with Pre-Upload Preview & Removal) */}
+                {clientStagedFiles.length > 0 && (
+                  <div style={{ marginBottom: '20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                        Files to Upload ({clientStagedFiles.length})
+                      </span>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#2563eb',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          + Add More Files
+                        </button>
+                        <span style={{ color: '#cbd5e1' }}>•</span>
+                        <button
+                          type="button"
+                          onClick={clearClientStagedFiles}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#ef4444',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Clear All
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      maxHeight: '230px',
+                      overflowY: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                      padding: '2px'
+                    }}>
+                      {clientStagedFiles.map((item) => (
+                        <div
+                          key={item.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            padding: '10px 12px',
+                            borderRadius: '10px',
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0'
+                          }}
+                        >
+                          {/* Thumbnail / Icon */}
+                          <div style={{
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            background: '#ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                            border: '1px solid #e2e8f0'
+                          }}>
+                            {item.isImg && item.previewUrl ? (
+                              <img
+                                src={item.previewUrl}
+                                alt={item.name}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                            ) : (
+                              getFileIconSvg(item.name, item.type)
+                            )}
+                          </div>
+
+                          {/* Details & inputs */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' }}>
+                              <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {item.name}
+                              </span>
+                              <span style={{ fontSize: '11px', color: '#94a3b8', flexShrink: 0 }}>
+                                {formatFileSize(item.size)}
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '6px', alignItems: 'center' }}>
+                              {/* Category selector per file */}
+                              <select
+                                value={item.category}
+                                onChange={(e) => handleUpdateClientStagedFile(item.id, 'category', e.target.value)}
+                                style={{
+                                  fontSize: '11.5px',
+                                  padding: '4px 8px',
+                                  borderRadius: '6px',
+                                  border: '1px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  color: '#334155',
+                                  fontWeight: 500,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <option value="Aadhar Card">Aadhar Card</option>
+                                <option value="PAN Card">PAN Card</option>
+                                <option value="Agreement">Agreement</option>
+                                <option value="Receipts">Receipts</option>
+                                <option value="Other">Other</option>
+                              </select>
+
+                              {/* Title input per file */}
+                              <input
+                                type="text"
+                                value={item.title}
+                                onChange={(e) => handleUpdateClientStagedFile(item.id, 'title', e.target.value)}
+                                placeholder="Document title"
+                                style={{
+                                  flex: 1,
+                                  fontSize: '12px',
+                                  padding: '4px 8px',
+                                  borderRadius: '6px',
+                                  border: '1px solid #e2e8f0',
+                                  background: '#ffffff',
+                                  color: '#334155',
+                                  outline: 'none'
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Actions: pre-upload preview & delete */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                            {item.previewUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setStagedPreviewFile(item)}
+                                title="Preview File"
+                                style={{
+                                  width: '32px',
+                                  height: '32px',
+                                  borderRadius: '6px',
+                                  border: '1px solid #dbeafe',
+                                  background: '#eff6ff',
+                                  color: '#2563eb',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveClientStagedFile(item.id)}
+                              title="Remove File"
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '6px',
+                                border: '1px solid #fee2e2',
+                                background: '#fef2f2',
+                                color: '#dc2626',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Modal Buttons */}
-                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', paddingTop: '10px', borderTop: '1px solid #f1f5f9' }}>
                   <button
                     type="button"
-                    onClick={() => setShowClientUploadModal(false)}
+                    onClick={handleCloseClientUploadModal}
                     disabled={uploadingClientDoc}
                     style={{
                       border: '1px solid #e2e8f0',
@@ -4133,23 +5103,169 @@ function Documents() {
                   </button>
                   <button
                     type="submit"
-                    disabled={uploadingClientDoc}
+                    disabled={uploadingClientDoc || clientStagedFiles.length === 0 || !clientUploadFormData.clientId}
                     style={{
                       border: 'none',
-                      background: 'linear-gradient(135deg, #3b775e 0%, #56a07a 100%)',
+                      background: (clientStagedFiles.length === 0 || !clientUploadFormData.clientId)
+                        ? '#94a3b8'
+                        : 'linear-gradient(135deg, #3b775e 0%, #56a07a 100%)',
                       color: '#fff',
                       borderRadius: '8px',
                       padding: '9px 20px',
                       fontWeight: 600,
-                      cursor: 'pointer'
+                      cursor: (clientStagedFiles.length === 0 || !clientUploadFormData.clientId) ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px'
                     }}
                   >
-                    {uploadingClientDoc ? 'Uploading...' : 'Upload Document'}
+                    {uploadingClientDoc ? (
+                      <>Uploading {clientStagedFiles.length} file{clientStagedFiles.length > 1 ? 's' : ''}...</>
+                    ) : clientStagedFiles.length > 1 ? (
+                      <>Upload {clientStagedFiles.length} Documents</>
+                    ) : (
+                      'Upload Document'
+                    )}
                   </button>
                 </div>
               </form>
+              )}
             </div>
           </div>
+        )}
+
+        {/* ── Staged File Preview Lightbox Modal (Pre-Upload Preview) ── */}
+        {stagedPreviewFile && createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(15, 23, 42, 0.8)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1200,
+              padding: '20px'
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setStagedPreviewFile(null);
+            }}
+          >
+            <div
+              style={{
+                background: '#fff',
+                borderRadius: '16px',
+                maxWidth: '850px',
+                width: '95%',
+                maxHeight: '90vh',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                background: '#f8fafc'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {getFileIconSvg(stagedPreviewFile.name, stagedPreviewFile.type)}
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '15px', color: '#0f172a' }}>
+                      Preview: {stagedPreviewFile.name}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>
+                      {stagedPreviewFile.category} • {formatFileSize(stagedPreviewFile.size)} • Pre-upload inspection
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setStagedPreviewFile(null);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '24px',
+                    cursor: 'pointer',
+                    color: '#64748b',
+                    lineHeight: 1
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div style={{
+                flex: 1,
+                overflow: 'auto',
+                padding: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: '380px',
+                background: '#f1f5f9'
+              }}>
+                {stagedPreviewFile.isImg ? (
+                  <img
+                    src={stagedPreviewFile.previewUrl}
+                    alt={stagedPreviewFile.name}
+                    style={{ maxWidth: '100%', maxHeight: '68vh', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                  />
+                ) : stagedPreviewFile.isPdf ? (
+                  <iframe
+                    src={stagedPreviewFile.previewUrl}
+                    title={stagedPreviewFile.name}
+                    style={{ width: '100%', height: '68vh', border: 'none', borderRadius: '8px' }}
+                  />
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                    {getFileIconSvg(stagedPreviewFile.name, stagedPreviewFile.type)}
+                    <p style={{ marginTop: '12px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                      {stagedPreviewFile.name}
+                    </p>
+                    <p style={{ fontSize: '12.5px', color: '#64748b' }}>
+                      Direct in-browser preview is not supported for this format. The file is valid and ready to be uploaded.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ padding: '12px 20px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', background: '#fff' }}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setStagedPreviewFile(null);
+                  }}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    border: '1px solid #e2e8f0',
+                    background: '#f8fafc',
+                    color: '#475569',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Close Preview
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
         )}
       </div>
     </div>
