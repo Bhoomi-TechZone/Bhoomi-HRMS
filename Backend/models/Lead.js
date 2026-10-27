@@ -50,6 +50,10 @@ const leadSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  assignedDate: {
+    type: Date,
+    default: null
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

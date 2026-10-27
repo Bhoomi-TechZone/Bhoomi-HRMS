@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 const MetaLead = require('../models/MetaLead');
 const WebsiteLead = require('../models/WebsiteLead');
@@ -70,9 +71,18 @@ router.get('/', auth, async (req, res) => {
     const { hasFullAccess, canAssignOrManage, isAdmin, roleName } = getLeadRoleAccess(user);
 
     // Check if user has read permission
+    const designation = (user?.designation || '').toLowerCase().trim();
+    const department = (user?.department || '').toLowerCase().trim();
     const hasReadPermission = hasFullAccess ||
       roleName.includes('sales') ||
       roleName.includes('executive') ||
+      roleName.includes('telecaller') ||
+      roleName.includes('bde') ||
+      roleName.includes('business development') ||
+      designation.includes('sales') ||
+      designation.includes('telecaller') ||
+      designation.includes('bde') ||
+      department.includes('sales') ||
       (user?.role?.permissions && user.role.permissions.some(
         p => p.module === 'leads' && p.actions.includes('read')
       ));
@@ -82,24 +92,35 @@ router.get('/', auth, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. Read permission required.' });
     }
 
-    // Only Admin can see old leads. Sales Head, Sales Manager, and other roles only see new data.
+    // Role-based visibility:
+    // 1. Non-full-access roles (e.g. Sales Executives, Telecallers, Employees) see all leads assigned to them or created by them
+    // 2. Sales Head & Sales Manager (who have full access, but not admin) see new organisation leads from cutoff date onwards
+    // 3. Admin sees all organisation leads (old and new)
     if (!isAdmin) {
-      query.$and = query.$and || [];
-      query.$and.push({
-        $or: [
+      const currentUserId = req.user?._id || req.user?.id;
+      const validObjectId = (mongoose.Types.ObjectId.isValid(currentUserId))
+        ? new mongoose.Types.ObjectId(currentUserId)
+        : currentUserId;
+
+      if (!hasFullAccess) {
+        // Standard sales executives and employees strictly see leads assigned to them or created by them
+        query.$or = [
+          { assignedTo: currentUserId },
+          { assignedTo: validObjectId },
+          { createdBy: currentUserId },
+          { createdBy: validObjectId }
+        ];
+      } else {
+        // Sales managers and sales heads see leads assigned to them OR created by them OR any new organisation leads
+        query.$or = [
+          { assignedTo: currentUserId },
+          { assignedTo: validObjectId },
+          { createdBy: currentUserId },
+          { createdBy: validObjectId },
           { createdAt: { $gte: DATA_CUTOFF_DATE } },
           { addedOn: { $gte: DATA_CUTOFF_DATE } }
-        ]
-      });
-    }
-
-    // Non-full-access roles only see their own assigned or created leads
-    if (!hasFullAccess) {
-      const currentUserId = req.user?._id || req.user?.id;
-      query.$or = [
-        { assignedTo: currentUserId },
-        { createdBy: currentUserId }
-      ];
+        ];
+      }
     }
 
     // Filter by status if provided
@@ -146,17 +167,18 @@ router.get('/:id', auth, async (req, res) => {
 
     const { hasFullAccess, isAdmin } = getLeadRoleAccess(user);
 
-    // Old leads are strictly visible only to Admin
-    if (!isAdmin) {
+    // Sales and regular employees can only view their assigned leads or leads they created/added
+    const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
+      (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
+
+    // Old leads are strictly visible only to Admin UNLESS assigned to or created by the current user
+    if (!isAdmin && !isOwnerOrAssignee) {
       const leadDate = new Date(lead.createdAt || lead.addedOn || 0);
       if (leadDate < DATA_CUTOFF_DATE) {
         return res.status(403).json({ message: 'Access denied. Old leads are only accessible by Admin.' });
       }
     }
 
-    // Sales and regular employees can only view their assigned leads or leads they created/added
-    const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
-      (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
     if (!hasFullAccess && !isOwnerOrAssignee) {
       return res.status(403).json({ message: 'Access denied' });
     }
@@ -218,6 +240,7 @@ router.post('/', auth, checkPermission('leads', 'create'), async (req, res) => {
       industry: industry ? industry.trim() : '',
       source,
       assignedTo: finalAssignedTo,
+      assignedDate: finalAssignedTo ? new Date() : null,
       budget: budget ? parseFloat(budget) : 0,
       requirements: requirements ? requirements.trim() : '',
       notes: notes ? notes.trim() : '',
@@ -526,7 +549,10 @@ router.post('/bulk-import', auth, checkPermission('leads', 'create'), async (req
 
         if (row.assignedTo) {
           const assignedUser = await User.findById(row.assignedTo);
-          if (assignedUser) leadData.assignedTo = row.assignedTo;
+          if (assignedUser) {
+            leadData.assignedTo = row.assignedTo;
+            leadData.assignedDate = new Date();
+          }
         }
 
         const lead = new Lead(leadData);
@@ -619,16 +645,16 @@ router.put('/:id', auth, async (req, res) => {
     ) : false;
     const { hasFullAccess, canAssignOrManage, isAdmin } = getLeadRoleAccess(user);
 
-    // Old leads can only be updated by Admin
-    if (!isAdmin) {
+    const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
+      (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
+
+    // Old leads can only be updated by Admin UNLESS assigned to or created by the current user
+    if (!isAdmin && !isOwnerOrAssignee) {
       const leadDate = new Date(lead.createdAt || lead.addedOn || 0);
       if (leadDate < DATA_CUTOFF_DATE) {
         return res.status(403).json({ message: 'Access denied. Old leads are only managed by Admin.' });
       }
     }
-
-    const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
-      (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
 
     if (!hasFullAccess && !isOwnerOrAssignee) {
       return res.status(403).json({ message: 'Access denied. You can only update your assigned or created leads.' });
@@ -812,6 +838,7 @@ router.put('/:id', auth, async (req, res) => {
         });
       }
       lead.assignedTo = assignedTo || null;
+      lead.assignedDate = assignedTo ? new Date() : null;
     }
 
     // Update status

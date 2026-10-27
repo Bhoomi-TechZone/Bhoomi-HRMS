@@ -59,8 +59,23 @@ import { ROUTES } from "./utils/routeUtils";
 // Wrapper component to show correct leads page based on role
 function LeadsWrapper() {
   const { user, hasPermission } = useAuth();
-  const isMarketing = user?.role?.name?.toLowerCase().includes('marketing');
-  const canRead = hasPermission('leads', 'read');
+  const roleName = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
+  const designation = (user?.designation || '').toString().toLowerCase().trim();
+  const department = (user?.department || '').toString().toLowerCase().trim();
+  const isMarketing = roleName.includes('marketing');
+  const isSalesOrLeadUser =
+    roleName.includes('sales') ||
+    roleName.includes('executive') ||
+    roleName.includes('telecaller') ||
+    roleName.includes('bde') ||
+    roleName.includes('admin') ||
+    roleName.includes('director') ||
+    designation.includes('sales') ||
+    designation.includes('telecaller') ||
+    designation.includes('bde') ||
+    department.includes('sales');
+
+  const canRead = hasPermission('leads', 'read') || isSalesOrLeadUser;
 
   // Marketing role sees Marketing Leads page
   if (isMarketing) {

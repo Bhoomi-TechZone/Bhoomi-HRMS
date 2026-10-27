@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
 const MetaConfig = require('../models/MetaConfig');
@@ -361,13 +362,26 @@ router.get('/', auth, async (req, res) => {
     const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
     const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(user);
 
-    // Only Admin can see old Meta leads
-    if (!isAdmin) {
-      query.createdTime = { $gte: DATA_CUTOFF_DATE };
-    }
+    // Role-based Meta lead access:
+    // 1. Non-manager sales executives see all Meta leads assigned to them
+    // 2. Sales managers see all leads assigned to them + new Meta leads from cutoff date onwards
+    // 3. Admin sees all Meta leads
+    const currentUserId = req.user?._id || req.user?.id;
+    const validObjectId = (mongoose.Types.ObjectId.isValid(currentUserId))
+      ? new mongoose.Types.ObjectId(currentUserId)
+      : currentUserId;
 
     if (!canSeeAllLeads) {
-      query.assignedTo = req.user._id;
+      query.$or = [
+        { assignedTo: currentUserId },
+        { assignedTo: validObjectId }
+      ];
+    } else if (!isAdmin) {
+      query.$or = [
+        { assignedTo: currentUserId },
+        { assignedTo: validObjectId },
+        { createdTime: { $gte: DATA_CUTOFF_DATE } }
+      ];
     }
 
     if (status) query.status = status;
@@ -835,13 +849,14 @@ router.get('/:id', auth, async (req, res) => {
     // Non-admin roles cannot view old Meta leads
     const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
     const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(user);
-    if (!isAdmin) {
+    const isAssignee = String(lead.assignedTo?._id || lead.assignedTo) === String(req.user._id);
+    if (!isAdmin && !isAssignee) {
       const leadTime = new Date(lead.createdTime || lead.createdAt || 0);
       if (leadTime < DATA_CUTOFF_DATE) {
         return res.status(403).json({ message: 'Access denied. Old leads are only visible to Admin.' });
       }
     }
-    if (!canSeeAllLeads && String(lead.assignedTo?._id || lead.assignedTo) !== String(req.user._id)) {
+    if (!canSeeAllLeads && !isAssignee) {
       return res.status(403).json({ message: 'Access denied. This lead is not assigned to you.' });
     }
 
@@ -936,6 +951,7 @@ router.patch('/:id', auth, async (req, res) => {
       historyEntry.action = historyEntry.action || 'Assignment Update';
       historyEntry.details = historyEntry.details || 'Lead reassigned';
       lead.assignedTo = assignedTo || null;
+      lead.assignedDate = assignedTo ? new Date() : null;
     }
     if (newNote && String(newNote).trim()) {
       const authorUser = req.user?.firstName ? req.user : await User.findById(req.user?._id || req.user?.id);

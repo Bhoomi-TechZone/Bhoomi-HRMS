@@ -263,9 +263,14 @@ export const AuthProvider = ({ children }) => {
   const hasPermission = useCallback((module, action) => {
     if (!user || !user.role) return false;
     
-    const roleName = (user.role.name || '').toLowerCase().trim();
+    const roleObj = user.role;
+    const roleName = (typeof roleObj === 'object' && roleObj !== null ? roleObj.name : roleObj || '').toLowerCase().trim();
+    const designation = (user.designation || '').toLowerCase().trim();
+    const department = (user.department || '').toLowerCase().trim();
     const targetModule = String(module || '').toLowerCase().trim();
     const targetAction = String(action || '').toLowerCase().trim();
+
+    if (roleName === 'admin' || roleName === 'super admin' || roleName === 'director') return true;
 
     // Check specific role permissions configured in database
     if (user.role.permissions && Array.isArray(user.role.permissions) && user.role.permissions.length > 0) {
@@ -273,13 +278,27 @@ export const AuthProvider = ({ children }) => {
         p => p.module && p.module.toLowerCase().trim() === targetModule
       );
       if (modulePermission && Array.isArray(modulePermission.actions)) {
-        return modulePermission.actions.map(a => a.toLowerCase().trim()).includes(targetAction);
+        if (modulePermission.actions.map(a => a.toLowerCase().trim()).includes(targetAction)) {
+          return true;
+        }
       }
-      return false;
     }
 
-    // Default fallback only if role has no permissions array defined in database
-    if (roleName === 'admin') return true;
+    // Sales, executives, telecallers, and BDEs should always have read permission on leads
+    if (targetModule === 'leads' && targetAction === 'read') {
+      const isSalesOrLeadRole =
+        roleName.includes('sales') ||
+        roleName.includes('executive') ||
+        roleName.includes('telecaller') ||
+        roleName.includes('bde') ||
+        roleName.includes('business development') ||
+        designation.includes('sales') ||
+        designation.includes('telecaller') ||
+        designation.includes('bde') ||
+        department.includes('sales');
+
+      if (isSalesOrLeadRole) return true;
+    }
 
     return false;
   }, [user]);

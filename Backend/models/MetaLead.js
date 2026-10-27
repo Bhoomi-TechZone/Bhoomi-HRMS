@@ -86,6 +86,10 @@ const metaLeadSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  assignedDate: {
+    type: Date,
+    default: null
+  },
   notes: {
     type: String,
     default: ''

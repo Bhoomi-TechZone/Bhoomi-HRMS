@@ -38,10 +38,6 @@ const DATA_CUTOFF_DATE = new Date('2026-10-16T19:00:00+05:30');
 
 function MyLeads() {
   const { user, hasPermission } = useAuth();
-  const canRead = hasPermission('leads', 'read');
-  const canCreate = hasPermission('leads', 'create');
-  const canUpdate = hasPermission('leads', 'update');
-  const canDelete = hasPermission('leads', 'delete');
 
   const roleNameLower = (user?.role?.name || user?.role || '').toString().toLowerCase().trim();
   const roleNormalized = roleNameLower.replace(/\s+/g, ' ');
@@ -82,10 +78,21 @@ function MyLeads() {
   // Standard roles (Sales Executives, Employees, etc.) only see their own created or assigned leads
   const hasFullAccess = isAdmin || isSalesHead || isSalesManager;
 
-  // Multi-Assign and Lead Assignment: Sales Head, Sales Manager, and Admin can assign leads to anyone
+  const isSales = roleNameLower.includes('sales') ||
+    roleNameLower.includes('executive') ||
+    roleNameLower.includes('telecaller') ||
+    roleNameLower.includes('bde') ||
+    designationLower.includes('sales') ||
+    designationLower.includes('telecaller') ||
+    designationLower.includes('bde') ||
+    departmentLower.includes('sales');
+
+  const canRead = hasPermission('leads', 'read') || isSales || hasFullAccess;
+  const canCreate = hasPermission('leads', 'create');
+  const canUpdate = hasPermission('leads', 'update');
+  const canDelete = hasPermission('leads', 'delete');
   const canMultiAssign = hasFullAccess;
   const canAssignLeads = hasFullAccess;
-  const isSales = roleNameLower.includes('sales');
 
   // Move to Pipeline:
   // 1. Sales Head, Sales Manager, and Admin can move ANY lead to pipeline
@@ -622,21 +629,34 @@ function MyLeads() {
         source: `Meta · ${m.pageName || 'Facebook'}`,
         createdAt: m.createdTime,
         assignedTo: m.assignedTo,
+        assignedDate: m.assignedDate,
       }));
     let merged = [...regular, ...meta];
 
     // Only Admin can see old leads data. Sales Head and other roles can only see new leads from cutoff date onwards.
+    // However, users MUST ALWAYS see all leads that are assigned to them or created by them!
     if (!isAdmin) {
+      const uid = String(user?._id || user?.id || '');
       merged = merged.filter(l => {
-        const d = new Date(l.createdAt || l.createdTime || l.addedOn || l.leadDate || 0);
-        return !isNaN(d.getTime()) && d >= DATA_CUTOFF_DATE;
+        const isAssigned = Array.isArray(l.assignedTo)
+          ? l.assignedTo.some(a => String(a?._id || a || '') === uid)
+          : String(l.assignedTo?._id || l.assignedTo || '') === uid;
+        const isCreator = String(l.createdBy?._id || l.createdBy || '') === uid;
+        if (uid && (isAssigned || isCreator)) {
+          return true;
+        }
+        if (hasFullAccess) {
+          const d = new Date(l.createdAt || l.createdTime || l.addedOn || l.leadDate || 0);
+          return !isNaN(d.getTime()) && d >= DATA_CUTOFF_DATE;
+        }
+        return false;
       });
     }
 
     return merged;
-  }, [leads, metaLeads, isAdmin]);
+  }, [leads, metaLeads, isAdmin, hasFullAccess, user?._id, user?.id]);
 
-  // ── Active employees for assignment (Only active employees with Sales / Sales Head role) ───────────
+  // ── Active employees strictly from SALES role (for both filter dropdown and assignment dropdowns) ──
   const salesEmployees = useMemo(() => {
     return employees.filter(emp => {
       if (!emp) return false;
@@ -650,21 +670,26 @@ function MyLeads() {
       const department = (emp.department || '').toLowerCase().trim();
       const designation = (emp.designation || '').toLowerCase().trim();
 
-      // Only employees which have sales or sales head role / designation
-      const isSalesOrSalesHead =
+      // Only employees from sales role, sales executives, telecallers, and business development
+      const isSalesRole =
         roleName === 'sales' ||
+        roleName === 'sales executive' ||
         roleName === 'sales head' ||
         roleName === 'saleshead' ||
         roleName === 'head of sales' ||
+        roleName === 'sales manager' ||
         roleName.includes('sales') ||
         roleName.includes('business development') ||
         roleName.includes('bde') ||
+        roleName.includes('telecaller') ||
         department === 'sales' ||
         department.includes('sales') ||
         designation.includes('sales') ||
-        designation.includes('bde');
+        designation.includes('business development') ||
+        designation.includes('bde') ||
+        designation.includes('telecaller');
 
-      return isSalesOrSalesHead;
+      return isSalesRole;
     });
   }, [employees]);
 
@@ -676,9 +701,11 @@ function MyLeads() {
     const uid = String(user?._id || user?.id || '');
     if (!hasFullAccess && uid) {
       return allLeads.filter(l => {
-        const assignedId = String(l.assignedTo?._id || l.assignedTo || '');
-        const createdById = String(l.createdBy?._id || l.createdBy || '');
-        return assignedId === uid || createdById === uid;
+        const isAssigned = Array.isArray(l.assignedTo)
+          ? l.assignedTo.some(a => String(a?._id || a || '') === uid)
+          : String(l.assignedTo?._id || l.assignedTo || '') === uid;
+        const isCreator = String(l.createdBy?._id || l.createdBy || '') === uid;
+        return isAssigned || isCreator;
       });
     }
     return allLeads;
@@ -794,9 +821,11 @@ function MyLeads() {
     return allLeads.filter(lead => {
       // Sales, executives, and regular employees only see leads assigned to them or created/added by them
       if (!hasFullAccess && uid) {
-        const assignedId = String(lead.assignedTo?._id || lead.assignedTo || '');
-        const createdById = String(lead.createdBy?._id || lead.createdBy || '');
-        if (assignedId !== uid && createdById !== uid) return false;
+        const isAssigned = Array.isArray(lead.assignedTo)
+          ? lead.assignedTo.some(a => String(a?._id || a || '') === uid)
+          : String(lead.assignedTo?._id || lead.assignedTo || '') === uid;
+        const isCreator = String(lead.createdBy?._id || lead.createdBy || '') === uid;
+        if (!isAssigned && !isCreator) return false;
       }
 
       const term = searchTerm.toLowerCase();
@@ -822,9 +851,9 @@ function MyLeads() {
       const matchesSource = !filterSource || lead.source === filterSource;
       const matchesEmployee = !filterEmployee ||
         (Array.isArray(lead.assignedTo)
-          ? lead.assignedTo.some(e => e._id === filterEmployee)
-          : lead.assignedTo?._id === filterEmployee) ||
-        (lead.createdBy?._id === filterEmployee || lead.createdBy === filterEmployee);
+          ? lead.assignedTo.some(e => String(e?._id || e?.id || e || '') === String(filterEmployee))
+          : String(lead.assignedTo?._id || lead.assignedTo?.id || lead.assignedTo || '') === String(filterEmployee)) ||
+        (String(lead.createdBy?._id || lead.createdBy?.id || lead.createdBy || '') === String(filterEmployee));
 
       let matchesDate = true;
       if (filterDate || filterEndDate) {
@@ -962,6 +991,23 @@ function MyLeads() {
   };
 
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN') : '—';
+  const getAssignedDate = (lead) => {
+    if (!lead) return null;
+    const hasAssignee = !!(lead.assignedTo?._id || (typeof lead.assignedTo === 'string' && lead.assignedTo.trim()));
+    if (!hasAssignee) return null;
+    if (lead.assignedDate) return lead.assignedDate;
+    // Check history for latest assignment action
+    if (Array.isArray(lead.history) && lead.history.length > 0) {
+      const assignmentEntry = [...lead.history].reverse().find(h =>
+        h && (h.action === 'Assignment Update' || (h.details && h.details.toLowerCase().includes('assign')))
+      );
+      if (assignmentEntry && assignmentEntry.date) {
+        return assignmentEntry.date;
+      }
+    }
+    // Fallback if already assigned but no explicit date was tracked previously
+    return lead.createdAt || lead.addedOn || lead.date || null;
+  };
   const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', {
     day: '2-digit',
     month: 'short',
@@ -1657,9 +1703,10 @@ function MyLeads() {
 
   const handleExcelQuickAssign = async (leadId, employeeId) => {
     const empId = employeeId || null;
+    const now = new Date().toISOString();
     // Optimistic update for instant UI feedback
     setLeads(prev => prev.map(l => l._id === leadId
-      ? { ...l, assignedTo: empId ? (employees.find(e => e._id === empId) || empId) : null }
+      ? { ...l, assignedTo: empId ? (employees.find(e => e._id === empId) || empId) : null, assignedDate: empId ? now : null }
       : l
     ));
     try {
@@ -1670,7 +1717,7 @@ function MyLeads() {
       }
     } catch (err) {
       // Revert on failure
-      setLeads(prev => prev.map(l => l._id === leadId ? { ...l, assignedTo: l.assignedTo } : l));
+      setLeads(prev => prev.map(l => l._id === leadId ? { ...l, assignedTo: l.assignedTo, assignedDate: l.assignedDate } : l));
       console.error('Assign failed:', err);
       alert(err.response?.data?.message || 'Assign failed');
     }
@@ -1729,13 +1776,17 @@ function MyLeads() {
     }
 
     const empId = employeeId || null;
+    const now = new Date().toISOString();
     // Optimistic update
-    setMetaLeads(prev => prev.map(l => l._id === leadId ? { ...l, assignedTo: empId ? employees.find(e => e._id === empId) || empId : null } : l));
+    setMetaLeads(prev => prev.map(l => l._id === leadId ? { ...l, assignedTo: empId ? employees.find(e => e._id === empId) || empId : null, assignedDate: empId ? now : null } : l));
     try {
-      await api.patch(`/meta-leads/${leadId}`, { assignedTo: empId });
+      const res = await api.patch(`/meta-leads/${leadId}`, { assignedTo: empId });
+      if (res.data) {
+        setMetaLeads(prev => prev.map(l => l._id === leadId ? { ...l, ...res.data, _type: 'meta' } : l));
+      }
     } catch (err) {
       // Revert on failure
-      setMetaLeads(prev => prev.map(l => l._id === leadId ? { ...l, assignedTo: l.assignedTo } : l));
+      setMetaLeads(prev => prev.map(l => l._id === leadId ? { ...l, assignedTo: l.assignedTo, assignedDate: l.assignedDate } : l));
       console.error('Assign failed:', err);
       alert(err.response?.data?.message || 'Assign failed');
     }
@@ -2099,11 +2150,12 @@ function MyLeads() {
     );
     // Update local state
     const emp = employees.find(e => e._id === multiAssignEmployee);
+    const now = new Date().toISOString();
     setLeads(prev => prev.map(l =>
-      selectedLeadIds.has(`regular-${l._id}`) ? { ...l, assignedTo: emp || multiAssignEmployee } : l
+      selectedLeadIds.has(`regular-${l._id}`) ? { ...l, assignedTo: emp || multiAssignEmployee, assignedDate: now } : l
     ));
     setMetaLeads(prev => prev.map(l =>
-      selectedLeadIds.has(`meta-${l._id}`) ? { ...l, assignedTo: emp || multiAssignEmployee } : l
+      selectedLeadIds.has(`meta-${l._id}`) ? { ...l, assignedTo: emp || multiAssignEmployee, assignedDate: now } : l
     ));
     setMultiAssigning(false);
     setShowMultiAssignModal(false);
@@ -2555,7 +2607,7 @@ function MyLeads() {
     const headers = [
       '#', 'Client Name', 'Company', 'Phone', 'Email',
       'Requirement', 'Country', 'Industry', 'Source',
-      'Assigned To', 'Status', 'Lead Type', 'Budget', 'Notes', 'Date', 'Added On', 'Added By'
+      'Assigned To', 'Status', 'Lead Type', 'Budget', 'Notes', 'Assign Date', 'Added On', 'Added By'
     ];
 
     const asText = (val) => val ? `="${val}"` : '';
@@ -2577,7 +2629,7 @@ function MyLeads() {
       lead.leadType || '',
       lead.budget || '',
       lead.notes || '',
-      fmtDate(lead.createdAt),
+      lead.assignedTo ? fmtDate(getAssignedDate(lead)) : '—',
       fmtDate(lead.addedOn),
       lead.createdBy ? `${lead.createdBy.firstName || ''} ${lead.createdBy.lastName || ''}`.trim() || lead.createdBy.email : '—',
     ]);
@@ -4192,7 +4244,7 @@ function MyLeads() {
                   <th>Lead Type</th>
                   <th>Assigned To</th>
                   <th>Status</th>
-                  <th>Date</th>
+                  <th>Assign Date</th>
                   <th>Added On</th>
                   <th>Added By</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
@@ -4559,7 +4611,7 @@ function MyLeads() {
                           </div>
                         )}
                       </td>
-                      <td style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap' }}>{fmtDate(lead.createdAt)}</td>
+                      <td style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap' }}>{lead.assignedTo ? fmtDate(getAssignedDate(lead)) : '—'}</td>
                       <td style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap' }}>{fmtDate(lead.addedOn)}</td>
                       <td style={{ fontSize: '10px', whiteSpace: 'nowrap' }}>
                         {lead.createdBy ? (() => {
