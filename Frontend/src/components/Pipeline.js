@@ -248,13 +248,9 @@ const isFollowUpTimePassed = (act) => {
   return targetDate.getTime() <= Date.now();
 };
 
-// Checks if current user is permitted to edit this follow-up (allowed only if scheduled time has not passed)
+// Checks if current user is permitted to edit this follow-up
 const canUserEditFollowUp = (act, currentUser, isSuperAdminOrHead = false) => {
   if (!act || act.type !== 'followup') return false;
-  // If time has passed, editing is not allowed
-  if (isFollowUpTimePassed(act)) return false;
-  // If already completed or cancelled, cannot edit
-  if (act.status === 'Completed' || act.status === 'Cancelled') return false;
 
   if (isSuperAdminOrHead) return true;
   if (!currentUser) return false;
@@ -2605,6 +2601,7 @@ function Pipeline() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [pipelines, setPipelines] = useState(() => {
+    if (!isAdmin) return [];
     try {
       const deleted = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || '[]');
       const saved = localStorage.getItem('crm_pipelines');
@@ -2639,6 +2636,7 @@ function Pipeline() {
     return DEFAULT_PIPELINES;
   });
   const [stages, setStages] = useState(() => {
+    if (!isAdmin) return [];
     try {
       const saved = localStorage.getItem('crm_stages');
       if (saved) {
@@ -2655,6 +2653,7 @@ function Pipeline() {
   });
   const [dealTypes, setDealTypes] = useState(DEAL_TYPE_OPTIONS);
   const [pipelineOptions, setPipelineOptions] = useState(() => {
+    if (!isAdmin) return [];
     try {
       const deleted = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || '[]');
       const saved = localStorage.getItem('crm_pipeline_options');
@@ -2828,19 +2827,7 @@ function Pipeline() {
       setDetailedContactId(queryContactId);
     }
   }, [queryContactId]);
-  const [dealActivities, setDealActivities] = useState(() => {
-    try {
-      const saved = localStorage.getItem('crm_deal_activities');
-      if (saved) return JSON.parse(saved);
-    } catch (e) { }
-    return {};
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('crm_deal_activities', JSON.stringify(dealActivities));
-    } catch (e) { }
-  }, [dealActivities]);
+  const [dealActivities, setDealActivities] = useState({});
 
   const [newActivityType, setNewActivityType] = useState('note'); // 'note' | 'email' | 'message' | 'call'
   const [newActivityContent, setNewActivityContent] = useState('');
@@ -2988,6 +2975,7 @@ function Pipeline() {
 
   // Contacts Management State
   const [contactStages, setContactStages] = useState(() => {
+    if (!isAdmin) return [];
     const legacyDummyNames = ['marketing qualified (mql)', 'marketing qualified', 'sales qualified (sql)', 'sales qualified', 'opportunity', 'opportunity stage', 'customer', 'retention & customer'];
     try {
       const deleted = JSON.parse(localStorage.getItem('crm_deleted_stages') || '[]');
@@ -3014,21 +3002,23 @@ function Pipeline() {
         .map(d => d.toLowerCase().trim());
     } catch (e) { }
 
-    let stages = (contactStages || [])
+    let list = (contactStages || [])
       .filter(s => !deleted.includes((s.name || s.id || '').toLowerCase().trim()))
       .map((s, idx) => ({
         ...s,
         id: s.id || s.name || `contact-stage-${idx}`,
         name: s.name || s.id || `Stage ${idx + 1}`
       }));
-    const existingNames = new Set(stages.map(s => (s.name || s.id || '').toLowerCase().trim()));
+    const existingNames = new Set(list.map(s => (s.name || s.id || '').toLowerCase().trim()));
 
     // Dynamically include any stage present on existing contacts ONLY if NOT deleted
     contacts.forEach(c => {
+      const cDate = getItemCreationDate(c);
+      if (!isAdmin && cDate < DATA_CUTOFF_DATE) return;
       const cStage = (c.leadStage || '').trim();
       if (cStage && !existingNames.has(cStage.toLowerCase()) && !deleted.includes(cStage.toLowerCase())) {
         existingNames.add(cStage.toLowerCase());
-        stages.push({
+        list.push({
           id: cStage,
           name: cStage,
           badgeClass: 'new',
@@ -3037,8 +3027,30 @@ function Pipeline() {
       }
     });
 
-    return stages;
-  }, [contactStages, contacts]);
+    if (!isAdmin) {
+      list = list.filter(s => {
+        if (s.createdAt) return new Date(s.createdAt) >= DATA_CUTOFF_DATE;
+        return true;
+      });
+      if (list.length === 0) {
+        list = [{ id: 'Lead', name: 'Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }];
+      }
+    } else if (adminDataViewMode === 'new') {
+      list = list.filter(s => {
+        if (s.createdAt) return new Date(s.createdAt) >= DATA_CUTOFF_DATE;
+        const name = (s.name || s.id || '').toLowerCase().trim();
+        return contacts.some(c => getItemCreationDate(c) >= DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
+      });
+    } else if (adminDataViewMode === 'old') {
+      list = list.filter(s => {
+        if (s.createdAt) return new Date(s.createdAt) < DATA_CUTOFF_DATE;
+        const name = (s.name || s.id || '').toLowerCase().trim();
+        return contacts.some(c => getItemCreationDate(c) < DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
+      });
+    }
+
+    return list;
+  }, [contactStages, contacts, isAdmin, adminDataViewMode]);
   const [draggedContactId, setDraggedContactId] = useState(null);
   const [dragOverContactColumnId, setDragOverContactColumnId] = useState(null);
   const [editingContactStageId, setEditingContactStageId] = useState(null);
@@ -3342,6 +3354,14 @@ function Pipeline() {
     try {
       localStorage.removeItem('crm_deals');
       localStorage.removeItem('crm_contacts');
+      localStorage.removeItem('crm_deal_activities');
+      if (!isAdmin) {
+        localStorage.removeItem('crm_pipelines');
+        localStorage.removeItem('crm_stages');
+        localStorage.removeItem('crm_contact_stages');
+        localStorage.removeItem('crm_lead_stages');
+        localStorage.removeItem('crm_pipeline_options');
+      }
     } catch (e) { }
 
     const fetchAllData = async () => {
@@ -3966,6 +3986,15 @@ function Pipeline() {
     setCompanyOwnerSearchQuery('');
   };
 
+  // Ensure non-full access users (e.g. Sales role) do not have lingering owner filters active
+  useEffect(() => {
+    if (!hasFullAccess) {
+      if (ownerFilter !== 'all') setOwnerFilter('all');
+      if (contactOwnerFilter !== 'all') setContactOwnerFilter('all');
+      if (companyOwnerFilter !== 'all') setCompanyOwnerFilter('all');
+    }
+  }, [hasFullAccess, ownerFilter, contactOwnerFilter, companyOwnerFilter]);
+
   // Tasks Management State
   const [tasks, setTasks] = useState(INITIAL_SAMPLE_TASKS);
   const [taskSearchQuery, setTaskSearchQuery] = useState('');
@@ -4196,30 +4225,42 @@ function Pipeline() {
     });
   }, [detailedContact, tasks]);
 
+  // Date & Time normalization helpers for follow-ups and reminders
+  const normYMD = useCallback((d) => {
+    if (!d) return '';
+    const s = String(d).trim();
+    const ddmmyyyy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (ddmmyyyy) {
+      return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+    }
+    const yyyymmdd = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (yyyymmdd) {
+      return `${yyyymmdd[1]}-${yyyymmdd[2].padStart(2, '0')}-${yyyymmdd[3].padStart(2, '0')}`;
+    }
+    return s;
+  }, []);
+
+  const normTimeStr = useCallback((t) => {
+    if (!t) return '';
+    return String(t).trim().toLowerCase().replace(/\s+/g, '').replace(/^0/, '');
+  }, []);
+
   // Reminders / Follow-ups Computation
   const isReminderOverdue = useCallback((r) => {
     if (!r.followUpDate || r.status === 'Completed' || r.status === 'Cancelled') return false;
     const now = new Date();
     const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    let dateStr = r.followUpDate;
-    if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(dateStr)) {
-      const parts = dateStr.split(/[-/]/);
-      dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
-    }
+    const dateStr = normYMD(r.followUpDate);
     return dateStr < todayYMD;
-  }, []);
+  }, [normYMD]);
 
   const isReminderToday = useCallback((r) => {
     if (!r.followUpDate) return false;
     const now = new Date();
     const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    let dateStr = r.followUpDate;
-    if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(dateStr)) {
-      const parts = dateStr.split(/[-/]/);
-      dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
-    }
+    const dateStr = normYMD(r.followUpDate);
     return dateStr === todayYMD;
-  }, []);
+  }, [normYMD]);
 
   const allReminders = useMemo(() => {
     const list = [];
@@ -4295,9 +4336,34 @@ function Pipeline() {
         if (dDate < DATA_CUTOFF_DATE) return;
       }
 
-      const custom = dealActivities[d._id] || [];
       const backend = Array.isArray(d.activities) ? d.activities : [];
-      // Prioritize backend records that possess official Mongo _id
+      const custom = (dealActivities[d._id] || []).filter(cAct => {
+        const cId = cAct._id ? String(cAct._id) : (cAct.id ? String(cAct.id) : '');
+        if (cId && backend.some(b => String(b._id || b.id || '') === cId)) return false;
+        const cNormChannel = (cAct.channel || '').trim().toLowerCase();
+        const cNormDate = normYMD(cAct.followUpDate || cAct.date);
+        const cNormTime = normTimeStr(cAct.followUpTime || cAct.time);
+        const cNormTitle = (cAct.title || '').trim().toLowerCase();
+        const cNormRemarks = (cAct.remarks || cAct.content || '').trim().toLowerCase();
+        if (backend.some(b => {
+          const bId = String(b._id || b.id || '');
+          if (cId && bId && (bId === cId || bId.includes(cId) || cId.includes(bId))) return true;
+          const bNormChannel = (b.channel || '').trim().toLowerCase();
+          const bNormDate = normYMD(b.followUpDate || b.date);
+          const bNormTime = normTimeStr(b.followUpTime || b.time);
+          const bNormTitle = (b.title || '').trim().toLowerCase();
+          const bNormRemarks = (b.remarks || b.content || '').trim().toLowerCase();
+          if (cNormChannel === bNormChannel) {
+            if (cNormDate && bNormDate && cNormDate === bNormDate && cNormTime === bNormTime) return true;
+            if (cNormRemarks && bNormRemarks && cNormRemarks === bNormRemarks) return true;
+            if (cNormTitle && bNormTitle && cNormTitle === bNormTitle) return true;
+          }
+          return false;
+        })) {
+          return false;
+        }
+        return true;
+      });
       const combined = [...backend, ...custom];
 
       // Resolve associated contact details for this deal
@@ -4322,10 +4388,14 @@ function Pipeline() {
         const idKey = act._id ? String(act._id) : (act.id ? String(act.id) : '');
         const normTitle = (act.title || '').trim().toLowerCase();
         const normChannel = (act.channel || '').trim().toLowerCase();
-        const normDate = (act.followUpDate || act.date || '').trim();
-        const normTime = (act.followUpTime || act.time || '').trim().toLowerCase();
         const normRemarks = (act.remarks || act.content || '').trim().toLowerCase();
-        const signature = `deal-${d._id}-${normTitle}-${normChannel}-${normDate}-${normTime}-${normRemarks}`;
+        const actNormDate = normYMD(act.followUpDate || act.date);
+        const actNormTime = normTimeStr(act.followUpTime || act.time);
+
+        // When title or remarks exist, collapse any duplicate or updated copies for the same deal touchpoint
+        const signature = (normTitle || normRemarks)
+          ? `deal-${d._id}-${normTitle}-${normChannel}-${normRemarks}`
+          : `deal-${d._id}-${normChannel}-${actNormDate}-${actNormTime}`;
 
         if ((idKey && seen.has(idKey)) || seenSignatures.has(signature)) return;
         if (idKey) seen.add(idKey);
@@ -4367,9 +4437,34 @@ function Pipeline() {
         if (cDate < DATA_CUTOFF_DATE) return;
       }
 
-      const custom = dealActivities[c._id] || [];
       const backend = Array.isArray(c.activities) ? c.activities : [];
-      // Prioritize backend records that possess official Mongo _id
+      const custom = (dealActivities[c._id] || []).filter(cAct => {
+        const cId = cAct._id ? String(cAct._id) : (cAct.id ? String(cAct.id) : '');
+        if (cId && backend.some(b => String(b._id || b.id || '') === cId)) return false;
+        const cNormChannel = (cAct.channel || '').trim().toLowerCase();
+        const cNormDate = normYMD(cAct.followUpDate || cAct.date);
+        const cNormTime = normTimeStr(cAct.followUpTime || cAct.time);
+        const cNormTitle = (cAct.title || '').trim().toLowerCase();
+        const cNormRemarks = (cAct.remarks || cAct.content || '').trim().toLowerCase();
+        if (backend.some(b => {
+          const bId = String(b._id || b.id || '');
+          if (cId && bId && (bId === cId || bId.includes(cId) || cId.includes(bId))) return true;
+          const bNormChannel = (b.channel || '').trim().toLowerCase();
+          const bNormDate = normYMD(b.followUpDate || b.date);
+          const bNormTime = normTimeStr(b.followUpTime || b.time);
+          const bNormTitle = (b.title || '').trim().toLowerCase();
+          const bNormRemarks = (b.remarks || b.content || '').trim().toLowerCase();
+          if (cNormChannel === bNormChannel) {
+            if (cNormDate && bNormDate && cNormDate === bNormDate && cNormTime === bNormTime) return true;
+            if (cNormRemarks && bNormRemarks && cNormRemarks === bNormRemarks) return true;
+            if (cNormTitle && bNormTitle && cNormTitle === bNormTitle) return true;
+          }
+          return false;
+        })) {
+          return false;
+        }
+        return true;
+      });
       const combined = [...backend, ...custom];
 
       const contactName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || 'Untitled Contact';
@@ -4383,10 +4478,13 @@ function Pipeline() {
         const idKey = act._id ? String(act._id) : (act.id ? String(act.id) : '');
         const normTitle = (act.title || '').trim().toLowerCase();
         const normChannel = (act.channel || '').trim().toLowerCase();
-        const normDate = (act.followUpDate || act.date || '').trim();
-        const normTime = (act.followUpTime || act.time || '').trim().toLowerCase();
         const normRemarks = (act.remarks || act.content || '').trim().toLowerCase();
-        const signature = `contact-${c._id}-${normTitle}-${normChannel}-${normDate}-${normTime}-${normRemarks}`;
+        const actNormDate = normYMD(act.followUpDate || act.date);
+        const actNormTime = normTimeStr(act.followUpTime || act.time);
+
+        const signature = (normTitle || normRemarks)
+          ? `contact-${c._id}-${normTitle}-${normChannel}-${normRemarks}`
+          : `contact-${c._id}-${normChannel}-${actNormDate}-${actNormTime}`;
 
         if ((idKey && seen.has(idKey)) || seenSignatures.has(signature)) return;
         if (idKey) seen.add(idKey);
@@ -4417,7 +4515,7 @@ function Pipeline() {
     });
 
     return list;
-  }, [deals, contacts, dealActivities, isAdmin, user, adminDataViewMode]);
+  }, [deals, contacts, dealActivities, isAdmin, user, adminDataViewMode, normYMD, normTimeStr]);
 
   const activeRemindersCount = useMemo(() => {
     return allReminders.length;
@@ -6804,15 +6902,30 @@ function Pipeline() {
   const handleOpenEditReminder = (reminder, e) => {
     if (e) e.stopPropagation();
     setEditingReminder(reminder);
+
+    let dateStr = reminder.followUpDate || reminder.date || new Date().toISOString().slice(0, 10);
+    const ddmmyyyy = String(dateStr).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (ddmmyyyy) {
+      dateStr = `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+    }
+
+    let nextDateStr = reminder.nextFollowUpDate || '';
+    if (nextDateStr) {
+      const nextMatch = String(nextDateStr).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if (nextMatch) {
+        nextDateStr = `${nextMatch[3]}-${nextMatch[2].padStart(2, '0')}-${nextMatch[1].padStart(2, '0')}`;
+      }
+    }
+
     setReminderFormData({
       targetType: reminder.entityType,
       targetId: reminder.entityId,
       title: reminder.title || '',
       channel: reminder.channel || 'Call',
       status: reminder.status || 'Scheduled',
-      followUpDate: reminder.followUpDate || '',
+      followUpDate: dateStr,
       followUpTime: reminder.followUpTime || '11:00 AM',
-      nextFollowUpDate: reminder.nextFollowUpDate || '',
+      nextFollowUpDate: nextDateStr,
       remarks: reminder.remarks || reminder.content || ''
     });
     setShowCreateReminderModal(true);
@@ -6852,7 +6965,14 @@ function Pipeline() {
       };
 
       if (editingReminder) {
-        const actId = editingReminder._id || editingReminder.id;
+        const actId = String(editingReminder._id || editingReminder.id || '');
+        const altActId = String(editingReminder.id || editingReminder._id || '');
+        const origNormDate = normYMD(editingReminder.followUpDate || editingReminder.date);
+        const origNormTime = normTimeStr(editingReminder.followUpTime || editingReminder.time);
+        const origChannel = (editingReminder.channel || '').trim().toLowerCase();
+        const origTitle = (editingReminder.title || '').trim().toLowerCase();
+        const origRemarks = (editingReminder.remarks || editingReminder.content || '').trim().toLowerCase();
+
         const updatePayload = {
           title: reminderFormData.title.trim() || `${reminderFormData.channel} Follow-up`,
           channel: reminderFormData.channel,
@@ -6864,18 +6984,39 @@ function Pipeline() {
           content: reminderFormData.remarks.trim()
         };
 
-        setDealActivities(prev => {
-          const currentList = prev[targetId] || [];
-          return {
-            ...prev,
-            [targetId]: currentList.map(a => (String(a.id) === String(actId) || String(a._id) === String(actId)) ? { ...a, ...updatePayload } : a)
-          };
-        });
+        const isMatchingAct = (a) => {
+          if (!a) return false;
+          const aId = String(a._id || a.id || '');
+          const aAltId = String(a.id || a._id || '');
+          if (actId && (aId === actId || aAltId === actId || aId === altActId || aAltId === altActId)) return true;
+          const aChannel = (a.channel || '').trim().toLowerCase();
+          const aNormDate = normYMD(a.followUpDate || a.date);
+          const aNormTime = normTimeStr(a.followUpTime || a.time);
+          const aTitle = (a.title || '').trim().toLowerCase();
+          const aRemarks = (a.remarks || a.content || '').trim().toLowerCase();
+          if (aChannel === origChannel) {
+            if (aNormDate && origNormDate && aNormDate === origNormDate && (aNormTime === origNormTime || aTitle === origTitle)) return true;
+            if (origRemarks && aRemarks && aRemarks === origRemarks) return true;
+            if (origTitle && aTitle && aTitle === origTitle) return true;
+          }
+          return false;
+        };
 
+        // Synchronously resolve the target entity and real MongoDB activity _id BEFORE state updates
+        const currentTargetObj = isContactAct
+          ? contacts.find(c => String(c._id) === String(targetId))
+          : deals.find(d => String(d._id) === String(targetId));
+        const existingActivities = currentTargetObj?.activities || [];
+        const matchedAct = existingActivities.find(isMatchingAct);
+        const realMongoId = matchedAct?._id
+          ? String(matchedAct._id)
+          : (actId && !actId.startsWith('deal-act-') && !actId.startsWith('contact-act-') && !actId.startsWith('followup-') ? actId : null);
+
+        // 1. Update entities in state
         if (isContactAct) {
           setContacts(prev => prev.map(c => {
             if (String(c._id) === String(targetId)) {
-              const acts = (c.activities || []).map(a => (String(a.id) === String(actId) || String(a._id) === String(actId)) ? { ...a, ...updatePayload } : a);
+              const acts = (c.activities || []).map(a => isMatchingAct(a) ? { ...a, ...updatePayload } : a);
               return { ...c, activities: acts };
             }
             return c;
@@ -6883,18 +7024,31 @@ function Pipeline() {
         } else {
           setDeals(prev => prev.map(d => {
             if (String(d._id) === String(targetId)) {
-              const acts = (d.activities || []).map(a => (String(a.id) === String(actId) || String(a._id) === String(actId)) ? { ...a, ...updatePayload } : a);
+              const acts = (d.activities || []).map(a => isMatchingAct(a) ? { ...a, ...updatePayload } : a);
               return { ...d, activities: acts };
             }
             return d;
           }));
         }
 
+        // 2. Remove matching activity from dealActivities local state to avoid duplicate ghost entries
+        setDealActivities(prev => {
+          const currentList = prev[targetId] || [];
+          return {
+            ...prev,
+            [targetId]: currentList.filter(a => !isMatchingAct(a))
+          };
+        });
+
+        // 3. Sync update with backend
         try {
-          if (isContactAct && targetId && !targetId.toString().startsWith('contact-')) {
-            await api.patch(`/pipeline-contacts/${targetId}/activities/${actId}`, updatePayload);
-          } else if (!isContactAct && targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
-            await api.patch(`/deals/${targetId}/activities/${actId}`, updatePayload);
+          const patchId = realMongoId || actId;
+          if (patchId && !patchId.startsWith('deal-act-') && !patchId.startsWith('contact-act-') && !patchId.startsWith('followup-')) {
+            if (isContactAct && targetId && !targetId.toString().startsWith('contact-')) {
+              await api.patch(`/pipeline-contacts/${targetId}/activities/${patchId}`, updatePayload);
+            } else if (!isContactAct && targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
+              await api.patch(`/deals/${targetId}/activities/${patchId}`, updatePayload);
+            }
           }
         } catch (err) {
           console.warn('API edit reminder error:', err.message);
@@ -6981,10 +7135,6 @@ function Pipeline() {
 
   const handleOpenEditFollowUp = (act, entityType = null, entityId = null) => {
     if (!act) return;
-    if (isFollowUpTimePassed(act)) {
-      alert('The scheduled time for this follow-up has already passed. It cannot be edited.');
-      return;
-    }
 
     const determinedEntityType = entityType || (activeTab === 'contacts' || (!detailedDealId && !!detailedContactId) ? 'contact' : 'deal');
     const determinedEntityId = entityId || (determinedEntityType === 'contact' ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : null));
@@ -7022,11 +7172,7 @@ function Pipeline() {
       return;
     }
 
-    const targetDate = parseFollowUpDateTime(editFollowUpForm.followUpDate, editFollowUpForm.followUpTime);
-    if (targetDate && targetDate.getTime() <= Date.now()) {
-      alert('The selected follow-up date and time is in the past. Please choose an upcoming date and time.');
-      return;
-    }
+    // Allow users to freely set/update follow-up date and time without blocking past timestamps
 
     const isContactAct = editingFollowUp._targetEntityType === 'contact' || activeTab === 'contacts' || (!detailedDealId && !!detailedContactId);
     const targetId = editingFollowUp._targetEntityId || (isContactAct ? (detailedContact ? detailedContact._id : null) : (detailedDeal ? detailedDeal._id : (detailedContact ? detailedContact._id : null)));
@@ -7062,38 +7208,82 @@ function Pipeline() {
     setIsSavingEditFollowUp(true);
 
     try {
-      // 1. Update dealActivities local state
-      setDealActivities(prev => {
-        const currentList = prev[targetId] || [];
-        return {
-          ...prev,
-          [targetId]: currentList.map(a => (a.id === actId || a._id === actId) ? { ...a, ...updatedPayload } : a)
-        };
-      });
+      const actId = String(editingFollowUp.id || editingFollowUp._id || '');
+      const altActId = String(editingFollowUp._id || editingFollowUp.id || '');
+      const origNormDate = normYMD(editingFollowUp.followUpDate || editingFollowUp.date);
+      const origNormTime = normTimeStr(editingFollowUp.followUpTime || editingFollowUp.time);
+      const origChannel = (editingFollowUp.channel || '').trim().toLowerCase();
+      const origTitle = (editingFollowUp.title || '').trim().toLowerCase();
+      const origRemarks = (editingFollowUp.remarks || editingFollowUp.content || '').trim().toLowerCase();
 
-      // 2. Update entities in state
+      const isMatchingAct = (a) => {
+        if (!a) return false;
+        const aId = String(a._id || a.id || '');
+        const aAltId = String(a.id || a._id || '');
+        if (actId && (aId === actId || aAltId === actId || aId === altActId || aAltId === altActId)) return true;
+        const aChannel = (a.channel || '').trim().toLowerCase();
+        const aNormDate = normYMD(a.followUpDate || a.date);
+        const aNormTime = normTimeStr(a.followUpTime || a.time);
+        const aTitle = (a.title || '').trim().toLowerCase();
+        const aRemarks = (a.remarks || a.content || '').trim().toLowerCase();
+        if (aChannel === origChannel) {
+          if (aNormDate && origNormDate && aNormDate === origNormDate && (aNormTime === origNormTime || aTitle === origTitle)) return true;
+          if (origRemarks && aRemarks && aRemarks === origRemarks) return true;
+          if (origTitle && aTitle && aTitle === origTitle) return true;
+        }
+        return false;
+      };
+
+      // Synchronously resolve the target entity and real MongoDB activity _id BEFORE state updates
+      const currentTargetObj = isContactAct
+        ? contacts.find(c => String(c._id) === String(targetId))
+        : deals.find(d => String(d._id) === String(targetId));
+      const existingActivities = currentTargetObj?.activities || [];
+      const matchedAct = existingActivities.find(isMatchingAct);
+      const realMongoId = matchedAct?._id
+        ? String(matchedAct._id)
+        : (actId && !actId.startsWith('deal-act-') && !actId.startsWith('contact-act-') && !actId.startsWith('followup-') ? actId : null);
+
+      // 1. Update entities in state
       if (isContactAct) {
         setContacts(prev => prev.map(c => {
-          if (c._id === targetId) {
-            const acts = (c.activities || []).map(a => (a.id === actId || a._id === actId) ? { ...a, ...updatedPayload } : a);
+          if (String(c._id) === String(targetId)) {
+            const acts = (c.activities || []).map(a => isMatchingAct(a) ? { ...a, ...updatedPayload } : a);
             return { ...c, activities: acts };
           }
           return c;
         }));
-        if (targetId && !targetId.toString().startsWith('contact-')) {
-          await api.patch(`/pipeline-contacts/${targetId}/activities/${actId}`, updatedPayload);
-        }
       } else {
         setDeals(prev => prev.map(d => {
-          if (d._id === targetId) {
-            const acts = (d.activities || []).map(a => (a.id === actId || a._id === actId) ? { ...a, ...updatedPayload } : a);
+          if (String(d._id) === String(targetId)) {
+            const acts = (d.activities || []).map(a => isMatchingAct(a) ? { ...a, ...updatedPayload } : a);
             return { ...d, activities: acts };
           }
           return d;
         }));
-        if (targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
-          await api.patch(`/deals/${targetId}/activities/${actId}`, updatedPayload);
+      }
+
+      // 2. Remove matching activity from dealActivities local state to avoid duplicate ghost entries
+      setDealActivities(prev => {
+        const currentList = prev[targetId] || [];
+        return {
+          ...prev,
+          [targetId]: currentList.filter(a => !isMatchingAct(a))
+        };
+      });
+
+      // 3. Sync update with backend
+      try {
+        const patchId = realMongoId || actId;
+        if (patchId && !patchId.startsWith('deal-act-') && !patchId.startsWith('contact-act-') && !patchId.startsWith('followup-')) {
+          if (isContactAct && targetId && !targetId.toString().startsWith('contact-')) {
+            await api.patch(`/pipeline-contacts/${targetId}/activities/${patchId}`, updatedPayload);
+          } else if (!isContactAct && targetId && !targetId.toString().startsWith('deal-sample-') && !targetId.toString().startsWith('deal-')) {
+            await api.patch(`/deals/${targetId}/activities/${patchId}`, updatedPayload);
+          }
         }
+      } catch (err) {
+        console.warn('API edit follow-up error:', err.message);
       }
 
       setEditingFollowUp(null);
@@ -7310,7 +7500,7 @@ function Pipeline() {
     }
     const badgeClasses = ['new', 'hot', 'cold', 'won', 'old', 'custom'];
     const randomBadge = badgeClasses[pipelines.length % badgeClasses.length];
-    const newP = { id: trimmed, name: trimmed, badgeClass: randomBadge };
+    const newP = { id: trimmed, name: trimmed, badgeClass: randomBadge, createdAt: new Date().toISOString() };
     const nextPipelines = [...pipelines, newP];
     const nextOptions = pipelineOptions.includes(trimmed) ? pipelineOptions : [...pipelineOptions, trimmed];
 
@@ -7480,7 +7670,7 @@ function Pipeline() {
     }
     const badgeClasses = ['new', 'hot', 'cold', 'won', 'custom'];
     const randomBadge = badgeClasses[contactStages.length % badgeClasses.length];
-    const newStage = { id: trimmed, name: trimmed, badgeClass: randomBadge };
+    const newStage = { id: trimmed, name: trimmed, badgeClass: randomBadge, createdAt: new Date().toISOString() };
     const nextStages = [...contactStages, newStage];
     const nextLeadStages = leadStages.includes(trimmed) ? leadStages : [...leadStages, trimmed];
 
@@ -7686,7 +7876,7 @@ function Pipeline() {
     if (!stages.some(s => (s.id || '').toLowerCase() === stageName.toLowerCase() || (s.name || '').toLowerCase() === stageName.toLowerCase())) {
       const badgeClasses = ['custom', 'new', 'hot', 'cold', 'won'];
       const randomBadge = badgeClasses[stages.length % badgeClasses.length];
-      const newStageObj = { id: stageName, name: stageName, badgeClass: randomBadge, isCustom: true };
+      const newStageObj = { id: stageName, name: stageName, badgeClass: randomBadge, isCustom: true, createdAt: new Date().toISOString() };
       const nextStages = [...stages, newStageObj];
       setStages(nextStages);
       try {
@@ -7718,7 +7908,7 @@ function Pipeline() {
     if (!pipelines.some(p => (p.name || p.id || '').toLowerCase() === pName.toLowerCase())) {
       const badgeClasses = ['new', 'hot', 'cold', 'won', 'old', 'custom'];
       const randomBadge = badgeClasses[pipelines.length % badgeClasses.length];
-      nextPipelines = [...pipelines, { id: pName, name: pName, badgeClass: randomBadge }];
+      nextPipelines = [...pipelines, { id: pName, name: pName, badgeClass: randomBadge, createdAt: new Date().toISOString() }];
       setPipelines(nextPipelines);
     }
     let deletedPipelines = [];
@@ -8175,6 +8365,99 @@ function Pipeline() {
     setIsDateDropdownOpen(false);
   };
 
+  const PRE_CUTOFF_LEGACY_STAGES = useMemo(() => [
+    'sales pipeline',
+    'enterprise pipeline',
+    'lead conversion pipeline',
+    'renewal & retention pipeline',
+    'partnership pipeline',
+    'hot',
+    'cold',
+    'old',
+    'marketing qualified (mql)',
+    'marketing qualified',
+    'sales qualified (sql)',
+    'sales qualified',
+    'opportunity',
+    'opportunity stage',
+    'customer',
+    'retention & customer'
+  ], []);
+
+  // Stage cutoff filter:
+  // Non-admins (Sales Head, Sales Manager, Sales Executives) only see stages created on or after 17 Oct 2026.
+  // Admins see all stages (or filtered by adminDataViewMode if 'new' or 'old').
+  const isStageCreatedOnOrAfterCutoff = useCallback((item, type = 'deal') => {
+    if (!item) return false;
+
+    // Explicit createdAt timestamp check
+    if (item?.createdAt) {
+      const itemCreatedAt = new Date(item.createdAt);
+      if (isAdmin) {
+        if (adminDataViewMode === 'old') return itemCreatedAt < DATA_CUTOFF_DATE;
+        if (adminDataViewMode === 'new') return itemCreatedAt >= DATA_CUTOFF_DATE;
+        return true; // 'all' mode
+      }
+      return itemCreatedAt >= DATA_CUTOFF_DATE;
+    }
+
+    const name = (typeof item === 'string' ? item : (item?.name || item?.id || '')).toLowerCase().trim();
+    if (!name) return false;
+
+    if (isAdmin) {
+      if (adminDataViewMode === 'old') {
+        if (PRE_CUTOFF_LEGACY_STAGES.includes(name)) return true;
+        if (type === 'deal') {
+          return deals.some(d => getItemCreationDate(d) < DATA_CUTOFF_DATE && ((d.pipeline || '').toLowerCase().trim() === name || (d.stage || '').toLowerCase().trim() === name));
+        } else {
+          return contacts.some(c => getItemCreationDate(c) < DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
+        }
+      }
+      if (adminDataViewMode === 'new') {
+        if (PRE_CUTOFF_LEGACY_STAGES.includes(name)) return false;
+        if (type === 'deal') {
+          return deals.some(d => getItemCreationDate(d) >= DATA_CUTOFF_DATE && ((d.pipeline || '').toLowerCase().trim() === name || (d.stage || '').toLowerCase().trim() === name));
+        } else {
+          return contacts.some(c => getItemCreationDate(c) >= DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
+        }
+      }
+      return true; // 'all' mode: admin sees all
+    }
+
+    // For non-admin roles (Sales Head, Sales Manager, Sales Executives):
+    // 1. If it's a known legacy pre-cutoff stage, it MUST be hidden!
+    if (PRE_CUTOFF_LEGACY_STAGES.includes(name)) {
+      return false;
+    }
+
+    // 2. Active stages configured in pipeline-configs or created after 17 Oct 2026 are visible!
+    return true;
+  }, [isAdmin, adminDataViewMode, deals, contacts, PRE_CUTOFF_LEGACY_STAGES]);
+
+  const visiblePipelines = useMemo(() => {
+    const list = (pipelines || []).filter(p => isStageCreatedOnOrAfterCutoff(p, 'deal'));
+    if (!isAdmin && list.length === 0) {
+      return [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }];
+    }
+    return list;
+  }, [pipelines, isStageCreatedOnOrAfterCutoff, isAdmin]);
+
+  const visiblePipelineOptions = useMemo(() => {
+    const list = (pipelineOptions || []).filter(p => isStageCreatedOnOrAfterCutoff(p, 'deal'));
+    if (!isAdmin && list.length === 0) {
+      return ['New Lead'];
+    }
+    return list;
+  }, [pipelineOptions, isStageCreatedOnOrAfterCutoff, isAdmin]);
+
+  const visibleStages = useMemo(() => {
+    const list = (stages || []).filter(s => isStageCreatedOnOrAfterCutoff(s, 'deal'));
+    if (!isAdmin && list.length === 0) {
+      return [{ id: 'New', name: 'New', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }];
+    }
+    return list;
+  }, [stages, isStageCreatedOnOrAfterCutoff, isAdmin]);
+
   // Helper to determine the single, canonical stage/column a deal belongs to
   const getDealStageName = useCallback((deal, currentPipelines) => {
     if (!deal) return '';
@@ -8350,20 +8633,20 @@ function Pipeline() {
   // Counts per pipeline
   const pipelineCounts = useMemo(() => {
     const counts = {};
-    pipelines.forEach(p => {
+    visiblePipelines.forEach(p => {
       counts[p.name] = 0;
       counts[p.id] = 0;
     });
     filteredDeals.forEach(d => {
-      const stageName = getDealStageName(d, pipelines);
-      const matchedP = pipelines.find(p => (p.name || '').trim().toLowerCase() === stageName.trim().toLowerCase());
+      const stageName = getDealStageName(d, visiblePipelines);
+      const matchedP = visiblePipelines.find(p => (p.name || '').trim().toLowerCase() === stageName.trim().toLowerCase());
       if (matchedP) {
         counts[matchedP.name] = (counts[matchedP.name] || 0) + 1;
         if (matchedP.id !== matchedP.name) {
           counts[matchedP.id] = counts[matchedP.name];
         }
-      } else if (pipelines.length > 0) {
-        const firstP = pipelines[0];
+      } else if (visiblePipelines.length > 0) {
+        const firstP = visiblePipelines[0];
         counts[firstP.name] = (counts[firstP.name] || 0) + 1;
         if (firstP.id !== firstP.name) {
           counts[firstP.id] = counts[firstP.name];
@@ -8371,7 +8654,7 @@ function Pipeline() {
       }
     });
     return counts;
-  }, [filteredDeals, pipelines, getDealStageName]);
+  }, [filteredDeals, visiblePipelines, getDealStageName]);
 
   // Handle pipeline change (move deal to another pipeline)
   const handleMovePipeline = async (dealId, nextPipeline, e) => {
@@ -10822,7 +11105,7 @@ function Pipeline() {
                                   <div style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                                     Select Stage
                                   </div>
-                                  {pipelines.map(p => {
+                                  {visiblePipelines.map(p => {
                                     const isSelected = (detailedDeal.pipeline || 'Sales Pipeline') === p.name;
                                     return (
                                       <button
@@ -10888,7 +11171,7 @@ function Pipeline() {
                                   <div style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                                     Select Status
                                   </div>
-                                  {stages.map(s => {
+                                  {visibleStages.map(s => {
                                     const isSelected = detailedDeal.stage === s.name;
                                     return (
                                       <button
@@ -12245,7 +12528,7 @@ function Pipeline() {
                                             </span>
                                           )}
 
-                                          {canUserEditFollowUp(act, user, hasFullAccess) ? (
+                                          {canUserEditFollowUp(act, user, hasFullAccess) && (
                                             <button
                                               type="button"
                                               className="pipeline-chain-edit-btn"
@@ -12255,11 +12538,12 @@ function Pipeline() {
                                               <Edit2 size={12} />
                                               <span>Edit</span>
                                             </button>
-                                          ) : isFollowUpTimePassed(act) && act.status !== 'Completed' ? (
-                                            <span className="pipeline-chain-expired-badge" title="Scheduled time has already passed; editing is disabled">
-                                              <Clock size={11} /> Time Passed
+                                          )}
+                                          {isFollowUpTimePassed(act) && act.status !== 'Completed' && (
+                                            <span className="pipeline-chain-expired-badge" title="Scheduled follow-up is overdue">
+                                              <Clock size={11} /> Overdue
                                             </span>
-                                          ) : null}
+                                          )}
                                         </div>
 
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -12335,21 +12619,24 @@ function Pipeline() {
                                   </div>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     {act.type === 'followup' && (
-                                      canUserEditFollowUp(act, user, hasFullAccess) ? (
-                                        <button
-                                          type="button"
-                                          className="pipeline-timeline-mini-action-btn"
-                                          title="Edit Follow-up (available before scheduled time)"
-                                          onClick={() => handleOpenEditFollowUp(act, 'deal', detailedDeal?._id)}
-                                        >
-                                          <Edit2 size={11} />
-                                          <span>Edit</span>
-                                        </button>
-                                      ) : isFollowUpTimePassed(act) && act.status !== 'Completed' ? (
-                                        <span className="pipeline-chain-expired-badge" title="Scheduled time has already passed; editing is disabled">
-                                          <Clock size={11} /> Time Passed
-                                        </span>
-                                      ) : null
+                                      <>
+                                        {canUserEditFollowUp(act, user, hasFullAccess) && (
+                                          <button
+                                            type="button"
+                                            className="pipeline-timeline-mini-action-btn"
+                                            title="Edit Follow-up"
+                                            onClick={() => handleOpenEditFollowUp(act, 'deal', detailedDeal?._id)}
+                                          >
+                                            <Edit2 size={11} />
+                                            <span>Edit</span>
+                                          </button>
+                                        )}
+                                        {isFollowUpTimePassed(act) && act.status !== 'Completed' && (
+                                          <span className="pipeline-chain-expired-badge" title="Scheduled follow-up is overdue">
+                                            <Clock size={11} /> Overdue
+                                          </span>
+                                        )}
+                                      </>
                                     )}
                                     <span className="pipeline-timeline-time-badge">{formatActivityTimestamp(act)}</span>
                                   </div>
@@ -12889,8 +13176,9 @@ function Pipeline() {
                     )}
                   </div>
 
-                  {/* All Deal Owners Dropdown */}
-                  <div className="pipeline-filter-dropdown-wrap">
+                  {/* All Deal Owners Dropdown (Sales Head, Sales Manager, and Admin only) */}
+                  {hasFullAccess && (
+                    <div className="pipeline-filter-dropdown-wrap">
                     <button
                       type="button"
                       className={`pipeline-tool-btn ${ownerFilter !== 'all' ? 'filter-active' : ''} ${isOwnerDropdownOpen ? 'active' : ''}`}
@@ -12982,7 +13270,8 @@ function Pipeline() {
                         </div>
                       </div>
                     )}
-                  </div>
+                    </div>
+                  )}
 
                   {/* Filter by Status Dropdown */}
                   <div className="pipeline-filter-dropdown-wrap">
@@ -13275,9 +13564,9 @@ function Pipeline() {
               3. Kanban Columns Board or List View
               ---------------------------------------------------------------- */}
               {isLoading ? (
-                viewMode === 'kanban' ? renderKanbanSkeleton(pipelines.length || 4, false) : renderTableSkeleton(7)
+                viewMode === 'kanban' ? renderKanbanSkeleton(visiblePipelines.length || 4, false) : renderTableSkeleton(7)
               ) : viewMode === 'kanban' ? (
-                pipelines.length === 0 ? (
+                visiblePipelines.length === 0 ? (
                   <div className="pipeline-empty-state-card" style={{ maxWidth: '480px', margin: '40px auto' }}>
                     <div className="pipeline-empty-icon-wrap" style={{ background: '#f0f9ff', color: '#0284c7' }}>
                       <Briefcase size={32} />
@@ -13299,9 +13588,9 @@ function Pipeline() {
                   </div>
                 ) : (
                   <div className="pipeline-kanban-board">
-                    {pipelines.map((pipeline, pIndex) => {
+                    {visiblePipelines.map((pipeline, pIndex) => {
                       const pipelineDeals = filteredDeals.filter(d => {
-                        const targetStage = getDealStageName(d, pipelines);
+                        const targetStage = getDealStageName(d, visiblePipelines);
                         return (targetStage || '').trim().toLowerCase() === (pipeline.name || '').trim().toLowerCase();
                       });
                       const count = pipelineDeals.length;
@@ -13484,7 +13773,7 @@ function Pipeline() {
                                                   <div style={{ padding: '3px 12px', fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
                                                     Move {pipelineDeals.length} deals to:
                                                   </div>
-                                                  {pipelines
+                                                  {visiblePipelines
                                                     .filter(p => (p.name || '').toLowerCase().trim() !== (pipeline.name || '').toLowerCase().trim())
                                                     .map(p => (
                                                       <button
@@ -13723,7 +14012,7 @@ function Pipeline() {
                                           <span className="pipeline-submenu-title">Move Pipeline</span>
                                         </div>
 
-                                        {pipelines.map(p => (
+                                        {visiblePipelines.map(p => (
                                           <button
                                             key={p.id}
                                             type="button"
@@ -14029,7 +14318,7 @@ function Pipeline() {
                             <div className="pipeline-submenu-header">
                               <span className="pipeline-submenu-title">Move Selected To</span>
                             </div>
-                            {pipelines.map(p => (
+                            {visiblePipelines.map(p => (
                               <button
                                 key={p.id}
                                 type="button"
@@ -15413,7 +15702,7 @@ function Pipeline() {
                                             </span>
                                           )}
 
-                                          {canUserEditFollowUp(act, user, hasFullAccess) ? (
+                                          {canUserEditFollowUp(act, user, hasFullAccess) && (
                                             <button
                                               type="button"
                                               className="pipeline-chain-edit-btn"
@@ -15423,11 +15712,12 @@ function Pipeline() {
                                               <Edit2 size={12} />
                                               <span>Edit</span>
                                             </button>
-                                          ) : isFollowUpTimePassed(act) && act.status !== 'Completed' ? (
-                                            <span className="pipeline-chain-expired-badge" title="Scheduled time has already passed; editing is disabled">
-                                              <Clock size={11} /> Time Passed
+                                          )}
+                                          {isFollowUpTimePassed(act) && act.status !== 'Completed' && (
+                                            <span className="pipeline-chain-expired-badge" title="Scheduled follow-up is overdue">
+                                              <Clock size={11} /> Overdue
                                             </span>
-                                          ) : null}
+                                          )}
                                         </div>
 
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -15503,21 +15793,24 @@ function Pipeline() {
                                   </div>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     {act.type === 'followup' && (
-                                      canUserEditFollowUp(act, user, hasFullAccess) ? (
-                                        <button
-                                          type="button"
-                                          className="pipeline-timeline-mini-action-btn"
-                                          title="Edit Follow-up (available before scheduled time)"
-                                          onClick={() => handleOpenEditFollowUp(act, 'contact', detailedContact?._id)}
-                                        >
-                                          <Edit2 size={11} />
-                                          <span>Edit</span>
-                                        </button>
-                                      ) : isFollowUpTimePassed(act) && act.status !== 'Completed' ? (
-                                        <span className="pipeline-chain-expired-badge" title="Scheduled time has already passed; editing is disabled">
-                                          <Clock size={11} /> Time Passed
-                                        </span>
-                                      ) : null
+                                      <>
+                                        {canUserEditFollowUp(act, user, hasFullAccess) && (
+                                          <button
+                                            type="button"
+                                            className="pipeline-timeline-mini-action-btn"
+                                            title="Edit Follow-up"
+                                            onClick={() => handleOpenEditFollowUp(act, 'contact', detailedContact?._id)}
+                                          >
+                                            <Edit2 size={11} />
+                                            <span>Edit</span>
+                                          </button>
+                                        )}
+                                        {isFollowUpTimePassed(act) && act.status !== 'Completed' && (
+                                          <span className="pipeline-chain-expired-badge" title="Scheduled follow-up is overdue">
+                                            <Clock size={11} /> Overdue
+                                          </span>
+                                        )}
+                                      </>
                                     )}
                                     <span className="pipeline-timeline-time-badge">{formatActivityTimestamp(act)}</span>
                                   </div>
@@ -16218,8 +16511,9 @@ function Pipeline() {
                     )}
                   </div>
 
-                  {/* All Contact Owners Dropdown */}
-                  <div className="pipeline-filter-dropdown-wrap">
+                  {/* All Contact Owners Dropdown (Sales Head, Sales Manager, and Admin only) */}
+                  {hasFullAccess && (
+                    <div className="pipeline-filter-dropdown-wrap">
                     <button
                       type="button"
                       className={`pipeline-tool-btn ${contactOwnerFilter !== 'all' ? 'filter-active' : ''} ${isContactOwnerDropdownOpen ? 'active' : ''}`}
@@ -16311,7 +16605,8 @@ function Pipeline() {
                         </div>
                       </div>
                     )}
-                  </div>
+                    </div>
+                  )}
 
                   {/* Filter by Status Dropdown */}
                   <div className="pipeline-filter-dropdown-wrap">
@@ -17617,8 +17912,9 @@ function Pipeline() {
                   )}
                 </div>
 
-                {/* All Company Owners Dropdown */}
-                <div className="pipeline-filter-dropdown-wrap">
+                {/* All Company Owners Dropdown (Sales Head, Sales Manager, and Admin only) */}
+                {hasFullAccess && (
+                  <div className="pipeline-filter-dropdown-wrap">
                   <button
                     type="button"
                     className={`pipeline-tool-btn ${companyOwnerFilter !== 'all' ? 'filter-active' : ''} ${isCompanyOwnerDropdownOpen ? 'active' : ''}`}
@@ -17709,7 +18005,8 @@ function Pipeline() {
                       </div>
                     </div>
                   )}
-                </div>
+                  </div>
+                )}
 
                 {/* Date Filter Dropdown */}
                 <div className="pipeline-filter-dropdown-wrap">
@@ -19630,7 +19927,7 @@ function Pipeline() {
                     <CreatableSelect
                       value={formData.pipeline}
                       onChange={val => setFormData({ ...formData, pipeline: val })}
-                      options={pipelineOptions}
+                      options={visiblePipelineOptions}
                       placeholder="Select or add stage..."
                       onCreateOption={handleCreatePipelineOption}
                       isSearchable={true}
@@ -19647,7 +19944,7 @@ function Pipeline() {
                         setModalStage(val);
                         setFormData({ ...formData, stage: val });
                       }}
-                      options={stages.map(s => s.name)}
+                      options={visibleStages.map(s => s.name)}
                       placeholder="Select or add status..."
                       onCreateOption={handleCreateStageOption}
                       isSearchable={true}
@@ -23131,15 +23428,15 @@ function Pipeline() {
                     </div>
                   </div>
 
-                  {/* Past-time Warning Notice */}
+                  {/* Past-time Notice (Informational only if overdue) */}
                   {(() => {
                     const parsed = parseFollowUpDateTime(editFollowUpForm.followUpDate, editFollowUpForm.followUpTime);
                     const isPast = parsed && parsed.getTime() <= Date.now();
-                    if (!isPast) return null;
+                    if (!isPast || editFollowUpForm.status === 'Completed') return null;
                     return (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '7px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '12px' }}>
-                        <AlertCircle size={15} style={{ flexShrink: 0 }} />
-                        <span>The selected date and time is in the past. Please choose an upcoming time slot.</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderRadius: '7px', background: '#fefce8', border: '1px solid #fef08a', color: '#854d0e', fontSize: '12px' }}>
+                        <Clock size={15} style={{ flexShrink: 0 }} />
+                        <span>This touchpoint is scheduled in the past or overdue. You can update the remarks, change status, or reschedule.</span>
                       </div>
                     );
                   })()}
@@ -23208,10 +23505,7 @@ function Pipeline() {
                   <button
                     type="submit"
                     className="pipeline-btn-primary"
-                    disabled={isSavingEditFollowUp || (() => {
-                      const p = parseFollowUpDateTime(editFollowUpForm.followUpDate, editFollowUpForm.followUpTime);
-                      return p && p.getTime() <= Date.now();
-                    })()}
+                    disabled={isSavingEditFollowUp}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',

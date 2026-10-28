@@ -821,17 +821,6 @@ router.patch('/:id/activities/:activityId', auth, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. You can only edit follow-ups you created.' });
     }
 
-    // Time check: if scheduled time has already passed, editing schedule is not allowed
-    if (activity.type === 'followup' && !isAdmin && !hasFullAccess) {
-      const scheduledTime = parseFollowUpDateTime(activity.followUpDate, activity.followUpTime);
-      if (scheduledTime && scheduledTime.getTime() <= Date.now()) {
-        const onlyStatusChange = status !== undefined && remarks === undefined && followUpDate === undefined && followUpTime === undefined && title === undefined && channel === undefined;
-        if (!onlyStatusChange) {
-          return res.status(400).json({ message: 'Cannot edit this follow-up because its scheduled time has already passed.' });
-        }
-      }
-    }
-
     let rescheduled = false;
     if (title !== undefined) activity.title = title;
     if (channel !== undefined) activity.channel = channel;
