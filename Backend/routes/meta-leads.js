@@ -687,7 +687,28 @@ router.get('/timeline', auth, async (req, res) => {
         {
           $addFields: {
             dateOnly: { $dateToString: { format: '%Y-%m-%d', date: '$actualDate' } },
-            sourceLabel: { $ifNull: ['$source', 'Manual'] }
+            sourceLabel: {
+              $let: {
+                vars: {
+                  s: { $toLower: { $ifNull: ['$source', ''] } }
+                },
+                in: {
+                  $switch: {
+                    branches: [
+                      { case: { $regexMatch: { input: '$$s', regex: 'facebook|\\bfb\\b' } }, then: 'Facebook' },
+                      { case: { $regexMatch: { input: '$$s', regex: 'instagram|\\big\\b' } }, then: 'Instagram' },
+                      { case: { $regexMatch: { input: '$$s', regex: 'indiamart' } }, then: 'IndiaMART' },
+                      { case: { $regexMatch: { input: '$$s', regex: 'website' } }, then: 'Website' },
+                      { case: { $regexMatch: { input: '$$s', regex: 'linkedin' } }, then: 'LinkedIn' },
+                      { case: { $regexMatch: { input: '$$s', regex: 'email' } }, then: 'Email Marketing' },
+                      { case: { $regexMatch: { input: '$$s', regex: 'excel|csv|import' } }, then: 'Excel Import' },
+                      { case: { $regexMatch: { input: '$$s', regex: 'manual' } }, then: 'Manual' },
+                    ],
+                    default: 'Other'
+                  }
+                }
+              }
+            }
           }
         },
         {
@@ -707,18 +728,15 @@ router.get('/timeline', auth, async (req, res) => {
 
     // Transform aggregation result into chart-friendly format
     const datesSet = new Set();
+    const standardSources = ['Facebook', 'Instagram', 'Website', 'IndiaMART', 'LinkedIn', 'Email Marketing', 'Excel Import', 'Manual', 'Other'];
     const sourcesMap = new Map();
-
-    // Initialize map with required default sources so they always show up on the chart
-    const defaultSources = ['Website', 'Other', 'Instagram', 'Email Marketing', 'Manual', 'Excel Import', 'Facebook'];
-    defaultSources.forEach(src => sourcesMap.set(src, new Map()));
+    standardSources.forEach(src => sourcesMap.set(src, new Map()));
 
     timeline.forEach(item => {
       datesSet.add(item._id.date);
-      if (!sourcesMap.has(item._id.source)) {
-        sourcesMap.set(item._id.source, new Map());
-      }
-      sourcesMap.get(item._id.source).set(item._id.date, item.count);
+      const srcName = standardSources.includes(item._id.source) ? item._id.source : 'Other';
+      const curCount = sourcesMap.get(srcName).get(item._id.date) || 0;
+      sourcesMap.get(srcName).set(item._id.date, curCount + item.count);
     });
 
     // Sort dates chronologically
@@ -730,15 +748,24 @@ router.get('/timeline', auth, async (req, res) => {
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     });
 
-    // Build sources array with data aligned to dates
-    const sources = Array.from(sourcesMap.entries()).map(([sourceName, dateMap]) => {
+    // Build sources array with data aligned to dates, keeping active channels
+    const allBuiltSources = Array.from(sourcesMap.entries()).map(([sourceName, dateMap]) => {
+      const dataArr = dates.map(date => dateMap.get(date) || 0);
+      const total = dataArr.reduce((sum, v) => sum + v, 0);
       return {
         name: sourceName,
-        data: dates.map(date => dateMap.get(date) || 0)
+        data: dataArr,
+        total
       };
     });
 
-    res.json({ dates: formattedDates, sources });
+    // Filter to sources that have leads, but keep at least standard sources if empty
+    let sources = allBuiltSources.filter(s => s.total > 0);
+    if (!sources.length) {
+      sources = allBuiltSources.slice(0, 4);
+    }
+
+    res.json({ dates: formattedDates, sources: sources.map(({ name, data }) => ({ name, data })) });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

@@ -29,7 +29,7 @@ export const AuthProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
@@ -43,7 +43,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.removeItem('user');
       setUser(null);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -220,7 +220,9 @@ export const AuthProvider = ({ children }) => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 25000);
     return () => clearInterval(interval);
-  }, [user]);
+  // Only re-run when the logged-in user identity changes, not on every
+  // profile object re-fetch (which creates a new reference each time).
+  }, [user?._id]);
 
   useEffect(() => {
     setUnreadNotificationsCount(notifications.filter(n => !n.isRead).length);
@@ -302,10 +304,6 @@ export const AuthProvider = ({ children }) => {
 
     return false;
   }, [user]);
-
-  if (loading && !user) {
-    return null;
-  }
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, updateUser, hasPermission, refreshUser, socket, unreadNotificationsCount, setUnreadNotificationsCount, notifications, setNotifications, activeToast, setActiveToast }}>

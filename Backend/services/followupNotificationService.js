@@ -173,8 +173,57 @@ async function resolveCreatorUserId(activity, entity = null) {
 }
 
 /**
+ * Resolves assigned member user ObjectId from activity data
+ */
+async function resolveMemberUserId(activity) {
+  if (!activity) return null;
+
+  if (activity.assignedTo) {
+    const id = (activity.assignedTo._id || activity.assignedTo).toString();
+    if (id && id !== 'null' && id !== 'undefined') return id;
+  }
+  if (activity.member) {
+    const id = (activity.member._id || activity.member).toString();
+    if (id && id !== 'null' && id !== 'undefined') return id;
+  }
+  if (activity.memberId) {
+    const id = activity.memberId.toString();
+    if (id && id !== 'null' && id !== 'undefined') return id;
+  }
+
+  const memberName = activity.memberName || activity.assignedToName;
+  if (memberName && typeof memberName === 'string' && memberName.trim()) {
+    const clean = memberName.trim();
+    const parts = clean.split(/\s+/);
+    const fName = parts[0];
+    const lName = parts.slice(1).join(' ');
+
+    const searchOr = [
+      { email: clean.toLowerCase() },
+      { officialEmail: clean.toLowerCase() }
+    ];
+
+    if (fName && lName) {
+      searchOr.push({
+        firstName: new RegExp(`^${fName}$`, 'i'),
+        lastName: new RegExp(`^${lName}$`, 'i')
+      });
+    } else if (fName) {
+      searchOr.push({
+        firstName: new RegExp(`^${fName}$`, 'i')
+      });
+    }
+
+    const memberUser = await User.findOne({ $or: searchOr });
+    if (memberUser) return memberUser._id.toString();
+  }
+
+  return null;
+}
+
+/**
  * Sends an immediate notification when a follow-up is scheduled or logged.
- * Both the creator user AND all Admins receive professional notifications.
+ * Creator, linked member, and all Admins receive professional notifications.
  */
 async function notifyFollowUpScheduled(io, { entity, activity, creatorUser, isContact = false }) {
   try {
@@ -211,10 +260,18 @@ async function notifyFollowUpScheduled(io, { entity, activity, creatorUser, isCo
       await sendNotification(io, creatorId, creatorTitle, creatorMsg, 'Follow-up', link);
     }
 
+    // 1b. Notify Linked Member (if selected and distinct from creator)
+    const memberId = await resolveMemberUserId(activity);
+    if (memberId && memberId !== creatorId) {
+      const memberTitle = `Follow-up Assigned: ${channel} with ${entityName}`;
+      const memberMsg = `${creatorName} scheduled a ${channel} follow-up for "${entityName}" on ${dateStr}${timeStr} and linked it to you.${remarksSnippet}`;
+      await sendNotification(io, memberId, memberTitle, memberMsg, 'Follow-up', link);
+    }
+
     // 2. Notify Admins
     for (const adminId of adminUserIds) {
-      if (creatorId && adminId === creatorId) {
-        // Creator already received the dedicated creator message
+      if ((creatorId && adminId === creatorId) || (memberId && adminId === memberId)) {
+        // Creator or linked member already received dedicated message
         continue;
       }
       const adminTitle = `New Follow-up Scheduled: ${channel} with ${entityName}`;
@@ -222,7 +279,7 @@ async function notifyFollowUpScheduled(io, { entity, activity, creatorUser, isCo
       await sendNotification(io, adminId, adminTitle, adminMsg, 'Follow-up', link);
     }
 
-    console.log(`[FollowUpNotification] Immediate schedule notification sent for "${entityName}" to creator (${creatorId}) + ${adminUserIds.length} admin(s).`);
+    console.log(`[FollowUpNotification] Immediate schedule notification sent for "${entityName}" to creator (${creatorId}), member (${memberId}) + ${adminUserIds.length} admin(s).`);
   } catch (err) {
     console.error('[FollowUpNotification] notifyFollowUpScheduled error:', err);
   }
@@ -287,10 +344,12 @@ async function checkAndSendFollowUpReminders(io) {
             const link = `/pipeline/crm/overview?ref=sidebar&tab=deals&view=kanban&detailTab=followups&dealId=${deal._id}&stage=all`;
 
             const creatorId = await resolveCreatorUserId(act, deal);
+            const memberId = await resolveMemberUserId(act);
 
-            // Target recipients: Creator + All Admins + Assigned Deal Owner
+            // Target recipients: Creator + Assigned Member + All Admins + Assigned Deal Owner
             const recipients = new Set([...adminUserIds]);
             if (creatorId) recipients.add(creatorId);
+            if (memberId) recipients.add(memberId);
             if (deal.assignedTo) {
               const assignedId = (deal.assignedTo._id || deal.assignedTo).toString();
               if (assignedId) recipients.add(assignedId);
@@ -298,10 +357,13 @@ async function checkAndSendFollowUpReminders(io) {
 
             for (const recipientId of recipients) {
               const isCreator = creatorId && recipientId === creatorId;
+              const isMember = memberId && recipientId === memberId;
               const title = `Follow-up Due: ${channel} with ${dealName}`;
               const message = isCreator
                 ? `Your scheduled ${channel} follow-up for deal "${dealName}" is due now (${timeDisplay}${dateDisplay}). Purpose: ${act.title || 'Touchpoint'}${remarksSnippet}`
-                : `Scheduled ${channel} follow-up for deal "${dealName}" (by ${authorName}) is due now (${timeDisplay}${dateDisplay}). Purpose: ${act.title || 'Touchpoint'}${remarksSnippet}`;
+                : isMember
+                  ? `Scheduled ${channel} follow-up linked to you for deal "${dealName}" (by ${authorName}) is due now (${timeDisplay}${dateDisplay}). Purpose: ${act.title || 'Touchpoint'}${remarksSnippet}`
+                  : `Scheduled ${channel} follow-up for deal "${dealName}" (by ${authorName}) is due now (${timeDisplay}${dateDisplay}). Purpose: ${act.title || 'Touchpoint'}${remarksSnippet}`;
 
               await sendNotification(io, recipientId, title, message, 'Follow-up', link);
             }
@@ -364,10 +426,12 @@ async function checkAndSendFollowUpReminders(io) {
             const link = `/pipeline/crm/overview?ref=sidebar&tab=contacts&view=list&detailTab=followups&contactId=${contact._id}&stage=all`;
 
             const creatorId = await resolveCreatorUserId(act, contact);
+            const memberId = await resolveMemberUserId(act);
 
-            // Target recipients: Creator + All Admins + Assigned Contact Owner
+            // Target recipients: Creator + Assigned Member + All Admins + Assigned Contact Owner
             const recipients = new Set([...adminUserIds]);
             if (creatorId) recipients.add(creatorId);
+            if (memberId) recipients.add(memberId);
             if (contact.assignedTo) {
               const assignedId = (contact.assignedTo._id || contact.assignedTo).toString();
               if (assignedId) recipients.add(assignedId);
@@ -375,10 +439,13 @@ async function checkAndSendFollowUpReminders(io) {
 
             for (const recipientId of recipients) {
               const isCreator = creatorId && recipientId === creatorId;
+              const isMember = memberId && recipientId === memberId;
               const title = `Follow-up Due: ${channel} with ${contactName}`;
               const message = isCreator
                 ? `Your scheduled ${channel} follow-up for contact "${contactName}" is due now (${timeDisplay}${dateDisplay}). Purpose: ${act.title || 'Touchpoint'}${remarksSnippet}`
-                : `Scheduled ${channel} follow-up for contact "${contactName}" (by ${authorName}) is due now (${timeDisplay}${dateDisplay}). Purpose: ${act.title || 'Touchpoint'}${remarksSnippet}`;
+                : isMember
+                  ? `Scheduled ${channel} follow-up linked to you for contact "${contactName}" (by ${authorName}) is due now (${timeDisplay}${dateDisplay}). Purpose: ${act.title || 'Touchpoint'}${remarksSnippet}`
+                  : `Scheduled ${channel} follow-up for contact "${contactName}" (by ${authorName}) is due now (${timeDisplay}${dateDisplay}). Purpose: ${act.title || 'Touchpoint'}${remarksSnippet}`;
 
               await sendNotification(io, recipientId, title, message, 'Follow-up', link);
             }

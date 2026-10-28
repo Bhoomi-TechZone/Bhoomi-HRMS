@@ -736,8 +736,13 @@ router.post('/:id/activities', auth, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. You can only add activities to your own deals.' });
     }
 
-    const { type, title, content, remarks, channel, status, followUpDate, followUpTime, nextFollowUpDate, author, authorRole, time, date } = req.body;
+    const { type, title, content, remarks, channel, status, followUpDate, followUpTime, nextFollowUpDate, author, authorRole, time, date, memberId, memberName, assignedTo, assignedToName } = req.body;
     const authorName = author || (req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() : 'Admin System');
+    
+    // Resolve member/assignedTo ObjectId if valid MongoDB ObjectId
+    const resolvedMemberId = memberId || assignedTo || null;
+    const isValidMemberObjectId = resolvedMemberId && mongoose.Types.ObjectId.isValid(resolvedMemberId);
+
     const newActivity = {
       type: type || 'note',
       title: title || '',
@@ -751,6 +756,11 @@ router.post('/:id/activities', auth, async (req, res) => {
       author: authorName,
       authorRole: authorRole || (user?.role?.name || user?.role || ''),
       createdBy: user._id,
+      assignedTo: isValidMemberObjectId ? resolvedMemberId : null,
+      assignedToName: memberName || assignedToName || '',
+      member: isValidMemberObjectId ? resolvedMemberId : null,
+      memberId: resolvedMemberId ? String(resolvedMemberId) : '',
+      memberName: memberName || assignedToName || '',
       reminderSent: false,
       time: time || 'Just now',
       date: date || new Date().toISOString().slice(0, 10),
@@ -810,15 +820,19 @@ router.patch('/:id/activities/:activityId', auth, async (req, res) => {
       return res.status(404).json({ message: 'Activity not found' });
     }
 
-    const { status, remarks, content, followUpDate, followUpTime, nextFollowUpDate, title, channel } = req.body;
+    const { status, remarks, content, followUpDate, followUpTime, nextFollowUpDate, title, channel, memberId, memberName, assignedTo, assignedToName } = req.body;
 
     const { hasFullAccess, isAdmin } = checkAccess(user);
     const isCreator = (activity.createdBy && activity.createdBy.toString() === user._id.toString()) ||
       (activity.author && activity.author.toLowerCase() === `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase());
+    const isAssignedMember = (activity.assignedTo && activity.assignedTo.toString() === user._id.toString()) ||
+      (activity.member && activity.member.toString() === user._id.toString()) ||
+      (activity.memberId && activity.memberId.toString() === user._id.toString()) ||
+      (activity.memberName && activity.memberName.toLowerCase() === `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase());
 
-    // User can only edit if creator or admin/sales head
-    if (!isCreator && !isAdmin && !hasFullAccess) {
-      return res.status(403).json({ message: 'Access denied. You can only edit follow-ups you created.' });
+    // User can edit if creator, assigned member, or admin/sales head
+    if (!isCreator && !isAssignedMember && !isAdmin && !hasFullAccess) {
+      return res.status(403).json({ message: 'Access denied. You can only edit follow-ups you created or are assigned to.' });
     }
 
     let rescheduled = false;
@@ -839,6 +853,23 @@ router.patch('/:id/activities/:activityId', auth, async (req, res) => {
       rescheduled = true;
     }
     if (nextFollowUpDate !== undefined) activity.nextFollowUpDate = nextFollowUpDate;
+
+    if (memberId !== undefined || assignedTo !== undefined) {
+      const newMemberId = memberId !== undefined ? memberId : assignedTo;
+      if (newMemberId && mongoose.Types.ObjectId.isValid(newMemberId)) {
+        activity.assignedTo = newMemberId;
+        activity.member = newMemberId;
+      } else {
+        activity.assignedTo = null;
+        activity.member = null;
+      }
+      activity.memberId = newMemberId ? String(newMemberId) : '';
+    }
+    if (memberName !== undefined || assignedToName !== undefined) {
+      const newMemberName = memberName !== undefined ? memberName : assignedToName;
+      activity.memberName = newMemberName || '';
+      activity.assignedToName = newMemberName || '';
+    }
 
     if (rescheduled || (status && status !== 'Completed' && status !== 'Missed')) {
       activity.reminderSent = false;

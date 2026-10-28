@@ -1018,9 +1018,16 @@ function HRDashboard() {
     const ctx = chartRef.current.getContext('2d');
     const canvasHeight = chartRef.current.offsetHeight || 320;
 
-    // Dynamic y-axis: spread the data to fill the chart height naturally
-    const allVals = [...(chartData.counts || []), ...(chartData.maleCounts || []), ...(chartData.femaleCounts || [])];
-    const dataMax = Math.max(...allVals, 1);
+    // Dynamic y-axis: safely find max value without stack overflow
+    let dataMax = 1;
+    [chartData.counts, chartData.maleCounts, chartData.femaleCounts].forEach(arr => {
+      if (Array.isArray(arr)) {
+        for (let i = 0; i < arr.length; i++) {
+          const v = Number(arr[i]);
+          if (!isNaN(v) && v > dataMax) dataMax = v;
+        }
+      }
+    });
     const rawStep = dataMax <= 5 ? 1 : dataMax <= 20 ? 5 : dataMax <= 50 ? 10 : dataMax <= 100 ? 20 : 50;
     const suggestedMax = Math.ceil((dataMax * 1.6) / rawStep) * rawStep;
 

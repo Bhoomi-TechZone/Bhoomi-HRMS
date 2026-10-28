@@ -268,12 +268,21 @@ const canUserEditFollowUp = (act, currentUser, isSuperAdminOrHead = false) => {
   if (currentEmail && author === currentEmail) return true;
   if (currentOfficialEmail && author === currentOfficialEmail) return true;
 
+  // Linked / assigned member permissions
+  const memberId = (act.memberId || act.assignedTo?._id || act.assignedTo || act.member || '').toString();
+  if (currentUserId && memberId && currentUserId === memberId) return true;
+
+  const memberName = (act.memberName || act.assignedToName || '').trim().toLowerCase();
+  if (currentFullName && memberName && memberName === currentFullName) return true;
+  if (currentEmail && memberName === currentEmail) return true;
+  if (currentOfficialEmail && memberName === currentOfficialEmail) return true;
+
   return false;
 };
 
 // Checks if current user is permitted to view an activity (specifically follow-ups)
 // Admin, Sales Head, and Sales Manager can view ALL follow-ups.
-// Sales Executives can ONLY view follow-ups they personally created.
+// Sales Executives can view follow-ups they personally created or where they are the assigned/linked member.
 const canUserViewActivity = (act, currentUser, isSuperAdminOrHead = false) => {
   if (!act) return false;
   // Non-followup activities (deal status events, payments, notes, tasks) are part of standard audit trail
@@ -295,6 +304,15 @@ const canUserViewActivity = (act, currentUser, isSuperAdminOrHead = false) => {
   if (currentFullName && author === currentFullName) return true;
   if (currentEmail && author === currentEmail) return true;
   if (currentOfficialEmail && author === currentOfficialEmail) return true;
+
+  // Linked / assigned member permissions
+  const memberId = (act.memberId || act.assignedTo?._id || act.assignedTo || act.member || '').toString();
+  if (currentUserId && memberId && currentUserId === memberId) return true;
+
+  const memberName = (act.memberName || act.assignedToName || '').trim().toLowerCase();
+  if (currentFullName && memberName && memberName === currentFullName) return true;
+  if (currentEmail && memberName === currentEmail) return true;
+  if (currentOfficialEmail && memberName === currentOfficialEmail) return true;
 
   return false;
 };
@@ -2433,6 +2451,229 @@ const getItemCreationDate = (item) => {
   return isNaN(d.getTime()) ? (item.title ? new Date() : new Date(0)) : d;
 };
 
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// MemberDropdown — fully custom styled dropdown for Assign / Link Member
+// Uses position:fixed portal so it is never clipped by overflow:hidden parents.
+// ---------------------------------------------------------------------------
+function MemberDropdown({ options, value, onChange, placeholder = '-- No Member Linked --' }) {
+  const [open, setOpen] = useState(false);
+  const [dropStyle, setDropStyle] = useState({});
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
+
+  const selectedOpt = options.find(o => String(o.id) === String(value)) || null;
+
+  const computePosition = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const PANEL_MAX_H = 280;
+    const MARGIN = 6;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    // Flip upward if not enough space below but enough above
+    const flipUp = spaceBelow < PANEL_MAX_H + MARGIN && spaceAbove > PANEL_MAX_H + MARGIN;
+
+    setDropStyle({
+      position: 'fixed',
+      left: rect.left,
+      width: rect.width,
+      minWidth: Math.max(rect.width, 220),
+      zIndex: 999999,
+      ...(flipUp
+        ? { bottom: window.innerHeight - rect.top + MARGIN }
+        : { top: rect.bottom + MARGIN }),
+    });
+  };
+
+  const openDropdown = () => {
+    computePosition();
+    setOpen(true);
+  };
+
+  // Reposition on scroll/resize while open
+  useEffect(() => {
+    if (!open) return;
+    const reposition = () => computePosition();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (
+        triggerRef.current && !triggerRef.current.contains(e.target) &&
+        panelRef.current && !panelRef.current.contains(e.target)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const panel = open ? createPortal(
+    <div
+      ref={panelRef}
+      style={{
+        ...dropStyle,
+        background: '#fff',
+        border: '1.5px solid #e2e8f0',
+        borderRadius: '10px',
+        boxShadow: '0 12px 40px -6px rgba(15,23,42,0.20), 0 2px 8px -2px rgba(15,23,42,0.08)',
+        overflow: 'hidden',
+        maxHeight: '280px',
+        overflowY: 'auto',
+        animation: 'memberDropAnim 0.14s ease',
+      }}
+    >
+      <style>{`
+        @keyframes memberDropAnim {
+          from { opacity: 0; transform: translateY(-6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .mdd-item { transition: background 0.1s; }
+        .mdd-item:hover { background: #f1f5f9 !important; }
+        .mdd-item.selected:hover { background: #dbeafe !important; }
+      `}</style>
+
+      {/* No member / clear option */}
+      <div
+        className="mdd-item"
+        onMouseDown={e => { e.preventDefault(); onChange('', null); setOpen(false); }}
+        style={{
+          padding: '10px 14px',
+          fontSize: '13px',
+          color: '#94a3b8',
+          cursor: 'pointer',
+          borderBottom: '1px solid #f1f5f9',
+          background: !value ? '#f8fafc' : '#fff',
+        }}
+      >
+        {placeholder}
+      </div>
+
+      {/* Member rows */}
+      {options.map(opt => {
+        const isSelected = String(opt.id) === String(value);
+        return (
+          <div
+            key={opt.id}
+            className={`mdd-item${isSelected ? ' selected' : ''}`}
+            onMouseDown={e => { e.preventDefault(); onChange(opt.id, opt); setOpen(false); }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 14px',
+              cursor: 'pointer',
+              background: isSelected ? '#eff6ff' : '#fff',
+              borderBottom: '1px solid #f8fafc',
+            }}
+          >
+            {/* Star or spacer */}
+            {opt.isDealOwner
+              ? <span style={{ color: '#f59e0b', fontSize: '15px', lineHeight: 1, flexShrink: 0 }}>★</span>
+              : <span style={{ width: '15px', flexShrink: 0 }} />
+            }
+            {/* Name */}
+            <span style={{
+              flex: 1,
+              fontSize: '13.5px',
+              color: '#1e293b',
+              fontWeight: opt.isDealOwner ? 600 : 400,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {opt.name}
+            </span>
+            {/* Role badge */}
+            {(opt.isDealOwner || opt.role) && (
+              <span style={{
+                fontSize: '11px',
+                color: opt.isDealOwner ? '#1d4ed8' : '#64748b',
+                background: opt.isDealOwner ? '#dbeafe' : '#f1f5f9',
+                padding: '2px 8px',
+                borderRadius: '5px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+                fontWeight: 500,
+              }}>
+                {opt.isDealOwner ? 'Deal Owner' : opt.role}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>,
+    document.body
+  ) : null;
+
+  return (
+    <div style={{ position: 'relative' }}>
+      {/* Trigger */}
+      <div
+        ref={triggerRef}
+        onClick={() => open ? setOpen(false) : openDropdown()}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          height: '34px',
+          padding: '0 28px 0 10px',
+          border: `1.5px solid ${open ? '#3b82f6' : '#cbd5e1'}`,
+          borderRadius: '7px',
+          background: open ? '#fafcff' : '#fff',
+          fontSize: '13px',
+          color: '#1e293b',
+          fontWeight: selectedOpt?.isDealOwner ? 600 : 400,
+          cursor: 'pointer',
+          userSelect: 'none',
+          boxSizing: 'border-box',
+          width: '100%',
+          outline: open ? '3px solid rgba(59,130,246,0.15)' : 'none',
+          transition: 'border-color 0.15s, outline 0.15s, background 0.15s',
+          position: 'relative',
+        }}
+      >
+        {selectedOpt ? (
+          <>
+            {selectedOpt.isDealOwner && (
+              <span style={{ color: '#f59e0b', fontSize: '14px', lineHeight: 1, flexShrink: 0 }}>★</span>
+            )}
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {selectedOpt.name}
+            </span>
+            {selectedOpt.isDealOwner ? (
+              <span style={{ fontSize: '11px', color: '#1d4ed8', background: '#dbeafe', padding: '1px 6px', borderRadius: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>Deal Owner</span>
+            ) : selectedOpt.role ? (
+              <span style={{ fontSize: '11px', color: '#64748b', background: '#f1f5f9', padding: '1px 6px', borderRadius: '4px', whiteSpace: 'nowrap', flexShrink: 0 }}>{selectedOpt.role}</span>
+            ) : null}
+          </>
+        ) : (
+          <span style={{ color: '#94a3b8' }}>{placeholder}</span>
+        )}
+        <span style={{
+          position: 'absolute', right: '9px', top: '50%',
+          transform: `translateY(-50%) rotate(${open ? '180deg' : '0deg'})`,
+          color: open ? '#3b82f6' : '#94a3b8',
+          pointerEvents: 'none', fontSize: '9px',
+          transition: 'transform 0.15s, color 0.15s',
+        }}>▼</span>
+      </div>
+      {panel}
+    </div>
+  );
+}
+
+
 function Pipeline() {
   const { user, hasPermission, setActiveToast } = useAuth();
 
@@ -2838,6 +3079,8 @@ function Pipeline() {
   const [isComposingFollowUp, setIsComposingFollowUp] = useState(false);
   const [followUpFormData, setFollowUpFormData] = useState({
     title: '',
+    memberId: '',
+    memberName: '',
     channel: 'Call', // 'Call' | 'Meeting' | 'WhatsApp' | 'Email' | 'Demo' | 'Visit'
     status: 'Scheduled', // 'Scheduled' | 'Completed' | 'Follow-up Needed' | 'Rescheduled' | 'Missed'
     followUpDate: new Date().toISOString().slice(0, 10),
@@ -2849,6 +3092,8 @@ function Pipeline() {
   const [editingFollowUp, setEditingFollowUp] = useState(null);
   const [editFollowUpForm, setEditFollowUpForm] = useState({
     title: '',
+    memberId: '',
+    memberName: '',
     channel: 'Call',
     status: 'Scheduled',
     followUpDate: '',
@@ -4037,6 +4282,8 @@ function Pipeline() {
   const [reminderFormData, setReminderFormData] = useState({
     targetType: 'deal',
     targetId: '',
+    memberId: '',
+    memberName: '',
     title: '',
     channel: 'Call',
     status: 'Scheduled',
@@ -4045,6 +4292,146 @@ function Pipeline() {
     nextFollowUpDate: '',
     remarks: ''
   });
+
+  // Dynamic Follow-up Member Options tailored to user role:
+  // - Sales Head / Sales Manager / Admin: Can select Deal Owner (featured at top) or any sales team member.
+  // - Sales Person (Executive): Can ONLY select their Sales Head or Sales Manager.
+  // - Admin: Can select any member.
+  const getFollowUpMemberOptions = useCallback((targetType, targetId) => {
+    const isSalesPerson = !isAdmin && !isSalesHead && !isSalesManager;
+    const salesHeadsAndManagers = [];
+    const allSalesMembers = [];
+
+    (employees || []).forEach(emp => {
+      if (!emp) return;
+      if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive') return;
+
+      const rName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
+      const des = (emp.designation || '').toLowerCase().trim();
+      const dept = (emp.department || '').toLowerCase().trim();
+
+      const isHead = rName.includes('sales head') || rName === 'saleshead' || rName === 'head of sales' || des.includes('sales head') || des.includes('head of sales');
+      const isMgr = !isHead && (rName.includes('sales manager') || rName.includes('salesmanager') || rName === 'manager of sales' || des.includes('sales manager'));
+      const isSales = isHead || isMgr || rName.includes('sales') || rName.includes('business development') || rName.includes('bde') || dept.includes('sales') || des.includes('sales') || des.includes('bde');
+
+      // Strictly only include employees with Sales, Sales Head, or Sales Manager roles
+      if (!isSales) return;
+
+      const empName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || emp.email;
+      let roleBadge = 'Sales';
+      if (isHead) {
+        roleBadge = 'Sales Head';
+      } else if (isMgr) {
+        roleBadge = 'Sales Manager';
+      } else {
+        roleBadge = emp.designation || 'Sales';
+      }
+
+      const empOption = {
+        id: String(emp._id || emp.id),
+        name: empName,
+        email: emp.email || emp.officialEmail || '',
+        role: roleBadge,
+        isHead,
+        isMgr
+      };
+
+      if (isHead || isMgr) {
+        salesHeadsAndManagers.push(empOption);
+      }
+      allSalesMembers.push(empOption);
+    });
+
+    // 1. For Sales Person: Strictly restricted to Sales Head & Sales Manager
+    if (isSalesPerson) {
+      return salesHeadsAndManagers.map(m => ({
+        id: m.id,
+        name: m.name,
+        label: `${m.name} (${m.role})`
+      }));
+    }
+
+    // 2. For Sales Head, Sales Manager, Admin: Resolve Deal Owner / Contact Owner
+    let ownerOption = null;
+    if (targetType === 'deal') {
+      const targetDeal = deals.find(d => String(d._id) === String(targetId)) || detailedDeal;
+      const dOwnerName = (targetDeal?.salesOwner || targetDeal?.addedBy || '').trim();
+      if (dOwnerName) {
+        const matchedEmp = (employees || []).find(emp => {
+          const eName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+          const eEmail = (emp.email || '').trim().toLowerCase();
+          const eOffEmail = (emp.officialEmail || '').trim().toLowerCase();
+          const target = dOwnerName.toLowerCase();
+          return (eName && eName === target) || (eEmail && eEmail === target) || (eOffEmail && eOffEmail === target);
+        });
+        if (matchedEmp) {
+          ownerOption = {
+            id: String(matchedEmp._id || matchedEmp.id),
+            name: `${matchedEmp.firstName || ''} ${matchedEmp.lastName || ''}`.trim() || dOwnerName,
+            label: `⭐ ${dOwnerName} (Deal Owner)`,
+            isDealOwner: true
+          };
+        } else {
+          ownerOption = {
+            id: `name_${dOwnerName}`,
+            name: dOwnerName,
+            label: `⭐ ${dOwnerName} (Deal Owner)`,
+            isDealOwner: true
+          };
+        }
+      }
+    } else if (targetType === 'contact') {
+      const targetContact = contacts.find(c => String(c._id) === String(targetId)) || detailedContact;
+      const cOwnerName = (targetContact?.owner || targetContact?.addedBy || '').trim();
+      if (cOwnerName) {
+        const matchedEmp = (employees || []).find(emp => {
+          const eName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+          const eEmail = (emp.email || '').trim().toLowerCase();
+          const eOffEmail = (emp.officialEmail || '').trim().toLowerCase();
+          const target = cOwnerName.toLowerCase();
+          return (eName && eName === target) || (eEmail && eEmail === target) || (eOffEmail && eOffEmail === target);
+        });
+        if (matchedEmp) {
+          ownerOption = {
+            id: String(matchedEmp._id || matchedEmp.id),
+            name: `${matchedEmp.firstName || ''} ${matchedEmp.lastName || ''}`.trim() || cOwnerName,
+            label: `⭐ ${cOwnerName} (Contact Owner)`,
+            isDealOwner: true
+          };
+        } else {
+          ownerOption = {
+            id: `name_${cOwnerName}`,
+            name: cOwnerName,
+            label: `⭐ ${cOwnerName} (Contact Owner)`,
+            isDealOwner: true
+          };
+        }
+      }
+    }
+
+    const options = [];
+    const addedIds = new Set();
+
+    if (ownerOption) {
+      options.push(ownerOption);
+      addedIds.add(String(ownerOption.id));
+      addedIds.add(ownerOption.name.toLowerCase());
+    }
+
+    allSalesMembers.forEach(m => {
+      if (!addedIds.has(String(m.id)) && !addedIds.has(m.name.toLowerCase())) {
+        options.push({
+          id: m.id,
+          name: m.name,
+          label: `${m.name} (${m.role})`
+        });
+        addedIds.add(String(m.id));
+        addedIds.add(m.name.toLowerCase());
+      }
+    });
+
+    return options;
+  }, [employees, isAdmin, isSalesHead, isSalesManager, deals, contacts, detailedDeal, detailedContact]);
 
   // Helper to extract strictly the contacts associated with a given deal
   const getDealAssociatedContacts = (targetDealIdOrObj) => {
@@ -4294,11 +4681,14 @@ function Pipeline() {
       if (userOfficialEmail && author === userOfficialEmail) return true;
       if (username && author === username) return true;
 
-      // 3. Reminder explicitly assigned to this user
-      const actAssignedId = (act?.assignedTo?._id || act?.assignedTo || '').toString();
+      // 3. Reminder explicitly assigned to this user / selected member
+      const actAssignedId = (act?.memberId || act?.assignedTo?._id || act?.assignedTo || act?.member || '').toString();
       if (userId && actAssignedId && actAssignedId === userId) return true;
-      const actAssignedName = (act?.assignedToName || act?.assignee || '').trim().toLowerCase();
+      const actAssignedName = (act?.memberName || act?.assignedToName || act?.assignee || '').trim().toLowerCase();
       if (userFullName && actAssignedName === userFullName) return true;
+      if (userEmail && actAssignedName === userEmail) return true;
+      if (userOfficialEmail && actAssignedName === userOfficialEmail) return true;
+      if (username && actAssignedName === username) return true;
 
       // 4. Deal or Contact is assigned to or owned by this user
       if (entity) {
@@ -4422,7 +4812,11 @@ function Pipeline() {
           followUpTime: act.followUpTime || act.time || '',
           nextFollowUpDate: act.nextFollowUpDate || '',
           remarks: act.remarks || act.content || '',
-          author: act.author || d.salesOwner || 'Admin System'
+          author: act.author || d.salesOwner || 'Admin System',
+          memberId: act.memberId || act.assignedTo?._id || act.assignedTo || '',
+          memberName: act.memberName || act.assignedToName || '',
+          assignedTo: act.assignedTo || act.memberId || '',
+          assignedToName: act.assignedToName || act.memberName || ''
         });
       });
     });
@@ -4509,7 +4903,11 @@ function Pipeline() {
           followUpTime: act.followUpTime || act.time || '',
           nextFollowUpDate: act.nextFollowUpDate || '',
           remarks: act.remarks || act.content || '',
-          author: act.author || c.owner || 'Admin System'
+          author: act.author || c.owner || 'Admin System',
+          memberId: act.memberId || act.assignedTo?._id || act.assignedTo || '',
+          memberName: act.memberName || act.assignedToName || '',
+          assignedTo: act.assignedTo || act.memberId || '',
+          assignedToName: act.assignedToName || act.memberName || ''
         });
       });
     });
@@ -6662,6 +7060,11 @@ function Pipeline() {
         nextFollowUpDate: followUpFormData.nextFollowUpDate || '',
         remarks: followUpFormData.remarks.trim(),
         content: followUpFormData.remarks.trim(),
+        memberId: followUpFormData.memberId || '',
+        memberName: followUpFormData.memberName || '',
+        assignedTo: followUpFormData.memberId || '',
+        assignedToName: followUpFormData.memberName || '',
+        member: followUpFormData.memberId || '',
         author: authorName,
         authorRole: authorRoleName,
         createdBy: user?._id || user?.id || null,
@@ -6675,6 +7078,8 @@ function Pipeline() {
 
       setFollowUpFormData({
         title: '',
+        memberId: '',
+        memberName: '',
         channel: 'Call',
         status: 'Scheduled',
         followUpDate: new Date().toISOString().slice(0, 10),
@@ -6885,9 +7290,55 @@ function Pipeline() {
   const handleOpenCreateReminder = (presetType = 'deal', presetId = '') => {
     setEditingReminder(null);
     const initialTargetId = presetId || (presetType === 'deal' ? (deals[0]?._id || '') : (contacts[0]?._id || ''));
+    
+    // Auto-select deal/contact owner if Sales Head / Sales Manager / Admin
+    let initialMemberId = '';
+    let initialMemberName = '';
+    if (presetType === 'deal' && initialTargetId && (isSalesHead || isSalesManager || isAdmin)) {
+      const targetDeal = deals.find(d => String(d._id) === String(initialTargetId));
+      const dOwnerName = (targetDeal?.salesOwner || targetDeal?.addedBy || '').trim();
+      if (dOwnerName) {
+        const matchedEmp = (employees || []).find(emp => {
+          const eName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+          const eEmail = (emp.email || '').trim().toLowerCase();
+          const eOffEmail = (emp.officialEmail || '').trim().toLowerCase();
+          const target = dOwnerName.toLowerCase();
+          return (eName && eName === target) || (eEmail && eEmail === target) || (eOffEmail && eOffEmail === target);
+        });
+        if (matchedEmp) {
+          initialMemberId = String(matchedEmp._id || matchedEmp.id);
+          initialMemberName = `${matchedEmp.firstName || ''} ${matchedEmp.lastName || ''}`.trim() || dOwnerName;
+        } else {
+          initialMemberId = `name_${dOwnerName}`;
+          initialMemberName = dOwnerName;
+        }
+      }
+    } else if (presetType === 'contact' && initialTargetId && (isSalesHead || isSalesManager || isAdmin)) {
+      const targetContact = contacts.find(c => String(c._id) === String(initialTargetId));
+      const cOwnerName = (targetContact?.owner || targetContact?.addedBy || '').trim();
+      if (cOwnerName) {
+        const matchedEmp = (employees || []).find(emp => {
+          const eName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+          const eEmail = (emp.email || '').trim().toLowerCase();
+          const eOffEmail = (emp.officialEmail || '').trim().toLowerCase();
+          const target = cOwnerName.toLowerCase();
+          return (eName && eName === target) || (eEmail && eEmail === target) || (eOffEmail && eOffEmail === target);
+        });
+        if (matchedEmp) {
+          initialMemberId = String(matchedEmp._id || matchedEmp.id);
+          initialMemberName = `${matchedEmp.firstName || ''} ${matchedEmp.lastName || ''}`.trim() || cOwnerName;
+        } else {
+          initialMemberId = `name_${cOwnerName}`;
+          initialMemberName = cOwnerName;
+        }
+      }
+    }
+
     setReminderFormData({
       targetType: presetType,
       targetId: initialTargetId,
+      memberId: initialMemberId,
+      memberName: initialMemberName,
       title: '',
       channel: 'Call',
       status: 'Scheduled',
@@ -6920,6 +7371,8 @@ function Pipeline() {
     setReminderFormData({
       targetType: reminder.entityType,
       targetId: reminder.entityId,
+      memberId: reminder.memberId || reminder.assignedTo?._id || reminder.assignedTo || '',
+      memberName: reminder.memberName || reminder.assignedToName || '',
       title: reminder.title || '',
       channel: reminder.channel || 'Call',
       status: reminder.status || 'Scheduled',
@@ -6981,7 +7434,12 @@ function Pipeline() {
           followUpTime: formatTime12H(reminderFormData.followUpTime),
           nextFollowUpDate: reminderFormData.nextFollowUpDate || '',
           remarks: reminderFormData.remarks.trim(),
-          content: reminderFormData.remarks.trim()
+          content: reminderFormData.remarks.trim(),
+          memberId: reminderFormData.memberId || '',
+          memberName: reminderFormData.memberName || '',
+          assignedTo: reminderFormData.memberId || '',
+          assignedToName: reminderFormData.memberName || '',
+          member: reminderFormData.memberId || ''
         };
 
         const isMatchingAct = (a) => {
@@ -7074,6 +7532,11 @@ function Pipeline() {
           nextFollowUpDate: reminderFormData.nextFollowUpDate || '',
           remarks: reminderFormData.remarks.trim(),
           content: reminderFormData.remarks.trim(),
+          memberId: reminderFormData.memberId || '',
+          memberName: reminderFormData.memberName || '',
+          assignedTo: reminderFormData.memberId || '',
+          assignedToName: reminderFormData.memberName || '',
+          member: reminderFormData.memberId || '',
           author: authorName,
           authorRole: authorRoleName,
           createdBy: user?._id || user?.id || null,
@@ -7154,6 +7617,8 @@ function Pipeline() {
     setEditFollowUpForm({
       id: act.id || act._id,
       title: act.title || '',
+      memberId: act.memberId || act.assignedTo?._id || act.assignedTo || '',
+      memberName: act.memberName || act.assignedToName || '',
       channel: act.channel || 'Call',
       status: act.status || 'Scheduled',
       followUpDate: dateStr,
@@ -7202,7 +7667,12 @@ function Pipeline() {
       followUpTime: formattedTime12,
       nextFollowUpDate: editFollowUpForm.nextFollowUpDate || '',
       remarks: editFollowUpForm.remarks.trim(),
-      content: editFollowUpForm.remarks.trim()
+      content: editFollowUpForm.remarks.trim(),
+      memberId: editFollowUpForm.memberId || '',
+      memberName: editFollowUpForm.memberName || '',
+      assignedTo: editFollowUpForm.memberId || '',
+      assignedToName: editFollowUpForm.memberName || '',
+      member: editFollowUpForm.memberId || ''
     };
 
     setIsSavingEditFollowUp(true);
@@ -12341,6 +12811,30 @@ function Pipeline() {
                                   onChange={e => setFollowUpFormData(prev => ({ ...prev, nextFollowUpDate: e.target.value }))}
                                 />
                               </div>
+
+                              {/* Member Selection */}
+                              {(() => {
+                                const currentMemberOptions = getFollowUpMemberOptions('deal', detailedDeal?._id);
+                                const isSalesPerson = !isAdmin && !isSalesHead && !isSalesManager;
+                                return (
+                                  <div className="pipeline-followup-field-group">
+                                    <label className="pipeline-followup-field-label">
+                                      {isSalesPerson ? 'Route to Management' : 'Assign / Link Member'}
+                                    </label>
+                                    <MemberDropdown
+                                      options={currentMemberOptions}
+                                      value={followUpFormData.memberId || ''}
+                                      onChange={(selId, matchedOpt) => {
+                                        setFollowUpFormData(prev => ({
+                                          ...prev,
+                                          memberId: selId,
+                                          memberName: matchedOpt ? matchedOpt.name : ''
+                                        }));
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              })()}
                             </div>
 
                             {/* Remarks Field */}
@@ -12479,6 +12973,13 @@ function Pipeline() {
                                             <span className="pipeline-chain-author-role">{act.authorRole}</span>
                                           )}
                                         </div>
+
+                                        {(act.memberName || act.assignedToName) && (
+                                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
+                                            <User size={11} />
+                                            <span>Assigned: {act.memberName || act.assignedToName}</span>
+                                          </div>
+                                        )}
 
                                         {(act.followUpDate || act.date) && (
                                           <div className="pipeline-chain-sched-item">
@@ -15515,6 +16016,30 @@ function Pipeline() {
                                   onChange={e => setFollowUpFormData(prev => ({ ...prev, nextFollowUpDate: e.target.value }))}
                                 />
                               </div>
+
+                              {/* Member Selection */}
+                              {(() => {
+                                const currentMemberOptions = getFollowUpMemberOptions('contact', detailedContact?._id);
+                                const isSalesPerson = !isAdmin && !isSalesHead && !isSalesManager;
+                                return (
+                                  <div className="pipeline-followup-field-group">
+                                    <label className="pipeline-followup-field-label">
+                                      {isSalesPerson ? 'Route to Management' : 'Assign / Link Member'}
+                                    </label>
+                                    <MemberDropdown
+                                      options={currentMemberOptions}
+                                      value={followUpFormData.memberId || ''}
+                                      onChange={(selId, matchedOpt) => {
+                                        setFollowUpFormData(prev => ({
+                                          ...prev,
+                                          memberId: selId,
+                                          memberName: matchedOpt ? matchedOpt.name : ''
+                                        }));
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              })()}
                             </div>
 
                             {/* Remarks Field */}
@@ -15653,6 +16178,13 @@ function Pipeline() {
                                             <span className="pipeline-chain-author-role">{act.authorRole}</span>
                                           )}
                                         </div>
+
+                                        {(act.memberName || act.assignedToName) && (
+                                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
+                                            <User size={11} />
+                                            <span>Assigned: {act.memberName || act.assignedToName}</span>
+                                          </div>
+                                        )}
 
                                         {(act.followUpDate || act.date) && (
                                           <div className="pipeline-chain-sched-item">
@@ -19433,15 +19965,23 @@ function Pipeline() {
                                 </span>
                               </td>
 
-                              {/* Set By / Author */}
+                              {/* Set By / Author & Linked Member */}
                               <td>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <div className="pipeline-owner-pill-avatar" style={{ width: '22px', height: '22px', fontSize: '10px' }} title={reminder.author}>
-                                    {(reminder.author || 'A').charAt(0).toUpperCase()}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <div className="pipeline-owner-pill-avatar" style={{ width: '22px', height: '22px', fontSize: '10px' }} title={`Created by: ${reminder.author || 'Admin System'}`}>
+                                      {(reminder.author || 'A').charAt(0).toUpperCase()}
+                                    </div>
+                                    <span style={{ fontSize: '12px', color: '#334155', fontWeight: 500 }}>
+                                      {reminder.author || 'Admin System'}
+                                    </span>
                                   </div>
-                                  <span style={{ fontSize: '12px', color: '#334155', fontWeight: 500 }}>
-                                    {reminder.author || 'Admin System'}
-                                  </span>
+                                  {(reminder.memberName || reminder.assignedToName) && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '1px 6px', borderRadius: '4px', width: 'fit-content' }}>
+                                      <User size={10} />
+                                      <span>For: {reminder.memberName || reminder.assignedToName}</span>
+                                    </div>
+                                  )}
                                 </div>
                               </td>
 
@@ -22284,17 +22824,19 @@ function Pipeline() {
       {
         showCreateReminderModal && (
           <div className="pipeline-modal-backdrop" onClick={() => { setShowCreateReminderModal(false); setEditingReminder(null); }}>
-            <div className="pipeline-modal-card" style={{ maxWidth: '680px', width: '92%' }} onClick={e => e.stopPropagation()}>
-              <div className="pipeline-modal-header">
+            <div className="pipeline-modal-card" style={{ maxWidth: '720px', width: '94%', borderRadius: '12px', boxShadow: '0 20px 40px -10px rgba(15, 23, 42, 0.22)', border: '1px solid #e2e8f0' }} onClick={e => e.stopPropagation()}>
+              <div className="pipeline-modal-header" style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div className="pipeline-modal-icon-badge" style={{ background: '#f0fdf4', color: '#16a34a' }}>
-                    <Bell size={18} />
+                  <div className="pipeline-modal-icon-badge" style={{ background: '#f0fdf4', color: '#16a34a', width: '34px', height: '34px', borderRadius: '8px' }}>
+                    <Bell size={17} />
                   </div>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
                       {editingReminder ? 'Edit Follow-up Reminder' : 'Set New Follow-up Reminder'}
                     </h3>
-                    <p className="pipeline-modal-subtitle">Schedule client calls, meetings, WhatsApp follow-ups, demos, or visits</p>
+                    <p className="pipeline-modal-subtitle" style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+                      Schedule and route client calls, meetings, WhatsApp follow-ups, or visits
+                    </p>
                   </div>
                 </div>
                 <button
@@ -22303,26 +22845,49 @@ function Pipeline() {
                   onClick={() => { setShowCreateReminderModal(false); setEditingReminder(null); }}
                   title="Close"
                 >
-                  <X size={18} />
+                  <X size={17} />
                 </button>
               </div>
 
               <form onSubmit={handleSubmitReminder}>
-                <div className="pipeline-modal-body" style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                <div className="pipeline-modal-body" style={{ padding: '14px 22px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {/* Target Entity Type Selector (Deal vs Contact) */}
                   {!editingReminder && (
-                    <div className="pipeline-form-group">
-                      <label className="pipeline-form-label">Link Follow-up To</label>
-                      <div style={{ display: 'flex', gap: '10px' }}>
+                    <div className="pipeline-form-group" style={{ margin: 0 }}>
+                      <label className="pipeline-form-label" style={{ marginBottom: '5px', fontSize: '12px', fontWeight: 600 }}>Link Follow-up To</label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                         <button
                           type="button"
                           className={`pipeline-channel-btn ${reminderFormData.targetType === 'deal' ? 'active' : ''}`}
-                          style={{ flex: 1, justifyContent: 'center', padding: '8px 14px' }}
+                          style={{ justifyContent: 'center', padding: '8px 14px', fontSize: '12.5px', borderRadius: '7px' }}
                           onClick={() => {
+                            const firstDeal = deals[0];
+                            let autoMemberId = '';
+                            let autoMemberName = '';
+                            if (firstDeal && (isSalesHead || isSalesManager || isAdmin)) {
+                              const dOwnerName = (firstDeal.salesOwner || firstDeal.addedBy || '').trim();
+                              if (dOwnerName) {
+                                const matchedEmp = (employees || []).find(emp => {
+                                  const eName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+                                  const eEmail = (emp.email || '').trim().toLowerCase();
+                                  const target = dOwnerName.toLowerCase();
+                                  return (eName && eName === target) || (eEmail && eEmail === target);
+                                });
+                                if (matchedEmp) {
+                                  autoMemberId = String(matchedEmp._id || matchedEmp.id);
+                                  autoMemberName = `${matchedEmp.firstName || ''} ${matchedEmp.lastName || ''}`.trim() || dOwnerName;
+                                } else {
+                                  autoMemberId = `name_${dOwnerName}`;
+                                  autoMemberName = dOwnerName;
+                                }
+                              }
+                            }
                             setReminderFormData(prev => ({
                               ...prev,
                               targetType: 'deal',
-                              targetId: deals[0]?._id || ''
+                              targetId: firstDeal?._id || '',
+                              memberId: autoMemberId,
+                              memberName: autoMemberName
                             }));
                           }}
                         >
@@ -22332,12 +22897,35 @@ function Pipeline() {
                         <button
                           type="button"
                           className={`pipeline-channel-btn ${reminderFormData.targetType === 'contact' ? 'active' : ''}`}
-                          style={{ flex: 1, justifyContent: 'center', padding: '8px 14px' }}
+                          style={{ justifyContent: 'center', padding: '8px 14px', fontSize: '12.5px', borderRadius: '7px' }}
                           onClick={() => {
+                            const firstContact = contacts[0];
+                            let autoMemberId = '';
+                            let autoMemberName = '';
+                            if (firstContact && (isSalesHead || isSalesManager || isAdmin)) {
+                              const cOwnerName = (firstContact.owner || firstContact.addedBy || '').trim();
+                              if (cOwnerName) {
+                                const matchedEmp = (employees || []).find(emp => {
+                                  const eName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+                                  const eEmail = (emp.email || '').trim().toLowerCase();
+                                  const target = cOwnerName.toLowerCase();
+                                  return (eName && eName === target) || (eEmail && eEmail === target);
+                                });
+                                if (matchedEmp) {
+                                  autoMemberId = String(matchedEmp._id || matchedEmp.id);
+                                  autoMemberName = `${matchedEmp.firstName || ''} ${matchedEmp.lastName || ''}`.trim() || cOwnerName;
+                                } else {
+                                  autoMemberId = `name_${cOwnerName}`;
+                                  autoMemberName = cOwnerName;
+                                }
+                              }
+                            }
                             setReminderFormData(prev => ({
                               ...prev,
                               targetType: 'contact',
-                              targetId: contacts[0]?._id || ''
+                              targetId: firstContact?._id || '',
+                              memberId: autoMemberId,
+                              memberName: autoMemberName
                             }));
                           }}
                         >
@@ -22348,76 +22936,190 @@ function Pipeline() {
                     </div>
                   )}
 
-                  {/* Target Entity Picker Dropdown with CreatableSelect */}
-                  {!editingReminder && (
-                    <div className="pipeline-form-group">
-                      <label className="pipeline-form-label">
-                        Select {reminderFormData.targetType === 'deal' ? 'Deal' : 'Contact'} <span className="required-star">*</span>
-                      </label>
-                      {reminderFormData.targetType === 'deal' ? (
+                  {/* Target Deal or Contact */}
+                  <div className="pipeline-form-group" style={{ margin: 0 }}>
+                    <label className="pipeline-form-label" style={{ marginBottom: '5px', fontSize: '12px', fontWeight: 600 }}>
+                      Select {reminderFormData.targetType === 'deal' ? 'Deal' : 'Contact'} <span className="required-star">*</span>
+                    </label>
+                    {editingReminder ? (
+                      <div style={{ height: '36px', padding: '0 12px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '7px', display: 'flex', alignItems: 'center', fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                        {reminderFormData.targetType === 'deal'
+                          ? (deals.find(item => String(item._id) === String(reminderFormData.targetId))?.dealName || reminderFormData.entityName || 'Deal')
+                          : (contacts.find(item => String(item._id) === String(reminderFormData.targetId))?.firstName || reminderFormData.entityName || 'Contact')}
+                      </div>
+                    ) : reminderFormData.targetType === 'deal' ? (
+                      <CreatableSelect
+                        value={(() => {
+                          const d = deals.find(item => String(item._id) === String(reminderFormData.targetId));
+                          return d ? `${d.dealName || d.clientName}${d.dealValue ? ` (₹${Number(d.dealValue).toLocaleString('en-IN')})` : ''}` : '';
+                        })()}
+                        onChange={val => {
+                          const matched = deals.find(item => String(item._id) === String(val) || (item.dealName || item.clientName) === val || `${item.dealName || item.clientName}${item.dealValue ? ` (₹${Number(item.dealValue).toLocaleString('en-IN')})` : ''}` === val);
+                          const nextTargetId = matched ? matched._id : val;
+                          let autoMemberId = reminderFormData.memberId;
+                          let autoMemberName = reminderFormData.memberName;
+
+                          if (matched && (isSalesHead || isSalesManager || isAdmin)) {
+                            const dOwnerName = (matched.salesOwner || matched.addedBy || '').trim();
+                            if (dOwnerName) {
+                              const matchedEmp = (employees || []).find(emp => {
+                                const eName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+                                const eEmail = (emp.email || '').trim().toLowerCase();
+                                const eOffEmail = (emp.officialEmail || '').trim().toLowerCase();
+                                const target = dOwnerName.toLowerCase();
+                                return (eName && eName === target) || (eEmail && eEmail === target) || (eOffEmail && eOffEmail === target);
+                              });
+                              if (matchedEmp) {
+                                autoMemberId = String(matchedEmp._id || matchedEmp.id);
+                                autoMemberName = `${matchedEmp.firstName || ''} ${matchedEmp.lastName || ''}`.trim() || dOwnerName;
+                              } else {
+                                autoMemberId = `name_${dOwnerName}`;
+                                autoMemberName = dOwnerName;
+                              }
+                            }
+                          }
+
+                          setReminderFormData(prev => ({
+                            ...prev,
+                            targetId: nextTargetId,
+                            memberId: autoMemberId,
+                            memberName: autoMemberName
+                          }));
+                        }}
+                        options={deals.filter(d => isItemOwnedByUser(d, 'deal')).map(d => ({
+                          id: d._id,
+                          label: `${d.dealName || d.clientName}${d.dealValue ? ` (₹${Number(d.dealValue).toLocaleString('en-IN')})` : ''}`
+                        }))}
+                        placeholder="Select or search Deal..."
+                        isSearchable={true}
+                        isCreatable={false}
+                        required={true}
+                      />
+                    ) : (
+                      <CreatableSelect
+                        value={(() => {
+                          const c = contacts.find(item => String(item._id) === String(reminderFormData.targetId));
+                          return c ? `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.company || c.email : '';
+                        })()}
+                        onChange={val => {
+                          const matched = contacts.find(item => String(item._id) === String(val) || `${item.firstName || ''} ${item.lastName || ''}`.trim() === val);
+                          const nextTargetId = matched ? matched._id : val;
+                          let autoMemberId = reminderFormData.memberId;
+                          let autoMemberName = reminderFormData.memberName;
+
+                          if (matched && (isSalesHead || isSalesManager || isAdmin)) {
+                            const cOwnerName = (matched.owner || matched.addedBy || '').trim();
+                            if (cOwnerName) {
+                              const matchedEmp = (employees || []).find(emp => {
+                                const eName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim().toLowerCase();
+                                const eEmail = (emp.email || '').trim().toLowerCase();
+                                const eOffEmail = (emp.officialEmail || '').trim().toLowerCase();
+                                const target = cOwnerName.toLowerCase();
+                                return (eName && eName === target) || (eEmail && eEmail === target) || (eOffEmail && eOffEmail === target);
+                              });
+                              if (matchedEmp) {
+                                autoMemberId = String(matchedEmp._id || matchedEmp.id);
+                                autoMemberName = `${matchedEmp.firstName || ''} ${matchedEmp.lastName || ''}`.trim() || cOwnerName;
+                              } else {
+                                autoMemberId = `name_${cOwnerName}`;
+                                autoMemberName = cOwnerName;
+                              }
+                            }
+                          }
+
+                          setReminderFormData(prev => ({
+                            ...prev,
+                            targetId: nextTargetId,
+                            memberId: autoMemberId,
+                            memberName: autoMemberName
+                          }));
+                        }}
+                        options={contacts.filter(c => isItemOwnedByUser(c, 'contact')).map(c => ({
+                          id: c._id,
+                          label: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.company || c.email || 'Contact'
+                        }))}
+                        placeholder="Select or search Contact..."
+                        isSearchable={true}
+                        isCreatable={false}
+                        required={true}
+                      />
+                    )}
+                  </div>
+
+                  {/* Assign / Link Member Field */}
+                  {(() => {
+                    const currentMemberOptions = getFollowUpMemberOptions(reminderFormData.targetType, reminderFormData.targetId);
+                    const isSalesPerson = !isAdmin && !isSalesHead && !isSalesManager;
+
+                    return (
+                      <div className="pipeline-form-group" style={{ margin: 0 }}>
+                        <label className="pipeline-form-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px', fontSize: '12px' }}>
+                          <span style={{ fontWeight: 600 }}>
+                            {isSalesPerson ? 'Route to Sales Management' : 'Assign / Link Member'}
+                          </span>
+                          <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '1px 7px', borderRadius: '4px', background: isSalesPerson ? '#fef3c7' : '#e0f2fe', color: isSalesPerson ? '#b45309' : '#0369a1' }}>
+                            {isAdmin
+                              ? 'Admin Mode'
+                              : (isSalesHead || isSalesManager)
+                                ? 'Sales Leadership'
+                                : 'Sales Executive'}
+                          </span>
+                        </label>
                         <CreatableSelect
                           value={(() => {
-                            const d = deals.find(item => String(item._id) === String(reminderFormData.targetId));
-                            return d ? `${d.dealName || d.clientName}${d.dealValue ? ` (₹${Number(d.dealValue).toLocaleString('en-IN')})` : ''}` : '';
+                            if (!reminderFormData.memberId) return '';
+                            const opt = currentMemberOptions.find(o => String(o.id) === String(reminderFormData.memberId) || o.name === reminderFormData.memberName);
+                            return opt ? (opt.label || opt.name) : (reminderFormData.memberName || '');
                           })()}
                           onChange={val => {
-                            const matched = deals.find(item => String(item._id) === String(val) || (item.dealName || item.clientName) === val || `${item.dealName || item.clientName}${item.dealValue ? ` (₹${Number(item.dealValue).toLocaleString('en-IN')})` : ''}` === val);
+                            if (!val) {
+                              setReminderFormData(prev => ({ ...prev, memberId: '', memberName: '' }));
+                              return;
+                            }
+                            const matched = currentMemberOptions.find(o => String(o.id) === String(val) || (o.label || o.name) === val || o.name === val);
                             setReminderFormData(prev => ({
                               ...prev,
-                              targetId: matched ? matched._id : val
+                              memberId: matched ? matched.id : val,
+                              memberName: matched ? matched.name : val
                             }));
                           }}
-                          options={deals.filter(d => isItemOwnedByUser(d, 'deal')).map(d => ({
-                            id: d._id,
-                            label: `${d.dealName || d.clientName}${d.dealValue ? ` (₹${Number(d.dealValue).toLocaleString('en-IN')})` : ''}`
+                          options={currentMemberOptions.map(opt => ({
+                            id: opt.id,
+                            label: opt.label || opt.name
                           }))}
-                          placeholder="Select or Type Deal..."
+                          placeholder={isSalesPerson ? "Select Sales Head / Manager..." : "Select Deal Owner or Team Member..."}
                           isSearchable={true}
                           isCreatable={false}
-                          required={true}
+                          isDeleteable={false}
                         />
-                      ) : (
-                        <CreatableSelect
-                          value={(() => {
-                            const c = contacts.find(item => String(item._id) === String(reminderFormData.targetId));
-                            return c ? `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.company || c.email : '';
-                          })()}
-                          onChange={val => {
-                            const matched = contacts.find(item => String(item._id) === String(val) || `${item.firstName || ''} ${item.lastName || ''}`.trim() === val);
-                            setReminderFormData(prev => ({
-                              ...prev,
-                              targetId: matched ? matched._id : val
-                            }));
-                          }}
-                          options={contacts.filter(c => isItemOwnedByUser(c, 'contact')).map(c => ({
-                            id: c._id,
-                            label: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.company || c.email || 'Contact'
-                          }))}
-                          placeholder="Select or Type Contact..."
-                          isSearchable={true}
-                          isCreatable={false}
-                          required={true}
-                        />
-                      )}
-                    </div>
-                  )}
+                        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.35' }}>
+                          {isAdmin
+                            ? 'Both creator & selected member receive reminders. Admin receives all.'
+                            : (isSalesHead || isSalesManager)
+                              ? 'Selecting deal owner sends reminder & notifications to both you and the deal owner.'
+                              : 'Select your Sales Head or Manager to route reminders to leadership.'}
+                        </p>
+                      </div>
+                    );
+                  })()}
 
                   {/* Channel Selector Pills */}
-                  <div className="pipeline-form-group">
-                    <label className="pipeline-form-label">Touchpoint / Channel</label>
-                    <div className="pipeline-followup-channels-bar" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  <div className="pipeline-form-group" style={{ margin: 0 }}>
+                    <label className="pipeline-form-label" style={{ marginBottom: '5px', fontSize: '12px', fontWeight: 600 }}>Touchpoint / Channel</label>
+                    <div className="pipeline-followup-channels-bar" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {[
-                        { key: 'Call', label: 'Phone Call', icon: <Phone size={13} />, className: 'channel-call' },
-                        { key: 'Meeting', label: 'Meeting', icon: <Users size={13} />, className: 'channel-meeting' },
-                        { key: 'WhatsApp', label: 'WhatsApp', icon: <MessageSquare size={13} />, className: 'channel-whatsapp' },
-                        { key: 'Email', label: 'Email', icon: <Mail size={13} />, className: 'channel-email' },
-                        { key: 'Demo', label: 'Product Demo', icon: <Briefcase size={13} />, className: 'channel-demo' },
-                        { key: 'Visit', label: 'Site Visit', icon: <Building2 size={13} />, className: 'channel-visit' }
+                        { key: 'Call', label: 'Call', icon: <Phone size={12} />, className: 'channel-call' },
+                        { key: 'Meeting', label: 'Meeting', icon: <Users size={12} />, className: 'channel-meeting' },
+                        { key: 'WhatsApp', label: 'WhatsApp', icon: <MessageSquare size={12} />, className: 'channel-whatsapp' },
+                        { key: 'Email', label: 'Email', icon: <Mail size={12} />, className: 'channel-email' },
+                        { key: 'Demo', label: 'Demo', icon: <Briefcase size={12} />, className: 'channel-demo' },
+                        { key: 'Visit', label: 'Visit', icon: <Building2 size={12} />, className: 'channel-visit' }
                       ].map(ch => (
                         <button
                           key={ch.key}
                           type="button"
                           className={`pipeline-channel-btn ${ch.className} ${reminderFormData.channel === ch.key ? 'active' : ''}`}
+                          style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '6px', gap: '5px' }}
                           onClick={() => setReminderFormData(prev => ({ ...prev, channel: ch.key }))}
                         >
                           {ch.icon}
@@ -22427,50 +23129,55 @@ function Pipeline() {
                     </div>
                   </div>
 
-                  {/* Title & Scheduled Date/Time Grid */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                    <div className="pipeline-form-group">
-                      <label className="pipeline-form-label">Title / Purpose</label>
-                      <input
-                        type="text"
-                        className="pipeline-form-input"
-                        placeholder={`e.g. ${reminderFormData.channel} regarding proposal`}
-                        value={reminderFormData.title}
-                        onChange={e => setReminderFormData(prev => ({ ...prev, title: e.target.value }))}
-                      />
-                    </div>
+                  {/* Title / Purpose */}
+                  <div className="pipeline-form-group" style={{ margin: 0 }}>
+                    <label className="pipeline-form-label" style={{ marginBottom: '5px', fontSize: '12px', fontWeight: 600 }}>Title / Purpose</label>
+                    <input
+                      type="text"
+                      className="pipeline-form-input"
+                      style={{ height: '36px', borderRadius: '7px', fontSize: '13px' }}
+                      placeholder={`e.g. ${reminderFormData.channel} regarding proposal & next steps`}
+                      value={reminderFormData.title}
+                      onChange={e => setReminderFormData(prev => ({ ...prev, title: e.target.value }))}
+                    />
+                  </div>
 
-                    <div className="pipeline-form-group">
-                      <label className="pipeline-form-label">
+                  {/* 4-Column: Scheduled Date, Scheduled Time, Status, Next Follow-up Date */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '10px' }}>
+                    <div className="pipeline-form-group" style={{ margin: 0 }}>
+                      <label className="pipeline-form-label" style={{ marginBottom: '4px', fontSize: '12px', fontWeight: 600 }}>
                         Scheduled Date <span className="required-star">*</span>
                       </label>
                       <input
                         type="date"
                         className="pipeline-form-input"
+                        style={{ height: '34px', borderRadius: '7px', fontSize: '13px' }}
                         value={reminderFormData.followUpDate}
                         onChange={e => setReminderFormData(prev => ({ ...prev, followUpDate: e.target.value }))}
                         required
                       />
                     </div>
 
-                    <div className="pipeline-form-group">
-                      <label className="pipeline-form-label">Time</label>
+                    <div className="pipeline-form-group" style={{ margin: 0 }}>
+                      <label className="pipeline-form-label" style={{ marginBottom: '4px', fontSize: '12px', fontWeight: 600 }}>Scheduled Time</label>
                       <input
                         type="time"
                         className="pipeline-form-input"
+                        style={{ height: '34px', borderRadius: '7px', fontSize: '13px' }}
                         value={convertTimeTo24H(reminderFormData.followUpTime)}
                         onChange={e => setReminderFormData(prev => ({ ...prev, followUpTime: e.target.value }))}
                       />
                     </div>
 
-                    <div className="pipeline-form-group">
-                      <label className="pipeline-form-label">Status</label>
+                    <div className="pipeline-form-group" style={{ margin: 0 }}>
+                      <label className="pipeline-form-label" style={{ marginBottom: '4px', fontSize: '12px', fontWeight: 600 }}>Status</label>
                       <select
                         className="pipeline-form-input"
+                        style={{ height: '34px', borderRadius: '7px', fontSize: '13px', background: '#fff' }}
                         value={reminderFormData.status}
                         onChange={e => setReminderFormData(prev => ({ ...prev, status: e.target.value }))}
                       >
-                        <option value="Scheduled">Scheduled / Upcoming</option>
+                        <option value="Scheduled">Scheduled</option>
                         <option value="Completed">Completed</option>
                         <option value="Follow-up Needed">Follow-up Needed</option>
                         <option value="Rescheduled">Rescheduled</option>
@@ -22478,11 +23185,12 @@ function Pipeline() {
                       </select>
                     </div>
 
-                    <div className="pipeline-form-group">
-                      <label className="pipeline-form-label">Next Follow-up Date (Optional)</label>
+                    <div className="pipeline-form-group" style={{ margin: 0 }}>
+                      <label className="pipeline-form-label" style={{ marginBottom: '4px', fontSize: '12px', fontWeight: 600 }}>Next Follow-up Date</label>
                       <input
                         type="date"
                         className="pipeline-form-input"
+                        style={{ height: '34px', borderRadius: '7px', fontSize: '13px' }}
                         value={reminderFormData.nextFollowUpDate}
                         onChange={e => setReminderFormData(prev => ({ ...prev, nextFollowUpDate: e.target.value }))}
                       />
@@ -22490,13 +23198,13 @@ function Pipeline() {
                   </div>
 
                   {/* Remarks Field */}
-                  <div className="pipeline-form-group">
-                    <label className="pipeline-form-label">
+                  <div className="pipeline-form-group" style={{ margin: 0 }}>
+                    <label className="pipeline-form-label" style={{ marginBottom: '4px', fontSize: '12px', fontWeight: 600 }}>
                       Remarks & Discussion Details <span className="required-star">*</span>
                     </label>
                     <textarea
                       className="pipeline-activity-composer-textarea"
-                      style={{ minHeight: '100px', fontSize: '13.5px', lineHeight: '1.5' }}
+                      style={{ minHeight: '80px', fontSize: '13px', lineHeight: '1.45', width: '100%', borderRadius: '7px', boxSizing: 'border-box' }}
                       placeholder="Enter discussion notes, agreed next steps, objections raised, or client feedback..."
                       value={reminderFormData.remarks}
                       onChange={e => setReminderFormData(prev => ({ ...prev, remarks: e.target.value }))}
@@ -22505,12 +23213,13 @@ function Pipeline() {
                   </div>
                 </div>
 
-                <div className="pipeline-modal-footer">
+                <div className="pipeline-modal-footer" style={{ borderTop: '1px solid #f1f5f9', padding: '14px 22px', background: '#fafafa', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                   <button
                     type="button"
                     className="pipeline-btn-cancel"
                     disabled={isSubmittingReminder}
                     onClick={() => { setShowCreateReminderModal(false); setEditingReminder(null); }}
+                    style={{ height: '36px', padding: '0 16px', borderRadius: '7px', fontSize: '12.5px' }}
                   >
                     Cancel
                   </button>
@@ -22518,11 +23227,11 @@ function Pipeline() {
                     type="submit"
                     className="pipeline-btn-save"
                     disabled={!reminderFormData.remarks.trim() || isSubmittingReminder}
-                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    style={{ height: '36px', padding: '0 20px', borderRadius: '7px', fontSize: '12.5px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                   >
                     {isSubmittingReminder ? (
                       <>
-                        <Loader2 size={14} className="pipeline-spinner-icon" />
+                        <Loader2 size={13} className="pipeline-spinner-icon" />
                         <span>{editingReminder ? 'Updating...' : 'Saving...'}</span>
                       </>
                     ) : (
@@ -23474,6 +24183,77 @@ function Pipeline() {
                       />
                     </div>
                   </div>
+
+                  {/* Linked Member Field */}
+                  {(() => {
+                    const currentMemberOptions = getFollowUpMemberOptions(editingFollowUp._targetEntityType || 'deal', editingFollowUp._targetEntityId);
+                    const isSalesPerson = !isAdmin && !isSalesHead && !isSalesManager;
+                    const selectedMemberId = editFollowUpForm.memberId || '';
+                    const selectedOpt = currentMemberOptions.find(o => String(o.id) === String(selectedMemberId));
+
+                    return (
+                      <div style={{ position: 'relative' }}>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '5px' }}>
+                          {isSalesPerson ? 'Route to Management' : 'Assign / Link Member'}
+                        </label>
+                        {/* Styled wrapper that shows selected option with star/role badge */}
+                        <div style={{ position: 'relative' }}>
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: '8px',
+                            height: '38px', padding: '0 32px 0 10px',
+                            border: '1.5px solid #cbd5e1', borderRadius: '8px',
+                            background: '#fff', fontSize: '13.5px', color: '#1e293b',
+                            fontWeight: selectedOpt?.isDealOwner ? 600 : 400,
+                            cursor: 'pointer', userSelect: 'none',
+                            boxSizing: 'border-box', width: '100%'
+                          }}>
+                            {selectedOpt ? (
+                              <>
+                                {selectedOpt.isDealOwner && (
+                                  <span style={{ color: '#f59e0b', fontSize: '15px', lineHeight: 1 }}>★</span>
+                                )}
+                                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {selectedOpt.name}
+                                </span>
+                                {selectedOpt.isDealOwner ? (
+                                  <span style={{ fontSize: '11px', color: '#64748b', background: '#f1f5f9', padding: '1px 7px', borderRadius: '4px', whiteSpace: 'nowrap' }}>Deal Owner</span>
+                                ) : selectedOpt.role ? (
+                                  <span style={{ fontSize: '11px', color: '#64748b', background: '#f1f5f9', padding: '1px 7px', borderRadius: '4px', whiteSpace: 'nowrap' }}>{selectedOpt.role}</span>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span style={{ color: '#94a3b8' }}>-- No Member Linked --</span>
+                            )}
+                            <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', pointerEvents: 'none', fontSize: '10px' }}>▼</span>
+                          </div>
+                          {/* Actual select overlaid invisibly for browser-native dropdown */}
+                          <select
+                            value={selectedMemberId}
+                            onChange={e => {
+                              const selId = e.target.value;
+                              const matchedOpt = currentMemberOptions.find(o => String(o.id) === String(selId));
+                              setEditFollowUpForm(prev => ({
+                                ...prev,
+                                memberId: selId,
+                                memberName: matchedOpt ? matchedOpt.name : ''
+                              }));
+                            }}
+                            style={{
+                              position: 'absolute', inset: 0, opacity: 0,
+                              width: '100%', height: '100%', cursor: 'pointer'
+                            }}
+                          >
+                            <option value="">-- No Member Linked (Self Only) --</option>
+                            {currentMemberOptions.map(opt => (
+                              <option key={opt.id} value={opt.id}>
+                                {opt.isDealOwner ? '★ ' : ''}{opt.name}{opt.isDealOwner ? ' (Deal Owner)' : opt.role ? ` (${opt.role})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Remarks / Discussion notes */}
                   <div>

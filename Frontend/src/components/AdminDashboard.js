@@ -219,6 +219,83 @@ function AdminDashboard() {
     }
   };
 
+  // Normalize and group timeline sources into clean, standard channels
+  const normalizeTimelineData = (data) => {
+    if (!data || !Array.isArray(data.sources) || !Array.isArray(data.dates)) {
+      return { dates: [], sources: [] };
+    }
+
+    const dates = data.dates;
+    const numDates = dates.length;
+
+    const mapSourceName = (name) => {
+      const lower = String(name || '').toLowerCase().trim();
+      if (lower.includes('indiamart')) return 'IndiaMART';
+      if (lower.includes('instagram') || lower === 'ig') return 'Instagram';
+      if (lower.includes('facebook') || lower === 'fb' || lower === 'meta') return 'Facebook';
+      if (lower.includes('website') || lower.includes('web')) return 'Website';
+      if (lower.includes('linkedin')) return 'LinkedIn';
+      if (lower.includes('email') || lower.includes('mail')) return 'Email Marketing';
+      if (lower.includes('excel') || lower.includes('csv') || lower.includes('import')) return 'Excel Import';
+      if (lower.includes('manual') || lower === 'direct') return 'Manual';
+      return null;
+    };
+
+    const buckets = new Map();
+    const otherData = new Array(numDates).fill(0);
+
+    data.sources.forEach(src => {
+      const sName = src.name || '';
+      const mapped = mapSourceName(sName);
+      const sData = Array.isArray(src.data) ? src.data : [];
+
+      if (mapped) {
+        if (!buckets.has(mapped)) {
+          buckets.set(mapped, new Array(numDates).fill(0));
+        }
+        const target = buckets.get(mapped);
+        for (let i = 0; i < numDates; i++) {
+          target[i] += Number(sData[i]) || 0;
+        }
+      } else {
+        // Roll up long-tail campaign/form/company names into "Other"
+        for (let i = 0; i < numDates; i++) {
+          otherData[i] += Number(sData[i]) || 0;
+        }
+      }
+    });
+
+    if (otherData.some(v => v > 0) || buckets.size === 0) {
+      if (buckets.has('Other')) {
+        const existing = buckets.get('Other');
+        for (let i = 0; i < numDates; i++) {
+          existing[i] += otherData[i];
+        }
+      } else {
+        buckets.set('Other', otherData);
+      }
+    }
+
+    const defaultChannels = ['Facebook', 'Instagram', 'Website', 'IndiaMART'];
+    defaultChannels.forEach(ch => {
+      if (!buckets.has(ch)) {
+        buckets.set(ch, new Array(numDates).fill(0));
+      }
+    });
+
+    const resultSources = [];
+    buckets.forEach((dArray, name) => {
+      const total = dArray.reduce((a, b) => a + b, 0);
+      resultSources.push({ name, data: dArray, total });
+    });
+
+    // Sort by volume descending, and limit to top 6 standard channels
+    resultSources.sort((a, b) => b.total - a.total);
+    const finalSources = resultSources.slice(0, 6).map(({ name, data }) => ({ name, data }));
+
+    return { dates, sources: finalSources };
+  };
+
   const fetchLeadsTimeline = async (month) => {
     setChartLoading(true);
     try {
@@ -229,8 +306,8 @@ function AdminDashboard() {
           return { data: { dates: [], sources: [] } };
         });
       
-      const timelineData = timelineResp.data;
-      console.log('Timeline data from backend:', timelineData);
+      const rawData = timelineResp.data;
+      const timelineData = normalizeTimelineData(rawData);
       
       setLeadsTimelineData(timelineData);
       setChartLoading(false);
@@ -372,9 +449,16 @@ function AdminDashboard() {
     const ctx = chartRef.current.getContext('2d');
     const canvasHeight = chartRef.current.offsetHeight || 320;
 
-    // Dynamic y-axis: spread the data to fill the chart height naturally
-    const allVals = [...(chartData.counts || []), ...(chartData.maleCounts || []), ...(chartData.femaleCounts || [])];
-    const dataMax = Math.max(...allVals, 1);
+    // Dynamic y-axis: safely find max value without stack overflow
+    let dataMax = 1;
+    [chartData.counts, chartData.maleCounts, chartData.femaleCounts].forEach(arr => {
+      if (Array.isArray(arr)) {
+        for (let i = 0; i < arr.length; i++) {
+          const v = Number(arr[i]);
+          if (!isNaN(v) && v > dataMax) dataMax = v;
+        }
+      }
+    });
     const rawStep = dataMax <= 5 ? 1 : dataMax <= 20 ? 5 : dataMax <= 50 ? 10 : dataMax <= 100 ? 20 : 50;
     const suggestedMax = Math.ceil((dataMax * 1.6) / rawStep) * rawStep;
 
@@ -532,12 +616,16 @@ function AdminDashboard() {
     const ctx = chartRef.current.getContext('2d');
     const canvasHeight = chartRef.current.offsetHeight || 320;
 
-    // Calculate max value across all sources for dynamic y-axis
-    let allVals = [];
+    // Calculate max value across all sources for dynamic y-axis safely without stack overflow
+    let dataMax = 1;
     (chartData.sources || []).forEach(source => {
-      allVals = allVals.concat(source.data || []);
+      if (Array.isArray(source.data)) {
+        for (let i = 0; i < source.data.length; i++) {
+          const v = Number(source.data[i]);
+          if (!isNaN(v) && v > dataMax) dataMax = v;
+        }
+      }
     });
-    const dataMax = Math.max(...allVals, 1);
     const rawStep = dataMax <= 5 ? 1 : dataMax <= 20 ? 5 : dataMax <= 50 ? 10 : dataMax <= 100 ? 20 : 50;
     const suggestedMax = Math.ceil((dataMax * 1.6) / rawStep) * rawStep;
 
@@ -860,7 +948,11 @@ function AdminDashboard() {
   // Sparkline SVG renderer — rounded pill bars like the reference image
   const SparkBars = ({ data = [], color = '#a8e63d', height = 36, featured = false, labels = [] }) => {
     if (!data.length) return null;
-    const max = Math.max(...data, 1);
+    let max = 1;
+    for (let i = 0; i < data.length; i++) {
+      const v = Number(data[i]);
+      if (!isNaN(v) && v > max) max = v;
+    }
     const barW = 7;
     const gap  = 4;
     const totalW = data.length * (barW + gap) - gap;
@@ -1100,8 +1192,16 @@ function AdminDashboard() {
                           <svg viewBox="0 0 100 40" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
                             <path
                               d={`M ${card.sparkData.map((val, i) => {
-                                const max = Math.max(...card.sparkData, 1);
-                                const min = Math.min(...card.sparkData, 0);
+                                const sData = Array.isArray(card.sparkData) ? card.sparkData : [];
+                                let max = 1;
+                                let min = 0;
+                                for (let k = 0; k < sData.length; k++) {
+                                  const v = Number(sData[k]);
+                                  if (!isNaN(v)) {
+                                    if (v > max) max = v;
+                                    if (v < min) min = v;
+                                  }
+                                }
                                 const range = max - min || 1;
                                 const x = (i / (card.sparkData.length - 1)) * 100;
                                 const y = 38 - ((val - min) / range) * 36;
@@ -1257,8 +1357,8 @@ function AdminDashboard() {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
                   {/* Custom Legend */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, paddingRight: 4, marginBottom: 10, flexWrap: 'wrap' }}>
-                    {(leadsTimelineData.sources || []).map((source, idx) => {
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, paddingRight: 4, marginBottom: 10, flexWrap: 'wrap', maxHeight: '42px', overflow: 'hidden' }}>
+                    {(leadsTimelineData.sources || []).slice(0, 6).map((source, idx) => {
                       const legendColors = {
                         'IndiaMART': { color: '#dbeafe', textColor: '#1e40af', border: '#93c5fd' },
                         'Meta': { color: '#ede9fe', textColor: '#6d28d9', border: '#c4b5fd' },
