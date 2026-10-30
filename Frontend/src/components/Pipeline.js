@@ -72,17 +72,17 @@ const INITIAL_SAMPLE_TASKS = [];
 
 // Country codes with flags, max digits & placeholder formatting
 const COUNTRY_CODES = [
-  { code: '+1', country: 'United States', flag: '🇺🇸', maxDigits: 10, formatPlaceholder: '(555) 000-0000' },
-  { code: '+91', country: 'India', flag: '🇮🇳', maxDigits: 10, formatPlaceholder: '98765 43210' },
-  { code: '+44', country: 'United Kingdom', flag: '🇬🇧', maxDigits: 10, formatPlaceholder: '7911 123456' },
-  { code: '+61', country: 'Australia', flag: '🇦🇺', maxDigits: 9, formatPlaceholder: '412 345 678' },
-  { code: '+49', country: 'Germany', flag: '🇩🇪', maxDigits: 11, formatPlaceholder: '151 12345678' },
-  { code: '+971', country: 'UAE', flag: '🇦🇪', maxDigits: 9, formatPlaceholder: '50 123 4567' },
-  { code: '+65', country: 'Singapore', flag: '🇸🇬', maxDigits: 8, formatPlaceholder: '8123 4567' },
-  { code: '+33', country: 'France', flag: '🇫🇷', maxDigits: 9, formatPlaceholder: '6 12 34 56 78' },
-  { code: '+81', country: 'Japan', flag: '🇯🇵', maxDigits: 10, formatPlaceholder: '90 1234 5678' },
-  { code: '+86', country: 'China', flag: '🇨🇳', maxDigits: 11, formatPlaceholder: '138 0000 0000' },
-  { code: '+55', country: 'Brazil', flag: '🇧🇷', maxDigits: 11, formatPlaceholder: '11 91234-5678' }
+  { code: '+1', country: 'United States', flag: '🇺🇸', minDigits: 10, maxDigits: 10, formatPlaceholder: '(555) 000-0000' },
+  { code: '+91', country: 'India', flag: '🇮🇳', minDigits: 10, maxDigits: 10, formatPlaceholder: '98765 43210' },
+  { code: '+44', country: 'United Kingdom', flag: '🇬🇧', minDigits: 10, maxDigits: 11, formatPlaceholder: '7911 123456' },
+  { code: '+61', country: 'Australia', flag: '🇦🇺', minDigits: 9, maxDigits: 10, formatPlaceholder: '412 345 678' },
+  { code: '+49', country: 'Germany', flag: '🇩🇪', minDigits: 10, maxDigits: 11, formatPlaceholder: '151 12345678' },
+  { code: '+971', country: 'UAE', flag: '🇦🇪', minDigits: 9, maxDigits: 10, formatPlaceholder: '050 123 4567' },
+  { code: '+65', country: 'Singapore', flag: '🇸🇬', minDigits: 8, maxDigits: 8, formatPlaceholder: '8123 4567' },
+  { code: '+33', country: 'France', flag: '🇫🇷', minDigits: 9, maxDigits: 10, formatPlaceholder: '6 12 34 56 78' },
+  { code: '+81', country: 'Japan', flag: '🇯🇵', minDigits: 10, maxDigits: 11, formatPlaceholder: '90 1234 5678' },
+  { code: '+86', country: 'China', flag: '🇨🇳', minDigits: 11, maxDigits: 11, formatPlaceholder: '138 0000 0000' },
+  { code: '+55', country: 'Brazil', flag: '🇧🇷', minDigits: 10, maxDigits: 11, formatPlaceholder: '11 91234-5678' }
 ];
 
 const CONTACT_SOURCE_OPTIONS = [];
@@ -91,7 +91,7 @@ const LEAD_STATUS_OPTIONS = [];
 
 // Default Contact Pipeline Stages for Columns
 const DEFAULT_CONTACT_STAGES = [
-  { id: 'Lead', name: 'Lead', badgeClass: 'new' }
+  { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' }
 ];
 
 // Initial High-Fidelity Pre-seeded Contacts
@@ -649,23 +649,23 @@ const isValidCompanyDomain = (domain) => {
 };
 
 const DEFAULT_PIPELINES = [
-  { id: 'New Lead', name: 'New Lead', badgeClass: 'new' },
-  { id: 'Initial', name: 'Initial', badgeClass: 'new' },
-  { id: 'Sales Pipeline', name: 'Sales Pipeline', badgeClass: 'hot' },
-  { id: 'Enterprise Pipeline', name: 'Enterprise Pipeline', badgeClass: 'cold' },
-  { id: 'Lead Conversion Pipeline', name: 'Lead Conversion Pipeline', badgeClass: 'won' },
-  { id: 'Renewal & Retention Pipeline', name: 'Renewal & Retention Pipeline', badgeClass: 'old' },
-  { id: 'Partnership Pipeline', name: 'Partnership Pipeline', badgeClass: 'custom' }
+  { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' },
+  { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' },
+  { id: 'Sales Pipeline', name: 'Sales Pipeline', badgeClass: 'hot', createdAt: '2026-09-01T00:00:00+05:30' },
+  { id: 'Enterprise Pipeline', name: 'Enterprise Pipeline', badgeClass: 'cold', createdAt: '2026-09-01T00:00:00+05:30' },
+  { id: 'Lead Conversion Pipeline', name: 'Lead Conversion Pipeline', badgeClass: 'won', createdAt: '2026-09-01T00:00:00+05:30' },
+  { id: 'Renewal & Retention Pipeline', name: 'Renewal & Retention Pipeline', badgeClass: 'old', createdAt: '2026-09-01T00:00:00+05:30' },
+  { id: 'Partnership Pipeline', name: 'Partnership Pipeline', badgeClass: 'custom', createdAt: '2026-09-01T00:00:00+05:30' }
 ];
 
 const DEFAULT_STAGES = [
-  { id: 'New Lead', name: 'New Lead', badgeClass: 'new' },
-  { id: 'New', name: 'New', badgeClass: 'new' },
-  { id: 'Hot', name: 'Hot', badgeClass: 'hot' },
-  { id: 'Old', name: 'Old', badgeClass: 'old' },
-  { id: 'Cold', name: 'Cold', badgeClass: 'cold' },
-  { id: 'Won', name: 'Won', badgeClass: 'won' },
-  { id: 'Lost', name: 'Lost', badgeClass: 'lost' }
+  { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' },
+  { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' },
+  { id: 'Hot', name: 'Hot', badgeClass: 'hot', createdAt: '2026-09-01T00:00:00+05:30' },
+  { id: 'Old', name: 'Old', badgeClass: 'old', createdAt: '2026-09-01T00:00:00+05:30' },
+  { id: 'Cold', name: 'Cold', badgeClass: 'cold', createdAt: '2026-09-01T00:00:00+05:30' },
+  { id: 'Won', name: 'Won', badgeClass: 'won', createdAt: '2026-09-01T00:00:00+05:30' },
+  { id: 'Lost', name: 'Lost', badgeClass: 'lost', createdAt: '2026-09-01T00:00:00+05:30' }
 ];
 
 const PIPELINE_OPTIONS = [
@@ -2840,6 +2840,99 @@ function Pipeline() {
     return false;
   }, [user, hasFullAccess, isAdmin, adminDataViewMode, deals, contacts]);
 
+  const PRE_CUTOFF_LEGACY_STAGES = useMemo(() => [
+    'sales pipeline',
+    'enterprise pipeline',
+    'lead conversion pipeline',
+    'renewal & retention pipeline',
+    'partnership pipeline',
+    'hot',
+    'cold',
+    'old',
+    'won',
+    'lost',
+    'new',
+    'lead',
+    'marketing qualified (mql)',
+    'marketing qualified',
+    'sales qualified (sql)',
+    'sales qualified',
+    'opportunity',
+    'opportunity stage',
+    'customer',
+    'retention & customer'
+  ], []);
+
+  // Stage cutoff filter:
+  // Non-admins (Sales Head, Sales Manager, Sales Executives / Sales Role) strictly only see stages created on or after 17 Oct 2026.
+  // Admins see all stages (or filtered by adminDataViewMode if 'new' or 'old').
+  const isStageCreatedOnOrAfterCutoff = useCallback((item, type = 'deal') => {
+    if (!item) return false;
+
+    // Explicit createdAt timestamp check
+    if (item?.createdAt) {
+      const itemCreatedAt = new Date(item.createdAt);
+      if (isAdmin) {
+        if (adminDataViewMode === 'old') return itemCreatedAt < DATA_CUTOFF_DATE;
+        if (adminDataViewMode === 'new') return itemCreatedAt >= DATA_CUTOFF_DATE;
+        return true; // 'all' mode
+      }
+      return itemCreatedAt >= DATA_CUTOFF_DATE;
+    }
+
+    const name = (typeof item === 'string' ? item : (item?.name || item?.id || '')).toLowerCase().trim();
+    if (!name) return false;
+
+    if (isAdmin) {
+      if (adminDataViewMode === 'old') {
+        if (PRE_CUTOFF_LEGACY_STAGES.includes(name)) return true;
+        if (type === 'deal') {
+          return deals.some(d => getItemCreationDate(d) < DATA_CUTOFF_DATE && ((d.pipeline || '').toLowerCase().trim() === name || (d.stage || '').toLowerCase().trim() === name));
+        } else {
+          return contacts.some(c => getItemCreationDate(c) < DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
+        }
+      }
+      if (adminDataViewMode === 'new') {
+        if (PRE_CUTOFF_LEGACY_STAGES.includes(name)) return false;
+        if (name === 'new lead' || name === 'initial') return true;
+        if (type === 'deal') {
+          return deals.some(d => getItemCreationDate(d) >= DATA_CUTOFF_DATE && ((d.pipeline || '').toLowerCase().trim() === name || (d.stage || '').toLowerCase().trim() === name));
+        } else {
+          return contacts.some(c => getItemCreationDate(c) >= DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
+        }
+      }
+      return true; // 'all' mode: admin sees all
+    }
+
+    // For non-admin roles (Sales Head, Sales Manager, Sales Role / Executives):
+    // Strictly ONLY show stages that were created on or after 17 Oct 2026!
+    // 1. If it's a known legacy pre-cutoff stage, it MUST be hidden!
+    if (PRE_CUTOFF_LEGACY_STAGES.includes(name)) {
+      return false;
+    }
+
+    // 2. Base post-cutoff stages created for the new pipeline system
+    if (name === 'new lead' || name === 'initial') {
+      return true;
+    }
+
+    // 3. Active stages created post-cutoff and used by deals or contacts from 17 Oct 2026
+    const hasPostCutoffDeal = (deals || []).some(d =>
+      getItemCreationDate(d) >= DATA_CUTOFF_DATE &&
+      ((d.pipeline || '').toLowerCase().trim() === name || (d.stage || '').toLowerCase().trim() === name)
+    );
+    if (hasPostCutoffDeal) return true;
+
+    const hasPostCutoffContact = (contacts || []).some(c =>
+      getItemCreationDate(c) >= DATA_CUTOFF_DATE &&
+      (c.leadStage || '').toLowerCase().trim() === name
+    );
+    if (hasPostCutoffContact) return true;
+
+    // Any stage without post-cutoff timestamp or post-cutoff deals/contacts was NOT created from 17 Oct 2026!
+    return false;
+  }, [isAdmin, adminDataViewMode, deals, contacts, PRE_CUTOFF_LEGACY_STAGES]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [pipelines, setPipelines] = useState(() => {
     if (!isAdmin) return [];
@@ -2965,10 +3058,32 @@ function Pipeline() {
     contactId: '',
   });
 
-  const setActiveTab = useCallback((tab) => setQueryState({ tab }), [setQueryState]);
+  const setActiveTab = useCallback((tab) => {
+    if (tab === 'contacts' && !isAdmin) {
+      setQueryState({ tab: 'deals' });
+      return;
+    }
+    setQueryState({ tab });
+  }, [isAdmin, setQueryState]);
   const setViewMode = useCallback((view) => setQueryState({ view }), [setQueryState]);
   const setDetailActiveTab = useCallback((detailTab) => setQueryState({ detailTab }), [setQueryState]);
   const setSelectedStageFilter = useCallback((stage) => setQueryState({ stage }), [setQueryState]);
+
+  // Restrict contacts tab to admin only; automatically redirect non-admin users to deals
+  useEffect(() => {
+    if (!isAdmin && activeTab === 'contacts') {
+      setActiveTab('deals');
+    }
+  }, [isAdmin, activeTab, setActiveTab]);
+
+  const visibleSidebarTabs = useMemo(() => {
+    return SIDEBAR_TABS.filter(tab => {
+      if (tab.id === 'contacts') {
+        return Boolean(isAdmin);
+      }
+      return true;
+    });
+  }, [isAdmin]);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -3273,29 +3388,21 @@ function Pipeline() {
     });
 
     if (!isAdmin) {
-      list = list.filter(s => {
-        if (s.createdAt) return new Date(s.createdAt) >= DATA_CUTOFF_DATE;
-        return true;
-      });
+      list = list.filter(s => isStageCreatedOnOrAfterCutoff(s, 'contact'));
       if (list.length === 0) {
-        list = [{ id: 'Lead', name: 'Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }];
+        list = [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }];
       }
     } else if (adminDataViewMode === 'new') {
-      list = list.filter(s => {
-        if (s.createdAt) return new Date(s.createdAt) >= DATA_CUTOFF_DATE;
-        const name = (s.name || s.id || '').toLowerCase().trim();
-        return contacts.some(c => getItemCreationDate(c) >= DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
-      });
+      list = list.filter(s => isStageCreatedOnOrAfterCutoff(s, 'contact'));
+      if (list.length === 0) {
+        list = [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }];
+      }
     } else if (adminDataViewMode === 'old') {
-      list = list.filter(s => {
-        if (s.createdAt) return new Date(s.createdAt) < DATA_CUTOFF_DATE;
-        const name = (s.name || s.id || '').toLowerCase().trim();
-        return contacts.some(c => getItemCreationDate(c) < DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
-      });
+      list = list.filter(s => isStageCreatedOnOrAfterCutoff(s, 'contact'));
     }
 
     return list;
-  }, [contactStages, contacts, isAdmin, adminDataViewMode]);
+  }, [contactStages, contacts, isAdmin, adminDataViewMode, isStageCreatedOnOrAfterCutoff]);
   const [draggedContactId, setDraggedContactId] = useState(null);
   const [dragOverContactColumnId, setDragOverContactColumnId] = useState(null);
   const [editingContactStageId, setEditingContactStageId] = useState(null);
@@ -3748,7 +3855,16 @@ function Pipeline() {
             setPipelines(prev => {
               const current = prev || [];
               const names = new Set(current.map(p => (p.name || p.id || '').toLowerCase()));
-              const toAdd = dealPipelines.filter(dp => !names.has(dp.toLowerCase())).map(dp => ({ id: dp, name: dp }));
+              const toAdd = dealPipelines.filter(dp => !names.has(dp.toLowerCase())).map(dp => {
+                const matchedDeal = loadedDeals.find(d => (d.pipeline || '').toLowerCase() === dp.toLowerCase());
+                const dDate = matchedDeal ? getItemCreationDate(matchedDeal) : null;
+                const isPostCutoff = dDate && dDate >= DATA_CUTOFF_DATE;
+                return {
+                  id: dp,
+                  name: dp,
+                  createdAt: isPostCutoff ? (matchedDeal.createdAt || new Date().toISOString()) : '2026-09-01T00:00:00+05:30'
+                };
+              });
               return toAdd.length > 0 ? [...current, ...toAdd] : current;
             });
             setPipelineOptions(prev => {
@@ -3762,12 +3878,18 @@ function Pipeline() {
             setStages(prev => {
               const current = prev || [];
               const names = new Set(current.map(s => (s.name || s.id || '').toLowerCase()));
-              const toAdd = dealStages.filter(ds => !names.has(ds.toLowerCase())).map(ds => ({
-                id: ds,
-                name: ds,
-                badgeClass: 'new',
-                isCustom: true
-              }));
+              const toAdd = dealStages.filter(ds => !names.has(ds.toLowerCase())).map(ds => {
+                const matchedDeal = loadedDeals.find(d => (d.stage || '').toLowerCase() === ds.toLowerCase());
+                const dDate = matchedDeal ? getItemCreationDate(matchedDeal) : null;
+                const isPostCutoff = dDate && dDate >= DATA_CUTOFF_DATE;
+                return {
+                  id: ds,
+                  name: ds,
+                  badgeClass: 'new',
+                  isCustom: true,
+                  createdAt: isPostCutoff ? (matchedDeal.createdAt || new Date().toISOString()) : '2026-09-01T00:00:00+05:30'
+                };
+              });
               return toAdd.length > 0 ? [...current, ...toAdd] : current;
             });
           }
@@ -3780,11 +3902,17 @@ function Pipeline() {
               const names = new Set(current.map(s => (s.name || s.id || '').toLowerCase()));
               const toAdd = contactLeadStages
                 .filter(st => !names.has(st.toLowerCase()) && !deletedStages.includes(st.toLowerCase()))
-                .map((st, i) => ({
-                  id: st,
-                  name: st,
-                  badgeClass: ['new', 'hot', 'cold', 'won', 'custom'][i % 5]
-                }));
+                .map((st, i) => {
+                  const matchedContact = initialContacts.find(c => (c.leadStage || '').toLowerCase() === st.toLowerCase());
+                  const cDate = matchedContact ? getItemCreationDate(matchedContact) : null;
+                  const isPostCutoff = cDate && cDate >= DATA_CUTOFF_DATE;
+                  return {
+                    id: st,
+                    name: st,
+                    badgeClass: ['new', 'hot', 'cold', 'won', 'custom'][i % 5],
+                    createdAt: isPostCutoff ? (matchedContact.createdAt || new Date().toISOString()) : '2026-09-01T00:00:00+05:30'
+                  };
+                });
               return toAdd.length > 0 ? [...current, ...toAdd] : current;
             });
             setLeadStages(prev => {
@@ -3830,6 +3958,10 @@ function Pipeline() {
   const [isCountryCodeOpen, setIsCountryCodeOpen] = useState(false);
   const countryCodeRef = useRef(null);
   const [selectedCountry, setSelectedCountry] = useState(COUNTRY_CODES[0]);
+
+  const [isDealCountryCodeOpen, setIsDealCountryCodeOpen] = useState(false);
+  const dealCountryCodeRef = useRef(null);
+  const [dealSelectedCountry, setDealSelectedCountry] = useState(COUNTRY_CODES[0]);
 
   const [contactFormData, setContactFormData] = useState({
     firstName: '',
@@ -4965,7 +5097,7 @@ function Pipeline() {
             type: 'Follow-up',
             title: `Follow-up Due: ${channel} with ${entityName}`,
             message: `Your scheduled ${channel} follow-up for "${entityName}" is due now (${reminder.followUpTime}). Purpose: ${reminder.title || 'Touchpoint'}${reminder.remarks ? ` | Notes: "${reminder.remarks}"` : ''}`,
-            link: reminder.entityType === 'contact'
+            link: (reminder.entityType === 'contact' && isAdmin)
               ? `/pipeline/crm/overview?ref=sidebar&tab=contacts&view=list&detailTab=followups&stage=all`
               : `/pipeline/crm/overview?ref=sidebar&tab=deals&view=kanban&detailTab=followups&stage=all`
           });
@@ -6552,11 +6684,11 @@ function Pipeline() {
 
   const contactStageOptions = useMemo(() => {
     const stageNames = (effectiveContactStages || []).map(s => typeof s === 'string' ? s : (s.name || s.id)).filter(Boolean);
-    const fromLeadStages = (leadStages || []).filter(Boolean);
-    const fromContacts = (contacts || []).map(c => c.leadStage).filter(Boolean);
+    const fromLeadStages = (leadStages || []).filter(st => isStageCreatedOnOrAfterCutoff(st, 'contact')).filter(Boolean);
+    const fromContacts = (contacts || []).filter(c => !isAdmin ? getItemCreationDate(c) >= DATA_CUTOFF_DATE : true).map(c => c.leadStage).filter(st => isStageCreatedOnOrAfterCutoff(st, 'contact')).filter(Boolean);
     const combined = Array.from(new Set([...stageNames, ...fromLeadStages, ...fromContacts]));
-    return combined.length > 0 ? combined : ['Lead'];
-  }, [effectiveContactStages, leadStages, contacts]);
+    return combined.length > 0 ? combined : ['New Lead'];
+  }, [effectiveContactStages, leadStages, contacts, isStageCreatedOnOrAfterCutoff, isAdmin]);
 
 
   const handleToggleTaskComplete = async (taskId, e) => {
@@ -8835,79 +8967,13 @@ function Pipeline() {
     setIsDateDropdownOpen(false);
   };
 
-  const PRE_CUTOFF_LEGACY_STAGES = useMemo(() => [
-    'sales pipeline',
-    'enterprise pipeline',
-    'lead conversion pipeline',
-    'renewal & retention pipeline',
-    'partnership pipeline',
-    'hot',
-    'cold',
-    'old',
-    'marketing qualified (mql)',
-    'marketing qualified',
-    'sales qualified (sql)',
-    'sales qualified',
-    'opportunity',
-    'opportunity stage',
-    'customer',
-    'retention & customer'
-  ], []);
-
-  // Stage cutoff filter:
-  // Non-admins (Sales Head, Sales Manager, Sales Executives) only see stages created on or after 17 Oct 2026.
-  // Admins see all stages (or filtered by adminDataViewMode if 'new' or 'old').
-  const isStageCreatedOnOrAfterCutoff = useCallback((item, type = 'deal') => {
-    if (!item) return false;
-
-    // Explicit createdAt timestamp check
-    if (item?.createdAt) {
-      const itemCreatedAt = new Date(item.createdAt);
-      if (isAdmin) {
-        if (adminDataViewMode === 'old') return itemCreatedAt < DATA_CUTOFF_DATE;
-        if (adminDataViewMode === 'new') return itemCreatedAt >= DATA_CUTOFF_DATE;
-        return true; // 'all' mode
-      }
-      return itemCreatedAt >= DATA_CUTOFF_DATE;
-    }
-
-    const name = (typeof item === 'string' ? item : (item?.name || item?.id || '')).toLowerCase().trim();
-    if (!name) return false;
-
-    if (isAdmin) {
-      if (adminDataViewMode === 'old') {
-        if (PRE_CUTOFF_LEGACY_STAGES.includes(name)) return true;
-        if (type === 'deal') {
-          return deals.some(d => getItemCreationDate(d) < DATA_CUTOFF_DATE && ((d.pipeline || '').toLowerCase().trim() === name || (d.stage || '').toLowerCase().trim() === name));
-        } else {
-          return contacts.some(c => getItemCreationDate(c) < DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
-        }
-      }
-      if (adminDataViewMode === 'new') {
-        if (PRE_CUTOFF_LEGACY_STAGES.includes(name)) return false;
-        if (type === 'deal') {
-          return deals.some(d => getItemCreationDate(d) >= DATA_CUTOFF_DATE && ((d.pipeline || '').toLowerCase().trim() === name || (d.stage || '').toLowerCase().trim() === name));
-        } else {
-          return contacts.some(c => getItemCreationDate(c) >= DATA_CUTOFF_DATE && (c.leadStage || '').toLowerCase().trim() === name);
-        }
-      }
-      return true; // 'all' mode: admin sees all
-    }
-
-    // For non-admin roles (Sales Head, Sales Manager, Sales Executives):
-    // 1. If it's a known legacy pre-cutoff stage, it MUST be hidden!
-    if (PRE_CUTOFF_LEGACY_STAGES.includes(name)) {
-      return false;
-    }
-
-    // 2. Active stages configured in pipeline-configs or created after 17 Oct 2026 are visible!
-    return true;
-  }, [isAdmin, adminDataViewMode, deals, contacts, PRE_CUTOFF_LEGACY_STAGES]);
-
   const visiblePipelines = useMemo(() => {
     const list = (pipelines || []).filter(p => isStageCreatedOnOrAfterCutoff(p, 'deal'));
     if (!isAdmin && list.length === 0) {
-      return [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }];
+      return [
+        { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() },
+        { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }
+      ];
     }
     return list;
   }, [pipelines, isStageCreatedOnOrAfterCutoff, isAdmin]);
@@ -8915,7 +8981,7 @@ function Pipeline() {
   const visiblePipelineOptions = useMemo(() => {
     const list = (pipelineOptions || []).filter(p => isStageCreatedOnOrAfterCutoff(p, 'deal'));
     if (!isAdmin && list.length === 0) {
-      return ['New Lead'];
+      return ['New Lead', 'Initial'];
     }
     return list;
   }, [pipelineOptions, isStageCreatedOnOrAfterCutoff, isAdmin]);
@@ -8923,7 +8989,10 @@ function Pipeline() {
   const visibleStages = useMemo(() => {
     const list = (stages || []).filter(s => isStageCreatedOnOrAfterCutoff(s, 'deal'));
     if (!isAdmin && list.length === 0) {
-      return [{ id: 'New', name: 'New', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }];
+      return [
+        { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() },
+        { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }
+      ];
     }
     return list;
   }, [stages, isStageCreatedOnOrAfterCutoff, isAdmin]);
@@ -9508,6 +9577,69 @@ function Pipeline() {
   // Edit Deal
   const handleOpenEditDeal = (deal, e) => {
     if (e) e.stopPropagation();
+
+    const matchedContact = contacts.find(c =>
+      (deal.email && c.email && c.email.toLowerCase() === deal.email.toLowerCase()) ||
+      (deal.phone && c.phone && (c.phone === deal.phone || (deal.phone || '').includes(c.phone))) ||
+      (deal.associatedContact && (
+        (c.name && c.name.toLowerCase() === deal.associatedContact.toLowerCase()) ||
+        (`${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === deal.associatedContact.toLowerCase()) ||
+        (c.email && c.email.toLowerCase() === deal.associatedContact.toLowerCase())
+      )) ||
+      (deal.clientName && (
+        (c.name && c.name.toLowerCase() === deal.clientName.toLowerCase()) ||
+        (`${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase() === deal.clientName.toLowerCase())
+      ))
+    );
+
+    const initialEmail = (deal.email && !deal.email.toLowerCase().endsWith('@example.com'))
+      ? deal.email
+      : (matchedContact?.email && !matchedContact.email.toLowerCase().endsWith('@example.com')
+          ? matchedContact.email
+          : (deal.associatedContact && deal.associatedContact.includes('@') && !deal.associatedContact.toLowerCase().endsWith('@example.com') ? deal.associatedContact : ''));
+
+    let initialPhone = deal.phone || '';
+    if (matchedContact?.phone) {
+      const dealDigits = (deal.phone || '').replace(/\D/g, '');
+      const contactDigits = (matchedContact.phone || '').replace(/\D/g, '');
+      if (!dealDigits || contactDigits.length > dealDigits.length) {
+        initialPhone = matchedContact.countryCode ? `${matchedContact.countryCode} ${matchedContact.phone}` : matchedContact.phone;
+      }
+    }
+
+    let dealCountry = COUNTRY_CODES[0];
+    let phoneDigits = '';
+    const rawPhone = String(initialPhone || '').trim();
+    if (rawPhone) {
+      if (rawPhone.startsWith('+')) {
+        const matched = COUNTRY_CODES.find(c => rawPhone.startsWith(c.code));
+        if (matched) {
+          dealCountry = matched;
+          phoneDigits = rawPhone.slice(matched.code.length).replace(/\D/g, '');
+          if (matched.maxDigits && phoneDigits.length > matched.maxDigits) {
+            phoneDigits = phoneDigits.slice(0, matched.maxDigits);
+          }
+        } else {
+          phoneDigits = rawPhone.replace(/\D/g, '').slice(0, 15);
+        }
+      } else {
+        if (matchedContact?.countryCode) {
+          const matchedCc = COUNTRY_CODES.find(c => c.code === matchedContact.countryCode);
+          if (matchedCc) dealCountry = matchedCc;
+        }
+        phoneDigits = rawPhone.replace(/\D/g, '');
+        const maxLen = dealCountry?.maxDigits || 15;
+        if (phoneDigits.length > maxLen) {
+          phoneDigits = phoneDigits.slice(0, maxLen);
+        }
+      }
+    } else if (matchedContact?.countryCode) {
+      const matchedCc = COUNTRY_CODES.find(c => c.code === matchedContact.countryCode);
+      if (matchedCc) dealCountry = matchedCc;
+    }
+
+    setDealSelectedCountry(dealCountry);
+    setIsDealCountryCodeOpen(false);
     setEditingDeal(deal);
     setModalStage(deal.stage || 'New');
     setFormData({
@@ -9521,8 +9653,8 @@ function Pipeline() {
       salesOwner: deal.salesOwner || 'Artiflow',
       location: deal.location || '',
       dealName: deal.dealName || '',
-      email: deal.email || '',
-      phone: deal.phone || '',
+      email: initialEmail,
+      phone: phoneDigits,
       associatedContact: deal.associatedContact || deal.clientName || '',
       associatedCompany: deal.associatedCompany || deal.company || ''
     });
@@ -9615,9 +9747,23 @@ function Pipeline() {
       alert('Please provide a deal name');
       return;
     }
-    if (!formData.associatedContact || !formData.associatedContact.trim()) {
-      alert('Please select or provide an associated contact for this deal');
+
+    const cleanPhoneDigits = (formData.phone || '').replace(/\D/g, '');
+    const minPhoneDigits = dealSelectedCountry?.minDigits || dealSelectedCountry?.maxDigits || 10;
+    const maxPhoneDigits = dealSelectedCountry?.maxDigits || 10;
+    if (cleanPhoneDigits && (cleanPhoneDigits.length < minPhoneDigits || cleanPhoneDigits.length > maxPhoneDigits)) {
+      const digitMsg = minPhoneDigits === maxPhoneDigits ? `${maxPhoneDigits}` : `${minPhoneDigits} to ${maxPhoneDigits}`;
+      alert(`Please enter a valid ${digitMsg}-digit phone number for ${dealSelectedCountry?.country || 'the selected country'}.`);
       return;
+    }
+
+    const trimmedEmail = (formData.email || '').trim();
+    if (trimmedEmail) {
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      if (!emailRegex.test(trimmedEmail)) {
+        alert('Please enter a valid email address.');
+        return;
+      }
     }
 
     const selectedStage = (modalStage || formData.stage || 'New').trim();
@@ -9629,7 +9775,7 @@ function Pipeline() {
     if (!pipelines.some(p => p.name.toLowerCase() === selectedPipeline.toLowerCase())) {
       const badgeClasses = ['new', 'hot', 'cold', 'won', 'old', 'custom'];
       const randomBadge = badgeClasses[pipelines.length % badgeClasses.length];
-      setPipelines(prev => [...prev, { id: selectedPipeline, name: selectedPipeline, badgeClass: randomBadge }]);
+      setPipelines(prev => [...prev, { id: selectedPipeline, name: selectedPipeline, badgeClass: randomBadge, createdAt: new Date().toISOString() }]);
     }
     if (!pipelineOptions.some(p => p.toLowerCase() === selectedPipeline.toLowerCase())) {
       setPipelineOptions(prev => [...prev, selectedPipeline]);
@@ -9639,7 +9785,7 @@ function Pipeline() {
     if (!stages.some(s => s.id.toLowerCase() === selectedStage.toLowerCase())) {
       const badgeClasses = ['custom', 'new', 'hot', 'cold', 'won'];
       const randomBadge = badgeClasses[stages.length % badgeClasses.length];
-      setStages(prev => [...prev, { id: selectedStage, name: selectedStage, badgeClass: randomBadge, isCustom: true }]);
+      setStages(prev => [...prev, { id: selectedStage, name: selectedStage, badgeClass: randomBadge, isCustom: true, createdAt: new Date().toISOString() }]);
     }
 
     // Auto add deal type to dealTypes list if custom
@@ -10125,6 +10271,24 @@ function Pipeline() {
     }));
   };
 
+  const handleDealPhoneChange = (e) => {
+    const digitsOnly = e.target.value.replace(/\D/g, '');
+    const maxDigits = dealSelectedCountry?.maxDigits || 10;
+    setFormData(prev => ({
+      ...prev,
+      phone: digitsOnly.slice(0, maxDigits)
+    }));
+  };
+
+  const handleSelectDealCountry = (country) => {
+    setDealSelectedCountry(country);
+    setIsDealCountryCodeOpen(false);
+    setFormData(prev => ({
+      ...prev,
+      phone: (prev.phone || '').replace(/\D/g, '').slice(0, country.maxDigits)
+    }));
+  };
+
   const handleLeadStageChangeOrAdd = (val) => {
     const trimmed = (val || '').trim();
     if (!trimmed) return;
@@ -10138,7 +10302,7 @@ function Pipeline() {
       }
       const badgeClasses = ['new', 'hot', 'cold', 'won', 'custom'];
       const randomBadge = badgeClasses[current.length % badgeClasses.length];
-      const newStageObj = { id: trimmed, name: trimmed, badgeClass: randomBadge, isCustom: true };
+      const newStageObj = { id: trimmed, name: trimmed, badgeClass: randomBadge, isCustom: true, createdAt: new Date().toISOString() };
       const nextStages = [...current, newStageObj];
       try {
         localStorage.setItem('crm_contact_stages', JSON.stringify(nextStages));
@@ -10185,14 +10349,37 @@ function Pipeline() {
   const handleOpenEditContact = (contact, e) => {
     if (e) e.stopPropagation();
     setEditingContact(contact);
-    const foundCountry = COUNTRY_CODES.find(c => c.code === contact.countryCode) || COUNTRY_CODES[0];
-    setSelectedCountry(foundCountry);
+    let contactCountry = COUNTRY_CODES.find(c => c.code === contact.countryCode) || COUNTRY_CODES[0];
+    let rawPhone = String(contact.phone || '').trim();
+    let phoneDigits = '';
+    if (rawPhone) {
+      if (rawPhone.startsWith('+')) {
+        const matched = COUNTRY_CODES.find(c => rawPhone.startsWith(c.code));
+        if (matched) {
+          contactCountry = matched;
+          phoneDigits = rawPhone.slice(matched.code.length).replace(/\D/g, '');
+          if (matched.maxDigits && phoneDigits.length > matched.maxDigits) {
+            phoneDigits = phoneDigits.slice(0, matched.maxDigits);
+          }
+        } else {
+          phoneDigits = rawPhone.replace(/\D/g, '').slice(0, 15);
+        }
+      } else {
+        phoneDigits = rawPhone.replace(/\D/g, '');
+        const maxLen = contactCountry?.maxDigits || 15;
+        if (phoneDigits.length > maxLen) {
+          phoneDigits = phoneDigits.slice(0, maxLen);
+        }
+      }
+    }
+    setSelectedCountry(contactCountry);
+    setIsCountryCodeOpen(false);
     setContactFormData({
       firstName: contact.firstName || '',
       lastName: contact.lastName || '',
       email: contact.email || '',
-      countryCode: contact.countryCode || '+1',
-      phone: contact.phone || '',
+      countryCode: contactCountry.code,
+      phone: phoneDigits,
       origin: contact.origin || 'Domestic',
       contactSource: contact.contactSource || '',
       leadStage: contact.leadStage || '',
@@ -10266,8 +10453,8 @@ function Pipeline() {
 
   const handleContactSubmit = async (e) => {
     e.preventDefault();
-    if (!contactFormData.firstName.trim() || !contactFormData.lastName.trim()) {
-      alert('Please enter both First Name and Last Name');
+    if (!contactFormData.firstName.trim()) {
+      alert('Please enter First Name');
       return;
     }
     const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -10288,10 +10475,12 @@ function Pipeline() {
       }
     }
 
-    const requiredPhoneDigits = selectedCountry?.maxDigits || 10;
+    const minPhoneDigits = selectedCountry?.minDigits || selectedCountry?.maxDigits || 10;
+    const maxPhoneDigits = selectedCountry?.maxDigits || 10;
     const cleanPhone = (contactFormData.phone || '').replace(/\D/g, '');
-    if (cleanPhone && cleanPhone.length !== requiredPhoneDigits) {
-      alert(`Please enter a valid ${requiredPhoneDigits}-digit phone number for ${selectedCountry?.country || 'the selected country'}.`);
+    if (cleanPhone && (cleanPhone.length < minPhoneDigits || cleanPhone.length > maxPhoneDigits)) {
+      const digitMsg = minPhoneDigits === maxPhoneDigits ? `${maxPhoneDigits}` : `${minPhoneDigits} to ${maxPhoneDigits}`;
+      alert(`Please enter a valid ${digitMsg}-digit phone number for ${selectedCountry?.country || 'the selected country'}.`);
       return;
     }
 
@@ -10310,7 +10499,7 @@ function Pipeline() {
 
     // Ensure contactStages has this stage column and un-delete it if previously in deletedStages
     if (!contactStages.some(s => (s.name || s.id || '').toLowerCase() === trimmedStage.toLowerCase())) {
-      const newStageObj = { id: trimmedStage, name: trimmedStage, badgeClass: 'new', isCustom: true };
+      const newStageObj = { id: trimmedStage, name: trimmedStage, badgeClass: 'new', isCustom: true, createdAt: new Date().toISOString() };
       const nextStages = [...contactStages, newStageObj];
       setContactStages(nextStages);
       try {
@@ -11223,6 +11412,9 @@ function Pipeline() {
       if (countryCodeRef.current && !countryCodeRef.current.contains(event.target)) {
         setIsCountryCodeOpen(false);
       }
+      if (dealCountryCodeRef.current && !dealCountryCodeRef.current.contains(event.target)) {
+        setIsDealCountryCodeOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -11264,7 +11456,7 @@ function Pipeline() {
           </div>
 
           <ul className="pipeline-sub-sidebar-menu">
-            {SIDEBAR_TABS.map(tab => {
+            {visibleSidebarTabs.map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
@@ -14881,8 +15073,8 @@ function Pipeline() {
           )
         )}
 
-        {/* CONTACTS TAB VIEW (Full Interactive Contacts Management & 3-Section Detail View) */}
-        {activeTab === 'contacts' && (
+        {/* CONTACTS TAB VIEW (Full Interactive Contacts Management & 3-Section Detail View - Admin Only) */}
+        {isAdmin && activeTab === 'contacts' && (
           (detailedContactId && isLoading) ? (
             renderDetailSkeleton()
           ) : detailedContact ? (
@@ -20567,7 +20759,120 @@ function Pipeline() {
                   </div>
                 </div>
 
-                {/* Row 4: Close Date */}
+                {/* Row 4: Phone Number & Email Address */}
+                {(() => {
+                  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+                  const cleanEmail = (formData.email || '').trim().toLowerCase();
+                  const isEmailValid = emailRegex.test(cleanEmail);
+                  const isEmailDirty = Boolean(cleanEmail.length > 0);
+
+                  const cleanPhoneDigits = (formData.phone || '').replace(/\D/g, '');
+                  const minPhoneDigits = dealSelectedCountry?.minDigits || dealSelectedCountry?.maxDigits || 10;
+                  const maxPhoneDigits = dealSelectedCountry?.maxDigits || 10;
+                  const isPhoneValid = cleanPhoneDigits.length >= minPhoneDigits && cleanPhoneDigits.length <= maxPhoneDigits;
+                  const isPhoneDirty = cleanPhoneDigits.length > 0;
+
+                  return (
+                    <div className="pipeline-form-row-grid">
+                      {/* Phone Number */}
+                      <div className="pipeline-form-group">
+                        <label>Phone Number</label>
+                        <div
+                          className="pipeline-phone-input-combo"
+                          style={{
+                            borderColor: isPhoneDirty ? (isPhoneValid ? '#10b981' : '#ef4444') : undefined,
+                            borderWidth: isPhoneDirty ? '1.5px' : undefined,
+                            boxShadow: 'none',
+                            backgroundColor: '#ffffff'
+                          }}
+                        >
+                          <div className="pipeline-country-picker-wrap" ref={dealCountryCodeRef}>
+                            <button
+                              type="button"
+                              className="pipeline-country-trigger-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsDealCountryCodeOpen(prev => !prev);
+                              }}
+                              title="Select Country Code"
+                            >
+                              <span className="pipeline-country-flag">{dealSelectedCountry?.flag}</span>
+                              <span className="pipeline-country-code-text">{dealSelectedCountry?.code}</span>
+                              <ChevronDown size={14} className={`pipeline-chevron-icon ${isDealCountryCodeOpen ? 'open' : ''}`} />
+                            </button>
+
+                            {isDealCountryCodeOpen && (
+                              <div className="pipeline-creatable-dropdown pipeline-country-dropdown placement-bottom">
+                                <div className="pipeline-creatable-options-list">
+                                  {COUNTRY_CODES.map((country) => {
+                                    const isSelected = dealSelectedCountry?.code === country.code;
+                                    return (
+                                      <div
+                                        key={country.code + country.country}
+                                        className={`pipeline-creatable-option ${isSelected ? 'selected' : ''}`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleSelectDealCountry(country);
+                                        }}
+                                      >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          <span style={{ fontSize: '15px' }}>{country.flag}</span>
+                                          <span className="pipeline-creatable-opt-text">{country.country}</span>
+                                          <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>({country.code})</span>
+                                        </div>
+                                        {isSelected && <CheckCircle size={14} className="pipeline-creatable-opt-check" />}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <input
+                            type="tel"
+                            placeholder={dealSelectedCountry?.formatPlaceholder || 'Enter phone number'}
+                            className="pipeline-phone-digits-input"
+                            value={formData.phone || ''}
+                            onChange={handleDealPhoneChange}
+                            maxLength={dealSelectedCountry?.maxDigits || 15}
+                          />
+
+                          {isPhoneDirty && isPhoneValid && (
+                            <CheckCircle size={16} className="pipeline-field-icon" style={{ color: '#16a34a', marginRight: '10px' }} />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Email Address */}
+                      <div className="pipeline-form-group">
+                        <label>Email Address</label>
+                        <div className="pipeline-input-with-icon">
+                          <input
+                            type="email"
+                            placeholder="Enter email address"
+                            className="pipeline-form-input"
+                            value={formData.email || ''}
+                            onChange={e => setFormData({ ...formData, email: e.target.value })}
+                            style={{
+                              borderColor: isEmailDirty ? (isEmailValid ? '#10b981' : '#ef4444') : undefined,
+                              borderWidth: isEmailDirty ? '1.5px' : undefined,
+                              boxShadow: 'none',
+                              backgroundColor: '#ffffff'
+                            }}
+                          />
+                          {isEmailDirty && isEmailValid ? (
+                            <CheckCircle size={16} className="pipeline-field-icon" style={{ color: '#16a34a' }} />
+                          ) : (
+                            <Mail size={16} className="pipeline-field-icon" style={{ color: isEmailDirty && !isEmailValid ? '#ef4444' : undefined }} />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Row 5: Close Date */}
                 <div className="pipeline-form-row-grid">
                   <div className="pipeline-form-group">
                     <label>Close Date <span className="pipeline-required">*</span></label>
@@ -20600,134 +20905,52 @@ function Pipeline() {
                 <hr className="pipeline-modal-section-divider" />
                 <h4 className="pipeline-modal-section-title">Associate Deal with</h4>
 
-                {/* Row 5: Associate with Contact & Associate with Company */}
-                <div className="pipeline-form-row-grid">
-                  {/* Contact Dropdown */}
-                  <div className="pipeline-form-group">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <label style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#334155' }}>
-                        Contact <span className="pipeline-required">*</span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingContact(null);
-                          setSelectedCountry(COUNTRY_CODES[0]);
-                          setContactFormData({
-                            firstName: formData.clientName ? formData.clientName.split(' ')[0] : '',
-                            lastName: formData.clientName ? formData.clientName.split(' ').slice(1).join(' ') : '',
-                            email: formData.email || '',
-                            countryCode: '+1',
-                            phone: formData.phone || '',
-                            contactSource: 'Direct Reference',
-                            leadStage: effectiveContactStages.length > 0 ? (typeof effectiveContactStages[0] === 'string' ? effectiveContactStages[0] : effectiveContactStages[0].name) : 'Lead',
-                            leadStatus: 'New',
-                            owner: formData.salesOwner || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Artiflow' : 'Artiflow'),
-                            company: formData.associatedCompany || ''
-                          });
-                          setShowCreateContactModal(true);
-                        }}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          padding: '0',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          color: '#0284c7',
-                          cursor: 'pointer',
-                          textDecoration: 'none'
-                        }}
-                        title="Add a new contact via modal"
-                      >
-                        Add+
-                      </button>
-                    </div>
-                    <CreatableSelect
-                      value={formData.associatedContact}
-                      onChange={val => {
-                        const valLower = (val || '').trim().toLowerCase();
-                        const matchedContact = contacts.find(c => {
-                          const cEmail = (c.email || '').trim().toLowerCase();
-                          const cName = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
-                          const cPhone = (c.phone || '').trim();
-                          const cFullPhone = `${c.countryCode ? `${c.countryCode} ` : ''}${cPhone}`.trim().toLowerCase();
-                          return (
-                            (cEmail && cEmail === valLower) ||
-                            (c._id && c._id === val) ||
-                            (cName && cName === valLower) ||
-                            (cPhone && cPhone === valLower) ||
-                            (cFullPhone && cFullPhone === valLower)
-                          );
+                {/* Associate Deal with Company */}
+                <div className="pipeline-form-group">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      Company <Info size={13} className="pipeline-info-icon" title="Select or type associated company name" />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingCompany(null);
+                        setCompanyFormData({
+                          name: formData.associatedCompany || '',
+                          domain: '',
+                          owner: [],
+                          industry: 'Software & Tech',
+                          country: 'United States',
+                          state: '',
+                          city: formData.location || '',
+                          postalCode: ''
                         });
-                        if (matchedContact) {
-                          setFormData({
-                            ...formData,
-                            associatedContact: val,
-                            clientName: formData.clientName || `${matchedContact.firstName || ''} ${matchedContact.lastName || ''}`.trim(),
-                            email: matchedContact.email || formData.email,
-                            phone: matchedContact.phone ? `${matchedContact.countryCode || '+1'} ${matchedContact.phone}`.trim() : formData.phone,
-                            associatedCompany: (matchedContact.company && matchedContact.company !== 'Direct Client') ? matchedContact.company : formData.associatedCompany
-                          });
-                        } else {
-                          setFormData({ ...formData, associatedContact: val });
-                        }
+                        setShowCreateCompanyModal(true);
                       }}
-                      options={contactOptions}
-                      placeholder="Search by name, email, or phone..."
-                      isSearchable={true}
-                      isCreatable={true}
-                      placement="top"
-                      required={true}
-                    />
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: '0',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        color: '#0284c7',
+                        cursor: 'pointer',
+                        textDecoration: 'none'
+                      }}
+                      title="Add a new company via modal"
+                    >
+                      Add+
+                    </button>
                   </div>
-
-                  {/* Company Dropdown */}
-                  <div className="pipeline-form-group">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <label style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        Company <Info size={13} className="pipeline-info-icon" title="Select or type associated company name" />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingCompany(null);
-                          setCompanyFormData({
-                            name: formData.associatedCompany || '',
-                            domain: '',
-                            owner: [],
-                            industry: 'Software & Tech',
-                            country: 'United States',
-                            state: '',
-                            city: formData.location || '',
-                            postalCode: ''
-                          });
-                          setShowCreateCompanyModal(true);
-                        }}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          padding: '0',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          color: '#0284c7',
-                          cursor: 'pointer',
-                          textDecoration: 'none'
-                        }}
-                        title="Add a new company via modal"
-                      >
-                        Add+
-                      </button>
-                    </div>
-                    <CreatableSelect
-                      value={formData.associatedCompany}
-                      onChange={val => setFormData({ ...formData, associatedCompany: val })}
-                      options={companyOptions}
-                      placeholder="Search"
-                      isSearchable={true}
-                      isCreatable={true}
-                      placement="top"
-                    />
-                  </div>
+                  <CreatableSelect
+                    value={formData.associatedCompany}
+                    onChange={val => setFormData({ ...formData, associatedCompany: val })}
+                    options={companyOptions}
+                    placeholder="Search"
+                    isSearchable={true}
+                    isCreatable={true}
+                    placement="top"
+                  />
                 </div>
               </div>
 
@@ -20788,10 +21011,9 @@ function Pipeline() {
                   </div>
 
                   <div className="pipeline-form-group">
-                    <label>Last Name <span className="pipeline-required">*</span></label>
+                    <label>Last Name</label>
                     <input
                       type="text"
-                      required
                       placeholder="Enter last name"
                       className="pipeline-form-input"
                       value={contactFormData.lastName}

@@ -118,10 +118,26 @@ router.get('/', auth, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. Read permission required.' });
     }
 
+    // Cleanup any contacts previously auto-generated from moved leads so only real contacts exist
+    try {
+      await PipelineContact.deleteMany({
+        $or: [
+          { relatedLead: { $ne: null } },
+          { leadRecordType: { $in: ['regular', 'meta'] } },
+          { 'activities.title': 'Lead moved to Pipeline' },
+          { leadStage: 'New Lead' }
+        ]
+      });
+    } catch (cleanErr) {
+      console.warn('Cleanup moved lead contacts error:', cleanErr.message);
+    }
+
     let query = {};
     if (req.query.includeUnmoved !== 'true') {
       query.isUnmoved = { $ne: true };
     }
+    query.leadStage = { $ne: 'New Lead' };
+    query.relatedLead = null;
 
     const dataViewMode = (req.query.dataViewMode || '').toLowerCase().trim();
 
@@ -306,75 +322,15 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
 
   const targetStage = 'New Lead';
 
-  // 1. PipelineContact upsert
+  // 1. Do not create contacts explicitly when moving leads to pipeline.
+  // Deals and associated contact details are unified in the Pipeline Deal view,
+  // so moving a lead only creates/updates the Deal with all the lead's details.
   let contact = null;
   if (cleanEmail) {
     contact = await PipelineContact.findOne({ email: cleanEmail });
   }
   if (!contact && leadId && mongoose.Types.ObjectId.isValid(leadId)) {
     contact = await PipelineContact.findOne({ relatedLead: leadId });
-  }
-
-  if (contact) {
-    contact.leadStage = targetStage;
-    contact.firstName = firstName;
-    if (lastName) contact.lastName = lastName;
-    if (phone) contact.phone = phone;
-    if (overrideData.countryCode) contact.countryCode = overrideData.countryCode;
-    if (overrideData.origin) contact.origin = overrideData.origin;
-    if (contactSource) contact.contactSource = contactSource;
-    if (company) contact.company = company;
-    if (address) contact.address = address;
-    if (notes) contact.notes = contact.notes ? `${contact.notes}\n${notes}` : notes;
-    if (owner) contact.owner = owner;
-    if (validAssignedTo) contact.assignedTo = validAssignedTo;
-    if (leadId && mongoose.Types.ObjectId.isValid(leadId)) contact.relatedLead = leadId;
-    contact.leadRecordType = leadType;
-    contact.isUnmoved = false;
-    contact.unmovedAt = null;
-    contact.unmovedBy = null;
-    contact.activities.push({
-      type: 'note',
-      title: 'Lead moved to Pipeline',
-      content: `Lead updated and moved to stage "${targetStage}" by ${userFullName}.`,
-      author: userFullName,
-      time: new Date().toLocaleTimeString(),
-      date: new Date().toLocaleDateString(),
-      createdAt: new Date()
-    });
-    await contact.save();
-  } else {
-    contact = new PipelineContact({
-      firstName,
-      lastName: lastName || '',
-      email: cleanEmail || undefined,
-      phone: phone || '',
-      countryCode: overrideData.countryCode || '+1',
-      origin: overrideData.origin || 'Domestic',
-      contactSource: contactSource || (leadType === 'meta' ? 'Meta' : 'Manual'),
-      leadStage: targetStage,
-      leadStatus: 'New',
-      owner,
-      addedBy: overrideData.addedBy || userFullName,
-      assignedTo: validAssignedTo,
-      company: company || '',
-      address: address || '',
-      notes: notes || '',
-      createdBy: user._id,
-      relatedLead: (leadId && mongoose.Types.ObjectId.isValid(leadId)) ? leadId : null,
-      leadRecordType: leadType,
-      isUnmoved: false,
-      activities: [{
-        type: 'note',
-        title: 'Lead moved to Pipeline',
-        content: `Moved from ${leadType === 'meta' ? 'Meta Leads' : 'Leads'} into "${targetStage}" stage by ${userFullName}.`,
-        author: userFullName,
-        time: new Date().toLocaleTimeString(),
-        date: new Date().toLocaleDateString(),
-        createdAt: new Date()
-      }]
-    });
-    await contact.save();
   }
 
   // Parse lead notes into activity note entries
@@ -452,12 +408,13 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
 
   const clientDisplayName = `${firstName} ${lastName || ''}`.trim() || company || 'Client';
   const dealName = clientDisplayName;
+  const formattedPhone = phone ? (overrideData.countryCode && !phone.startsWith('+') ? `${overrideData.countryCode} ${phone}` : phone) : '';
 
   if (deal) {
     deal.dealName = deal.dealName || dealName;
     deal.clientName = clientDisplayName;
     if (cleanEmail) deal.email = cleanEmail;
-    if (phone) deal.phone = phone;
+    if (phone) deal.phone = formattedPhone || phone;
     if (company) deal.company = company;
     deal.stage = 'New Lead';
     deal.pipeline = 'New Lead';
@@ -507,7 +464,7 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
       dealName,
       clientName: clientDisplayName,
       email: cleanEmail || '',
-      phone,
+      phone: formattedPhone || phone || '',
       company,
       pipeline: 'New Lead',
       stage: 'New Lead',

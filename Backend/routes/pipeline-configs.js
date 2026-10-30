@@ -19,6 +19,10 @@ const PRE_CUTOFF_LEGACY_STAGES = new Set([
   'hot',
   'cold',
   'old',
+  'won',
+  'lost',
+  'new',
+  'lead',
   'marketing qualified (mql)',
   'marketing qualified',
   'sales qualified (sql)',
@@ -122,17 +126,14 @@ router.get('/', auth, async (req, res) => {
       const strName = (typeof item === 'string' ? item : (item?.name || item?.id || '')).toLowerCase().trim();
       if (!strName) return false;
 
-      // If it's a known pre-cutoff legacy stage, strictly hide it unless explicitly created post-cutoff
-      if (preCutoffOnlyStageNames.has(strName)) {
-        if (typeof item === 'object' && item !== null && item.createdAt) {
-          return new Date(item.createdAt) >= DATA_CUTOFF_DATE;
-        }
-        return false;
-      }
-
       // If explicitly stamped with createdAt, check against cutoff date
       if (typeof item === 'object' && item !== null && item.createdAt) {
         return new Date(item.createdAt) >= DATA_CUTOFF_DATE;
+      }
+
+      // If it's a known pre-cutoff legacy stage, strictly hide it
+      if (preCutoffOnlyStageNames.has(strName) || PRE_CUTOFF_LEGACY_STAGES.has(strName)) {
+        return false;
       }
 
       // If stage exists in post-cutoff data, it is visible
@@ -140,26 +141,49 @@ router.get('/', auth, async (req, res) => {
         return true;
       }
 
-      // New custom stages created after cutoff
-      return true;
+      // Otherwise, stage was not created on/after 17 Oct 2026: do not show
+      return false;
     };
 
     const filteredConfig = config.toObject ? config.toObject() : { ...config };
 
     if (Array.isArray(filteredConfig.pipelines)) {
       filteredConfig.pipelines = filteredConfig.pipelines.filter(isStageCreatedOnOrAfterCutoff);
+      if (filteredConfig.pipelines.length === 0) {
+        filteredConfig.pipelines = [
+          { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() },
+          { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }
+        ];
+      }
     }
     if (Array.isArray(filteredConfig.stages)) {
       filteredConfig.stages = filteredConfig.stages.filter(isStageCreatedOnOrAfterCutoff);
+      if (filteredConfig.stages.length === 0) {
+        filteredConfig.stages = [
+          { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() },
+          { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }
+        ];
+      }
     }
     if (Array.isArray(filteredConfig.contactStages)) {
       filteredConfig.contactStages = filteredConfig.contactStages.filter(isStageCreatedOnOrAfterCutoff);
+      if (filteredConfig.contactStages.length === 0) {
+        filteredConfig.contactStages = [
+          { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }
+        ];
+      }
     }
     if (Array.isArray(filteredConfig.pipelineOptions)) {
       filteredConfig.pipelineOptions = filteredConfig.pipelineOptions.filter(isStageCreatedOnOrAfterCutoff);
+      if (filteredConfig.pipelineOptions.length === 0) {
+        filteredConfig.pipelineOptions = ['New Lead', 'Initial'];
+      }
     }
     if (Array.isArray(filteredConfig.leadStages)) {
       filteredConfig.leadStages = filteredConfig.leadStages.filter(isStageCreatedOnOrAfterCutoff);
+      if (filteredConfig.leadStages.length === 0) {
+        filteredConfig.leadStages = ['New Lead'];
+      }
     }
 
     return res.json(filteredConfig);
