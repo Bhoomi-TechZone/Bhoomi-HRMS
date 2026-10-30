@@ -270,7 +270,7 @@ function Leads() {
       case 'Converted':
         return 'badge-converted';
       case 'Lost':
-        return 'badge-lost';
+        return 'badge-lost'; case 'Invalid': return 'badge-invalid'; case 'International': return 'badge-international';
       default:
         return '';
     }
@@ -615,6 +615,8 @@ function Leads() {
                         <option value="In Progress">In Progress</option>
                         <option value="Converted">Converted</option>
                         <option value="Lost">Lost</option>
+                        <option value="Invalid">Invalid</option>
+                        <option value="International">International</option>
                       </select>
                     )}
                     

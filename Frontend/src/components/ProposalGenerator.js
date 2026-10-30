@@ -42,11 +42,12 @@ function parseDocxIntoSemanticElements(html) {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent.trim();
       if (text) {
+        const lines = Math.max(1, Math.ceil(text.length / 58));
         addElement({
           type: 'paragraph',
           html: `<p>${node.textContent}</p>`,
           fontSize: 14,
-          estimatedHeight: Math.max(26, Math.ceil(text.length / 65) * 22 + 8)
+          estimatedHeight: Math.max(28, lines * 23 + 10)
         });
       }
       continue;
@@ -73,22 +74,36 @@ function parseDocxIntoSemanticElements(html) {
       continue;
     }
 
+    // Table parsing with accurate cell wrapping calculation
     if (tagName === 'table') {
       const rows = Array.from(node.querySelectorAll('tr'));
+      const calcRowHeight = (tr) => {
+        const cells = Array.from(tr.querySelectorAll('th, td'));
+        let maxLines = 1;
+        for (const cell of cells) {
+          const lines = Math.max(1, Math.ceil(cell.textContent.trim().length / 28));
+          if (lines > maxLines) maxLines = lines;
+        }
+        return Math.max(34, maxLines * 22 + 16);
+      };
+
+      const calcTableHeight = (trs) => {
+        return trs.reduce((sum, tr) => sum + calcRowHeight(tr), 24);
+      };
+
       const rowCount = rows.length || 1;
-      
-      // If table is exceptionally large, break it into manageable sub-tables
-      if (rowCount > 8) {
+      // If table is large, break it into manageable sub-tables so it paginates cleanly
+      if (rowCount > 6) {
         const headerRow = rows[0] ? rows[0].outerHTML : '';
-        for (let r = 0; r < rowCount; r += 6) {
-          const chunkRows = rows.slice(r, r + 6);
+        for (let r = 0; r < rowCount; r += 5) {
+          const chunkRows = rows.slice(r, r + 5);
           const hasHeader = r === 0;
           const tableHtml = `<table>${!hasHeader && headerRow ? headerRow : ''}${chunkRows.map(tr => tr.outerHTML).join('')}</table>`;
           addElement({
             type: 'table',
             html: tableHtml,
             fontSize: 13,
-            estimatedHeight: Math.max(80, chunkRows.length * 36 + 24)
+            estimatedHeight: calcTableHeight(chunkRows)
           });
         }
       } else {
@@ -96,24 +111,37 @@ function parseDocxIntoSemanticElements(html) {
           type: 'table',
           html: node.outerHTML,
           fontSize: 13,
-          estimatedHeight: Math.max(70, rowCount * 36 + 24)
+          estimatedHeight: calcTableHeight(rows)
         });
       }
       continue;
     }
 
+    // List parsing with multi-line item calculation and splitting into manageable chunks
     if (tagName === 'ul' || tagName === 'ol') {
       const items = Array.from(node.querySelectorAll('li'));
-      if (items.length > 7) {
-        // Split long list into smaller chunks so user can move chunks and span pages smoothly
-        for (let j = 0; j < items.length; j += 6) {
-          const chunkItems = items.slice(j, j + 6);
-          const listHtml = `<${tagName}>${chunkItems.map(li => li.outerHTML).join('')}</${tagName}>`;
+      
+      const calcItemsHeight = (liList) => {
+        let h = 12;
+        for (const li of liList) {
+          const liText = li.textContent.trim();
+          const lines = Math.max(1, Math.ceil(liText.length / 52));
+          h += lines * 23 + 6;
+        }
+        return Math.max(36, h);
+      };
+
+      // Split long lists into chunks of at most 3 items so they span pages without clipping
+      if (items.length > 3) {
+        for (let j = 0; j < items.length; j += 3) {
+          const chunkItems = items.slice(j, j + 3);
+          const startAttr = tagName === 'ol' && j > 0 ? ` start="${j + 1}"` : '';
+          const listHtml = `<${tagName}${startAttr}>${chunkItems.map(li => li.outerHTML).join('')}</${tagName}>`;
           addElement({
             type: 'list',
             html: listHtml,
             fontSize: 14,
-            estimatedHeight: Math.max(30, chunkItems.length * 24 + 10)
+            estimatedHeight: calcItemsHeight(chunkItems)
           });
         }
       } else {
@@ -121,17 +149,18 @@ function parseDocxIntoSemanticElements(html) {
           type: 'list',
           html: node.outerHTML,
           fontSize: 14,
-          estimatedHeight: Math.max(30, items.length * 24 + 10)
+          estimatedHeight: calcItemsHeight(items)
         });
       }
       continue;
     }
 
+    // Native headings (h1 - h6)
     if (/^h[1-6]$/i.test(tagName)) {
       if (!textContent) continue;
       const level = parseInt(tagName.charAt(1)) || 1;
       const fontSize = level === 1 ? 22 : level === 2 ? 18 : level === 3 ? 16 : 14;
-      const hHeight = level === 1 ? 44 : level === 2 ? 38 : level === 3 ? 32 : 28;
+      const hHeight = level === 1 ? 46 : level === 2 ? 40 : level === 3 ? 34 : 30;
       addElement({
         type: 'heading',
         level: level,
@@ -142,21 +171,37 @@ function parseDocxIntoSemanticElements(html) {
       continue;
     }
 
+    // Check for bold paragraphs acting as headings (e.g. "<p><strong>4. Information Required...</strong></p>")
+    const isBoldHeadingPara = tagName === 'p' && (
+      (node.querySelector('strong, b') && textContent.length < 80) ||
+      (/^\d+[\.\)]\s+[A-Za-z]/.test(textContent) && textContent.length < 80)
+    );
+    if (isBoldHeadingPara) {
+      addElement({
+        type: 'heading',
+        level: 2,
+        html: node.outerHTML,
+        fontSize: 18,
+        estimatedHeight: 40
+      });
+      continue;
+    }
+
     // Regular paragraph or blockquote / div
     if (!textContent && imgs.length === 0) continue;
 
-    if (textContent.length > 400) {
-      // Split very long paragraphs into ~200-300 character chunks (by sentence)
+    if (textContent.length > 350) {
+      // Split very long paragraphs into ~200 character chunks (by sentence)
       const sentences = textContent.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [textContent];
       let currentParaText = '';
       for (const sent of sentences) {
-        if ((currentParaText + sent).length > 300 && currentParaText.trim()) {
-          const lines = Math.max(1, Math.ceil(currentParaText.length / 65));
+        if ((currentParaText + sent).length > 250 && currentParaText.trim()) {
+          const lines = Math.max(1, Math.ceil(currentParaText.length / 58));
           addElement({
             type: 'paragraph',
             html: `<p>${currentParaText.trim()}</p>`,
             fontSize: 14,
-            estimatedHeight: Math.max(26, lines * 22 + 8)
+            estimatedHeight: Math.max(28, lines * 23 + 10)
           });
           currentParaText = sent;
         } else {
@@ -164,21 +209,21 @@ function parseDocxIntoSemanticElements(html) {
         }
       }
       if (currentParaText.trim()) {
-        const lines = Math.max(1, Math.ceil(currentParaText.length / 65));
+        const lines = Math.max(1, Math.ceil(currentParaText.length / 58));
         addElement({
           type: 'paragraph',
           html: `<p>${currentParaText.trim()}</p>`,
           fontSize: 14,
-          estimatedHeight: Math.max(26, lines * 22 + 8)
+          estimatedHeight: Math.max(28, lines * 23 + 10)
         });
       }
     } else {
-      const lines = Math.max(1, Math.ceil(textContent.length / 65));
+      const lines = Math.max(1, Math.ceil(textContent.length / 58));
       addElement({
         type: 'paragraph',
         html: node.outerHTML,
         fontSize: 14,
-        estimatedHeight: Math.max(26, lines * 22 + 8)
+        estimatedHeight: Math.max(28, lines * 23 + 10)
       });
     }
   }
@@ -187,6 +232,10 @@ function parseDocxIntoSemanticElements(html) {
 }
 
 const customStyle = `
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
   .ql-container {
     height: 100% !important;
     min-height: 40px;
@@ -199,16 +248,22 @@ const customStyle = `
   }
   .ql-editor {
     overflow-y: visible !important;
-    height: 100% !important;
+    overflow-x: visible !important;
+    overflow: visible !important;
+    height: auto !important;
     padding: 0px !important;
     min-height: 0 !important;
     box-sizing: border-box !important;
     line-height: 1.5 !important;
+    white-space: normal !important;
   }
   
   /* Make sure quill inherits the wrapper font family */
   .text-box-wrapper .ql-editor {
     font-family: inherit !important;
+    height: auto !important;
+    overflow: visible !important;
+    white-space: normal !important;
   }
 
   .text-box-wrapper .ql-editor p {
@@ -219,12 +274,24 @@ const customStyle = `
   .text-box-wrapper .ql-editor ul, 
   .text-box-wrapper .ql-editor ol {
     margin: 4px 0 6px 0 !important;
-    padding-left: 20px !important;
+    padding-left: 24px !important;
+    display: block !important;
+  }
+
+  .text-box-wrapper .ql-editor ul {
+    list-style-type: disc !important;
+  }
+
+  .text-box-wrapper .ql-editor ol {
+    list-style-type: decimal !important;
   }
 
   .text-box-wrapper .ql-editor li {
     margin-bottom: 3px !important;
     line-height: 1.45 !important;
+    display: list-item !important;
+    list-style: inherit !important;
+    color: inherit !important;
   }
 
   .text-box-wrapper .ql-editor h1,
@@ -245,12 +312,19 @@ const customStyle = `
     border-collapse: collapse !important;
     margin: 8px 0 !important;
     font-size: 0.95em !important;
+    display: table !important;
+  }
+  .text-box-wrapper .ql-editor table tr {
+    display: table-row !important;
   }
   .text-box-wrapper .ql-editor table th,
   .text-box-wrapper .ql-editor table td {
+    display: table-cell !important;
     border: 1px solid #cbd5e1 !important;
     padding: 6px 10px !important;
     text-align: left !important;
+    vertical-align: middle !important;
+    color: #1e293b !important;
   }
   .text-box-wrapper .ql-editor table th {
     background: #f1f5f9 !important;
@@ -282,6 +356,20 @@ const customStyle = `
     display: none !important;
   }
 `;
+
+// Inject custom styles directly into document head so html2canvas iframe clone always inherits them
+const injectCustomStyles = () => {
+  if (typeof document === 'undefined') return;
+  const styleId = 'proposal-custom-styles';
+  let styleEl = document.getElementById(styleId);
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = styleId;
+    document.head.appendChild(styleEl);
+  }
+  styleEl.innerHTML = customStyle;
+};
+injectCustomStyles();
 
 export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, readOnly = false, initialTab = 'form' }) {
   const [numPages, setNumPages] = useState(null);
@@ -559,9 +647,9 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
       }
 
       const START_X = 135;
-      const CONTENT_WIDTH = 630;
+      const CONTENT_WIDTH = 560;
       const START_Y = 45;
-      const MAX_PAGE_Y = 535; // Usable vertical height on the blank template page
+      const MAX_PAGE_Y = 465; // Usable vertical height on the blank template page (clean bottom footer margin)
       const GAP_Y = 12; // Gap between elements
 
       const targetPages = [updatedSequence[blankPageIndex]];
@@ -574,8 +662,15 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
         const elem = elements[i];
         const elemHeight = elem.estimatedHeight || 30;
 
+        // Prevent orphan headings: if this is a heading, ensure it fits together with its following content
+        let neededHeight = elemHeight;
+        if (elem.type === 'heading' && i + 1 < elements.length) {
+          const nextElem = elements[i + 1];
+          neededHeight = elemHeight + Math.min(120, nextElem.estimatedHeight || 60);
+        }
+
         // If adding this element exceeds page height and we already placed elements on current page
-        if (currentY > START_Y && (currentY + elemHeight > MAX_PAGE_Y)) {
+        if (currentY > START_Y && (currentY + neededHeight > MAX_PAGE_Y)) {
           // Advance to next blank page
           currentTargetPageIndex++;
           const nextSeqIdx = blankPageIndex + currentTargetPageIndex;
@@ -747,9 +842,154 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
     }
   };
 
+  const renderPageToCanvas = async (pageElement, pageObj, captureHeight) => {
+    return await html2canvas(pageElement, {
+      scale: 1.5,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      imageTimeout: 0,
+      width: PAGE_WIDTH,
+      height: captureHeight,
+      windowWidth: PAGE_WIDTH,
+      windowHeight: captureHeight,
+      scrollX: 0,
+      scrollY: 0,
+      x: 0,
+      y: 0,
+      onclone: (clonedDoc) => {
+        const targetPage = clonedDoc.getElementById(`pdf-page-container-${pageObj.id}`) || clonedDoc.querySelector(`[data-pdf-page-id="${pageObj.id}"]`);
+        if (targetPage) {
+          // 1. Copy live background canvas bitmap to cloned targetPage canvas
+          const liveCanvas = pageElement.querySelector('canvas');
+          const clonedCanvas = targetPage.querySelector('canvas');
+          if (liveCanvas && clonedCanvas) {
+            clonedCanvas.width = liveCanvas.width;
+            clonedCanvas.height = liveCanvas.height;
+            clonedCanvas.style.width = `${PAGE_WIDTH}px`;
+            clonedCanvas.style.height = `${liveCanvas.offsetHeight || 590}px`;
+            const ctx = clonedCanvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(liveCanvas, 0, 0);
+            }
+          }
+
+          // 2. Clear entire cloned iframe body and mount ONLY targetPage at (0, 0)
+          clonedDoc.body.innerHTML = '';
+          clonedDoc.body.style.margin = '0';
+          clonedDoc.body.style.padding = '0';
+          clonedDoc.body.style.background = '#ffffff';
+          clonedDoc.body.style.width = `${PAGE_WIDTH}px`;
+          clonedDoc.body.style.height = `${captureHeight}px`;
+          clonedDoc.body.style.overflow = 'hidden';
+
+          targetPage.style.position = 'relative';
+          targetPage.style.margin = '0';
+          targetPage.style.left = '0';
+          targetPage.style.top = '0';
+          targetPage.style.width = `${PAGE_WIDTH}px`;
+          targetPage.style.height = `${captureHeight}px`;
+          targetPage.style.minHeight = `${captureHeight}px`;
+          targetPage.style.boxShadow = 'none';
+          targetPage.style.border = 'none';
+          targetPage.style.background = '#ffffff';
+          targetPage.style.color = '#0f172a';
+
+          // 3. Remove editor handles / overlays
+          targetPage.querySelectorAll('[title="Drag to reorder page"], .editor-toolbar, .canva-control-bar').forEach(el => el.remove());
+
+          // 4. Force all dynamic text boxes to be fully visible with dark legible typography
+          targetPage.querySelectorAll('.text-box-wrapper').forEach(b => {
+            b.style.setProperty('display', 'block', 'important');
+            b.style.setProperty('visibility', 'visible', 'important');
+            b.style.setProperty('opacity', '1', 'important');
+            b.style.setProperty('border', 'none', 'important');
+            b.style.setProperty('outline', 'none', 'important');
+            b.style.setProperty('background', 'transparent', 'important');
+            b.style.setProperty('color', '#0f172a', 'important');
+            b.style.setProperty('z-index', '999', 'important');
+            b.querySelectorAll('p, span, div, li, td, th, h1, h2, h3, h4').forEach(child => {
+              child.style.setProperty('visibility', 'visible', 'important');
+              child.style.setProperty('opacity', '1', 'important');
+              if (!child.style.color || child.style.color === 'inherit') {
+                child.style.setProperty('color', '#0f172a', 'important');
+              }
+            });
+          });
+
+          // 5. Enforce full width and borders on tables
+          targetPage.querySelectorAll('table').forEach(tbl => {
+            tbl.style.setProperty('width', '100%', 'important');
+            tbl.style.setProperty('display', 'table', 'important');
+            tbl.style.setProperty('border-collapse', 'collapse', 'important');
+            tbl.style.setProperty('visibility', 'visible', 'important');
+            tbl.querySelectorAll('tr').forEach(tr => tr.style.setProperty('display', 'table-row', 'important'));
+            tbl.querySelectorAll('th, td').forEach(cell => {
+              cell.style.setProperty('display', 'table-cell', 'important');
+              cell.style.setProperty('visibility', 'visible', 'important');
+              cell.style.setProperty('border', '1px solid #cbd5e1', 'important');
+              cell.style.setProperty('color', '#0f172a', 'important');
+            });
+          });
+
+          // 6. Enforce proper lists display
+          targetPage.querySelectorAll('ul, ol').forEach(list => {
+            list.style.setProperty('display', 'block', 'important');
+            list.style.setProperty('visibility', 'visible', 'important');
+            list.style.setProperty('padding-left', '24px', 'important');
+          });
+          targetPage.querySelectorAll('li').forEach(li => {
+            li.style.setProperty('display', 'list-item', 'important');
+            li.style.setProperty('visibility', 'visible', 'important');
+            li.style.setProperty('color', '#0f172a', 'important');
+          });
+
+          // 7. Enforce image visibility
+          targetPage.querySelectorAll('img').forEach(img => {
+            img.style.setProperty('visibility', 'visible', 'important');
+            img.style.setProperty('opacity', '1', 'important');
+            img.style.setProperty('max-width', '100%', 'important');
+            if (!img.getAttribute('crossorigin')) {
+              img.setAttribute('crossorigin', 'anonymous');
+            }
+          });
+
+          // 8. Enforce .ql-editor display
+          targetPage.querySelectorAll('.ql-editor').forEach(ed => {
+            ed.style.setProperty('overflow', 'visible', 'important');
+            ed.style.setProperty('height', 'auto', 'important');
+            ed.style.setProperty('visibility', 'visible', 'important');
+            ed.style.setProperty('opacity', '1', 'important');
+            ed.style.setProperty('color', '#0f172a', 'important');
+          });
+
+          clonedDoc.body.appendChild(targetPage);
+        }
+
+        const styleTag = clonedDoc.createElement('style');
+        styleTag.innerHTML = `
+          * { box-sizing: border-box !important; }
+          .text-box-wrapper { position: absolute !important; display: block !important; visibility: visible !important; opacity: 1 !important; z-index: 999 !important; color: #0f172a !important; }
+          .text-box-wrapper p, .text-box-wrapper span, .text-box-wrapper div, .text-box-wrapper li { color: #0f172a !important; visibility: visible !important; opacity: 1 !important; }
+          .text-box-wrapper h1, .text-box-wrapper h2, .text-box-wrapper h3, .text-box-wrapper h4 { color: #0f172a !important; font-weight: 700 !important; }
+          .text-box-wrapper table { border-collapse: collapse !important; width: 100% !important; display: table !important; }
+          .text-box-wrapper th, .text-box-wrapper td { border: 1px solid #cbd5e1 !important; color: #0f172a !important; display: table-cell !important; }
+          .text-box-wrapper ul { list-style-type: disc !important; padding-left: 24px !important; display: block !important; }
+          .text-box-wrapper ol { list-style-type: decimal !important; padding-left: 24px !important; display: block !important; }
+          .text-box-wrapper li { display: list-item !important; margin-bottom: 3px !important; color: #0f172a !important; }
+        `;
+        clonedDoc.head.appendChild(styleTag);
+      }
+    });
+  };
+
   const generateFinalPDF = async () => {
     if (!pageSequence.length) return;
     setIsGenerating(true);
+    const scrollContainer = document.getElementById('pdf-scroll-container');
+    const originalScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+
     try {
       const oldActiveBoxId = activeBoxId;
       const oldEditingBoxId = editingBoxId;
@@ -758,6 +998,11 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
 
       await new Promise(r => setTimeout(r, 60));
 
+      const safeTitle = (proposalTitle || 'Proposal')
+        .replace(/[/\\?%*:|"<>]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim();
+
       let pdf = null;
 
       for (let i = 0; i < pageSequence.length; i++) {
@@ -765,16 +1010,29 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
         const pageElement = document.getElementById(`pdf-page-container-${pageObj.id}`);
         if (!pageElement) continue;
 
-        const canvas = await html2canvas(pageElement, {
-          scale: 1.5,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#ffffff',
-          logging: false,
-          imageTimeout: 0
+        // Bring page into full view to guarantee accurate coordinates and paint
+        if (scrollContainer) {
+          scrollContainer.scrollTop = pageElement.offsetTop;
+        }
+        await new Promise(r => setTimeout(r, 60));
+
+        // Measure true maximum bottom of all rendered boxes on this page to prevent any content clipping
+        const boxEls = pageElement.querySelectorAll('.text-box-wrapper');
+        let maxBoxBottom = 0;
+        boxEls.forEach(b => {
+          const topVal = parseFloat(b.style.top) || b.offsetTop || 0;
+          const heightVal = b.offsetHeight || b.scrollHeight || 60;
+          const bottom = topVal + heightVal;
+          if (bottom > maxBoxBottom) maxBoxBottom = bottom;
         });
 
-        const imgData = canvas.toDataURL('image/jpeg', 0.88);
+        const bgCanvas = pageElement.querySelector('canvas');
+        const defaultHeight = bgCanvas ? bgCanvas.offsetHeight : (pageElement.offsetHeight || 590);
+        const captureHeight = Math.max(defaultHeight, maxBoxBottom > 0 ? maxBoxBottom + 30 : defaultHeight);
+
+        const canvas = await renderPageToCanvas(pageElement, pageObj, captureHeight);
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const isLandscape = canvas.width > canvas.height;
         const orientation = isLandscape ? 'l' : 'p';
 
@@ -802,6 +1060,9 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
 
       const base64Pdf = pdf.output('datauristring');
       setSavedBase64Pdf(base64Pdf);
+
+      // Trigger direct PDF file download for user
+      pdf.save(`${safeTitle}.pdf`);
 
       const pdfEditorState = {
         savedTextBoxes: textBoxes,
@@ -845,6 +1106,9 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
       console.error(err);
       alert("Error generating PDF: " + err.message);
     } finally {
+      if (scrollContainer) {
+        scrollContainer.scrollTop = originalScrollTop;
+      }
       setIsGenerating(false);
     }
   };
@@ -857,19 +1121,11 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
       .replace(/\s+/g, ' ')
       .trim();
 
-    // If PDF has already been generated and saved, download it instantly in 0ms!
-    if (savedBase64Pdf) {
-      const link = document.createElement('a');
-      link.href = savedBase64Pdf;
-      link.setAttribute('download', `${safeTitle}.pdf`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      return;
-    }
-
-    // Otherwise render on the fly with download indicator
+    // Render directly from the live DOM canvas so preview matches download 100%
     setIsDownloading(true);
+    const scrollContainer = document.getElementById('pdf-scroll-container');
+    const originalScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+
     try {
       const oldActiveBoxId = activeBoxId;
       const oldEditingBoxId = editingBoxId;
@@ -885,16 +1141,29 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
         const pageElement = document.getElementById(`pdf-page-container-${pageObj.id}`);
         if (!pageElement) continue;
 
-        const canvas = await html2canvas(pageElement, {
-          scale: 1.5,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#ffffff',
-          logging: false,
-          imageTimeout: 0
+        // Bring page into full view to guarantee accurate coordinates and paint
+        if (scrollContainer) {
+          scrollContainer.scrollTop = pageElement.offsetTop;
+        }
+        await new Promise(r => setTimeout(r, 60));
+
+        // Measure true maximum bottom of all rendered boxes on this page to prevent any content clipping
+        const boxEls = pageElement.querySelectorAll('.text-box-wrapper');
+        let maxBoxBottom = 0;
+        boxEls.forEach(b => {
+          const topVal = parseFloat(b.style.top) || b.offsetTop || 0;
+          const heightVal = b.offsetHeight || b.scrollHeight || 60;
+          const bottom = topVal + heightVal;
+          if (bottom > maxBoxBottom) maxBoxBottom = bottom;
         });
 
-        const imgData = canvas.toDataURL('image/jpeg', 0.88);
+        const bgCanvas = pageElement.querySelector('canvas');
+        const defaultHeight = bgCanvas ? bgCanvas.offsetHeight : (pageElement.offsetHeight || 590);
+        const captureHeight = Math.max(defaultHeight, maxBoxBottom > 0 ? maxBoxBottom + 30 : defaultHeight);
+
+        const canvas = await renderPageToCanvas(pageElement, pageObj, captureHeight);
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const isLandscape = canvas.width > canvas.height;
         const orientation = isLandscape ? 'l' : 'p';
 
@@ -921,6 +1190,19 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
         const base64Pdf = pdf.output('datauristring');
         setSavedBase64Pdf(base64Pdf);
         pdf.save(`${safeTitle}.pdf`);
+
+        // Sync fresh complete PDF state back to database if proposalId exists
+        if (proposalId) {
+          axios.put(`/proposals/${proposalId}`, {
+            title: proposalTitle || 'Custom Generated Proposal',
+            proposalType: 'international',
+            pdfEditorState: {
+              savedTextBoxes: textBoxes,
+              savedPageSequence: pageSequence,
+              base64Pdf: base64Pdf
+            }
+          }).catch(err => console.warn('Background sync note:', err));
+        }
       }
       setActiveBoxId(oldActiveBoxId);
       setEditingBoxId(oldEditingBoxId);
@@ -928,6 +1210,9 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
       console.error(err);
       alert("Error downloading PDF: " + err.message);
     } finally {
+      if (scrollContainer) {
+        scrollContainer.scrollTop = originalScrollTop;
+      }
       setIsDownloading(false);
     }
   };
@@ -972,8 +1257,6 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
         }
       }}
     >
-      <style>{customStyle}</style>
-
       {/* Loading Spinner Overlay for Open, Save/Generate, or Download */}
       {(isLoadingProposal || isGenerating || isDownloading) && (
         <div style={{
@@ -1013,13 +1296,6 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
           </div>
         </div>
       )}
-
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `}</style>
 
       {/* Header Bar */}
       <div className="editor-header" style={{ position: 'relative', zIndex: 10000, background: '#1f2937', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'white', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
@@ -1146,10 +1422,18 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
           loading={<div style={{ padding: '50px', color: 'white' }}>Loading PDF...</div>}
         >
           {pageSequence.map((pageObj, index) => {
+            const pageBoxes = textBoxes.filter(b => b.pageId === pageObj.id);
+            const maxBoxBottom = pageBoxes.reduce((max, b) => {
+              const bY = Number(b.y) || 0;
+              const bH = typeof b.height === 'number' ? b.height : (b.type === 'image' ? 300 : 80);
+              return Math.max(max, bY + bH);
+            }, 590);
+
             return (
               <div
                 key={pageObj.id}
                 id={`pdf-page-container-${pageObj.id}`}
+                data-pdf-page-id={pageObj.id}
                 draggable
                 onDragStart={(e) => {
                   setDraggedPageIndex(index);
@@ -1185,6 +1469,7 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
                   background: 'white',
                   width: PAGE_WIDTH,
                   maxWidth: '100%',
+                  minHeight: Math.max(590, maxBoxBottom + 30),
                   height: 'max-content',
                   border: draggedPageIndex === index ? '2px dashed #3b82f6' : '1px solid #d1d5db',
                   opacity: draggedPageIndex === index ? 0.5 : 1
@@ -1789,7 +2074,7 @@ export function ProposalGenerator({ isOpen, onClose, onSuccess, proposalId, read
                     )}
 
                     {/* The Content Editor */}
-                    <div style={{ opacity: activeBoxId === box.id || !isGenerating ? 1 : 0.9, height: '100%' }}>
+                    <div style={{ opacity: 1, height: 'auto', minHeight: '100%' }}>
                       {box.type === 'table' ? (
                         <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', background: box.backgroundColor || 'transparent' }}>
                           <tbody>

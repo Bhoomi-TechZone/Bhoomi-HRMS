@@ -14,7 +14,7 @@ const LeadSubmissionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['New', 'In Progress', 'Contacted', 'Interested', 'Not Interested', 'Converted'],
+      enum: ['New', 'In Progress', 'Contacted', 'Interested', 'Not Interested', 'Converted', 'Invalid', 'International'],
       default: 'New'
     },
     updates: {

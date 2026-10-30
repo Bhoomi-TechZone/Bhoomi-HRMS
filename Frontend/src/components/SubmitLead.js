@@ -111,6 +111,8 @@ function SubmitLead() {
               <option value="Interested">Interested</option>
               <option value="Not Interested">Not Interested</option>
               <option value="Converted">Converted</option>
+              <option value="Invalid">Invalid</option>
+              <option value="International">International</option>
             </select>
           </div>
 

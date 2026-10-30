@@ -3,7 +3,7 @@ import axios from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import './MetaLeads.css';
 
-const STATUS_OPTIONS = ['New', 'Contacted', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed'];
+const STATUS_OPTIONS = ['New', 'Contacted', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed', 'Invalid', 'International'];
 
 const STATUS_COLORS = {
   New: '#3498db',
@@ -14,6 +14,8 @@ const STATUS_COLORS = {
   Converted: '#27ae60',
   'Not Interested': '#e74c3c',
   Closed: '#95a5a6',
+  Invalid: '#dc2626',
+  International: '#0891b2',
 };
 
 function MetaLeads() {

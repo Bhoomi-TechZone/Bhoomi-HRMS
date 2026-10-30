@@ -650,7 +650,7 @@ router.get('/followups/due', auth, async (req, res) => {
     const query = {
       nextFollowUp: { $ne: null, $lte: now },
       followUpCompleted: { $ne: true },
-      status: { $nin: ['Converted', 'Closed', 'Not Interested'] }
+      status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Invalid'] }
     };
     if (!canManage) query.employee = req.user._id;
 

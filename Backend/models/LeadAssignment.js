@@ -61,7 +61,7 @@ const leadAssignmentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['New', 'Contacted', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed'],
+    enum: ['New', 'Contacted', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed', 'Invalid', 'International'],
     default: 'New'
   },
   history: [{

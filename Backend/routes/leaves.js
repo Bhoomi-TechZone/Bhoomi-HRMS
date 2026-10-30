@@ -32,9 +32,9 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB limit
   fileFilter: (req, file, cb) => {
-    const allowedExtensions = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'];
+    const allowedExtensions = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp'];
     const ext = path.extname(file.originalname).toLowerCase();
     
     const allowedMimeTypes = [
@@ -48,13 +48,14 @@ const upload = multer({
       'image/jpg',
       'image/pjpeg',
       'image/png',
-      'image/x-png'
+      'image/x-png',
+      'image/webp'
     ];
 
     if (allowedExtensions.includes(ext) || allowedMimeTypes.includes((file.mimetype || '').toLowerCase())) {
       return cb(null, true);
     }
-    cb(new Error('Invalid file type. Only PDF, DOC, DOCX, JPG, PNG are allowed.'));
+    cb(new Error('Invalid file format. Supported formats are: PDF, DOC, DOCX, JPG, JPEG, PNG, and WEBP.'));
   }
 });
 
@@ -64,7 +65,7 @@ const handleUploadAttachment = (req, res, next) => {
     if (err) {
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ message: 'Attachment file size cannot exceed 5MB.' });
+          return res.status(400).json({ message: 'Attachment file size exceeds the 2MB limit. Please upload a file smaller than 2MB.' });
         }
         return res.status(400).json({ message: `Upload error: ${err.message}` });
       }
@@ -341,7 +342,7 @@ router.get('/export/excel', auth, async (req, res) => {
       'End Date': new Date(leave.endDate).toLocaleDateString(),
       'Reason': leave.reason,
       'Status': leave.status,
-      'Applied On': leave.createdAt ? new Date(leave.createdAt).toLocaleDateString() : 'N/A',
+      'Applied On': leave.createdAt ? new Date(leave.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) + ' IST' : 'N/A',
       'Approved By': leave.approvedBy ? `${leave.approvedBy.firstName} ${leave.approvedBy.lastName}` : 'N/A',
       'Admin Response': leave.adminResponse || 'N/A'
     }));
@@ -401,7 +402,7 @@ router.get('/export/pdf', auth, async (req, res) => {
       if (leave.adminResponse) {
         doc.text(`Admin Response: ${leave.adminResponse}`);
       }
-      doc.text(`Applied On: ${leave.createdAt ? new Date(leave.createdAt).toLocaleDateString() : 'N/A'}`);
+      doc.text(`Applied On: ${leave.createdAt ? new Date(leave.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) + ' IST' : 'N/A'}`);
 
       if (index < leaves.length - 1) {
         doc.moveDown().strokeColor('#ccc').lineWidth(0.5).moveTo(50, doc.y).lineTo(550, doc.y).stroke();
@@ -632,8 +633,8 @@ router.put('/:id', auth, handleUploadAttachment, async (req, res) => {
     const isOwnLeave = currentUserId && leaveEmployeeId && currentUserId === leaveEmployeeId;
 
     // CASE 1: Employee is editing their own leave request
-    if (isOwnLeave && !status) {
-      if (existingLeave.status === 'approved') {
+    if ((isOwnLeave || isHrOrAdmin) && !status) {
+      if (existingLeave.status === 'approved' && !isHrOrAdmin) {
         return res.status(400).json({ message: 'Approved leaves cannot be edited' });
       }
 
@@ -649,6 +650,15 @@ router.put('/:id', auth, handleUploadAttachment, async (req, res) => {
       if (req.file) {
         updateData.attachmentFileName = req.file.originalname;
         updateData.attachmentFilePath = req.file.path;
+        if (existingLeave.attachmentFilePath && existingLeave.attachmentFilePath !== req.file.path && fs.existsSync(existingLeave.attachmentFilePath)) {
+          try { fs.unlinkSync(existingLeave.attachmentFilePath); } catch (e) {}
+        }
+      } else if (req.body.removeAttachment === 'true' || req.body.removeAttachment === true) {
+        updateData.attachmentFileName = '';
+        updateData.attachmentFilePath = '';
+        if (existingLeave.attachmentFilePath && fs.existsSync(existingLeave.attachmentFilePath)) {
+          try { fs.unlinkSync(existingLeave.attachmentFilePath); } catch (e) {}
+        }
       }
 
       // If re-editing a rejected leave, reset status to pending
@@ -665,7 +675,7 @@ router.put('/:id', auth, handleUploadAttachment, async (req, res) => {
     }
 
     // If attempting to edit someone else's leave details without changing status
-    if (!status && !isOwnLeave) {
+    if (!status && !isOwnLeave && !isHrOrAdmin) {
       return res.status(403).json({ message: 'Access denied: You can only edit your own leave requests' });
     }
 

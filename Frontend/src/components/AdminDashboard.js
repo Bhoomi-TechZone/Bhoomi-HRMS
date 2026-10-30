@@ -1448,6 +1448,8 @@ function AdminDashboard() {
                           'Converted': { bg: '#d1fae5', color: '#047857', dot: '#059669' },
                           'Not Interested': { bg: '#fee2e2', color: '#dc2626', dot: '#ef4444' },
                           'Closed': { bg: '#f1f5f9', color: '#475569', dot: '#64748b' },
+                          'Invalid': { bg: '#fee2e2', color: '#991b1b', dot: '#dc2626' },
+                          'International': { bg: '#ecfeff', color: '#0e7490', dot: '#06b6d4' },
                         };
                         const status = lead.status || 'New';
                         const st = statusColors[status] || statusColors['New'];

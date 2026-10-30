@@ -602,6 +602,8 @@
 .status-converted      { background: #dcfce7; color: #166534; }
 .status-not-interested { background: #fee2e2; color: #991b1b; }
 .status-closed         { background: #f1f5f9; color: #334155; }
+.status-invalid        { background: #fee2e2; color: #991b1b; }
+.status-international  { background: #ecfeff; color: #0e7490; }
 
 /* ---- Action Buttons ---- */
 .is-actions {

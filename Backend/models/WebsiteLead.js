@@ -47,7 +47,7 @@ const websiteLeadSchema = new mongoose.Schema({
   // CRM management fields
   status: {
     type: String,
-    enum: ['New', 'Contacted', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed'],
+    enum: ['New', 'Contacted', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed', 'Invalid', 'International'],
     default: 'New',
     index: true
   },

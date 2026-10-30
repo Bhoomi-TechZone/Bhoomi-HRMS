@@ -154,6 +154,23 @@ const SunIcon = () => (
   </svg>
 );
 
+// Format date and time in IST (Indian Standard Time, Asia/Kolkata)
+const formatDateTimeIST = (dateStr, { includeZone = false } = {}) => {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '—';
+  const formatted = d.toLocaleString('en-US', {
+    timeZone: 'Asia/Kolkata',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+  return includeZone ? `${formatted} IST` : formatted;
+};
+
 const CustomDropdown = ({ label, options, value, onChange, isOpen, onToggle }) => {
   return (
     <div style={{ position: 'relative' }}>
@@ -272,6 +289,10 @@ function Leaves() {
   const [editingLeave, setEditingLeave] = useState(null);
   const [editingHoliday, setEditingHoliday] = useState(null);
   const [attachmentFile, setAttachmentFile] = useState(null);
+  const [attachmentError, setAttachmentError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [existingAttachment, setExistingAttachment] = useState('');
+  const [isAttachmentRemoved, setIsAttachmentRemoved] = useState(false);
   const [previewAttachmentUrl, setPreviewAttachmentUrl] = useState(null);
   const [previewAttachmentType, setPreviewAttachmentType] = useState(null);
   const [formData, setFormData] = useState({
@@ -487,29 +508,57 @@ function Leaves() {
     }
   };
 
+  const handleRemoveAttachment = (e) => {
+    e.stopPropagation();
+    setAttachmentFile(null);
+    setExistingAttachment('');
+    setIsAttachmentRemoved(true);
+    setAttachmentError('');
+    const el = document.getElementById('leave-attachment-input');
+    if (el) el.value = '';
+  };
+
   const handleFileChange = (e) => {
     const file = e.target.files[0];
+
     if (!file) {
+      setAttachmentError('');
       setAttachmentFile(null);
+
+
       return;
     }
-    const allowedExtensions = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
+    const allowedExtensions = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'webp'];
     const ext = file.name.split('.').pop().toLowerCase();
     if (!allowedExtensions.includes(ext)) {
-      alert('Invalid file format. Please upload PDF, DOC, DOCX, JPG, or PNG files only.');
+      const errMsg = `Unsupported file format (.${ext || 'unknown'}). Supported formats are: PDF, DOC, DOCX, JPG, JPEG, PNG, and WEBP.`;
+      setAttachmentError(errMsg);
+      setAttachmentFile(null);
+
+
       e.target.value = '';
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      alert('File size exceeds the 5MB limit. Please upload a smaller file.');
+    if (file.size > 2 * 1024 * 1024) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      const errMsg = `File size (${sizeMB} MB) exceeds the 2MB limit. Please upload a file smaller than 2MB.`;
+      setAttachmentError(errMsg);
+      setAttachmentFile(null);
+
+
       e.target.value = '';
       return;
     }
+
+    setAttachmentError('');
     setAttachmentFile(file);
+    setIsAttachmentRemoved(false);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const data = new FormData();
       data.append('leaveCategory', formData.leaveCategory);
@@ -521,19 +570,21 @@ function Leaves() {
       data.append('description', formData.description || '');
       if (attachmentFile) {
         data.append('attachment', attachmentFile);
+      } else if (isAttachmentRemoved) {
+        data.append('removeAttachment', 'true');
       }
 
       if (editingLeave) {
-        await api.put(`/leaves/${editingLeave._id}`, data, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
+        const res = await api.put(`/leaves/${editingLeave._id}`, data);
+        if (res.data) {
+          setLeaves(prev => prev.map(l => l._id === editingLeave._id ? res.data : l));
+        }
         setEditingLeave(null);
       } else {
-        await api.post('/leaves', data, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
+        await api.post('/leaves', data);
       }
       setShowModal(false);
+      setAttachmentError('');
       setFormData({
         leaveCategory: 'Casual Leave',
         leaveType: 'Personal',
@@ -544,24 +595,34 @@ function Leaves() {
         description: ''
       });
       setAttachmentFile(null);
-      fetchLeaves();
+      setExistingAttachment('');
+      setIsAttachmentRemoved(false);
+
+      await fetchLeaves();
     } catch (error) {
       alert(error.response?.data?.message || 'Error processing leave request');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleEditLeave = (leave) => {
     const isOwner = String(user?._id || user?.userId || user?.id) === String(leave.employee?._id || leave.employee);
-    if (!isOwner) {
+    if (!isOwner && !isHrOrAdmin) {
       alert('You can only edit your own leave requests.');
       return;
     }
-    if (leave.status === 'approved') {
+    if (leave.status === 'approved' && !isHrOrAdmin) {
       alert('Approved leave requests cannot be edited.');
       return;
     }
     setEditingLeave(leave);
+    setAttachmentError('');
     setAttachmentFile(null);
+    setExistingAttachment(leave.attachmentFileName || '');
+    setIsAttachmentRemoved(false);
+
+
     setFormData({
       leaveCategory: leave.leaveCategory || 'Casual Leave',
       leaveType: leave.leaveType || 'Personal',
@@ -861,7 +922,7 @@ function Leaves() {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: '#f8fafc',
+        background: '#ffffff',
         padding: '28px 24px',
         boxSizing: 'border-box',
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif"
@@ -960,7 +1021,7 @@ function Leaves() {
 
           {/* Table Header Skeleton */}
           <div style={{
-            background: '#f8fafc',
+            background: '#ffffff',
             padding: '12px 16px',
             borderBottom: '2px solid #e5e7eb',
             display: 'grid',
@@ -1295,7 +1356,7 @@ function Leaves() {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: '#f8fafc',
+        background: '#ffffff',
         padding: '28px 24px',
         boxSizing: 'border-box'
       }}>
@@ -1485,7 +1546,7 @@ function Leaves() {
 
           {activeTab !== 'leaveBalance' && (<>
             {/* Filter Bar */}
-            <div style={{ padding: '10px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', background: '#fafafa' }}>
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', background: '#ffffff' }}>
               <div style={{ position: 'relative', flex: '1', minWidth: '220px', maxWidth: '350px' }}>
                 <SearchIcon style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', width: '12px', height: '12px' }} />
                 <input 
@@ -1585,7 +1646,7 @@ function Leaves() {
             <div className="leaves-table-wrap" style={{ overflowX: "auto", overflowY: "auto", WebkitOverflowScrolling: "touch", flex: 1, minHeight: 0 }}>
               <table className="leaves-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: "1000px" }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
-                  <tr style={{ background: "#fafafa", boxShadow: '0 1px 0 #f1f5f9' }}>
+                  <tr style={{ background: "#ffffff", boxShadow: '0 1px 0 #f1f5f9' }}>
                     <th style={{
                       padding: "12px 16px",
                       textAlign: "left",
@@ -1836,13 +1897,13 @@ function Leaves() {
                           </span>
                         </div>
                       </td>
-                      <td data-label="Applied On" style={{ padding: "12px 16px", minWidth: "100px", whiteSpace: "nowrap" }}>
+                      <td data-label="Applied On" style={{ padding: "12px 16px", minWidth: "140px", whiteSpace: "nowrap" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                           <div style={{ color: "#94a3b8", display: "inline-flex" }}>
                             <ClockIcon />
                           </div>
                           <span style={{ fontSize: "11px", color: "#64748b" }}>
-                            {leave.createdAt ? new Date(leave.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                            {formatDateTimeIST(leave.createdAt)}
                           </span>
                         </div>
                       </td>
@@ -1860,6 +1921,7 @@ function Leaves() {
                               left: rect.left + rect.width / 2,
                               showUpward: showUpward
                             });
+                    
                             setHoveredDesc(leave._id);
                           }}
                           onMouseLeave={() => setHoveredDesc(null)}
@@ -1940,6 +2002,7 @@ function Leaves() {
                                   bottom: showUpward ? window.innerHeight - rect.top + 4 : 'auto',
                                   left: rect.left 
                                 });
+                        
                                 setOpenStatusDropdown(openStatusDropdown === leave._id ? null : leave._id);
                               }}
                               style={{
@@ -2097,7 +2160,7 @@ function Leaves() {
                           )}
 
                           {/* Edit Button: Only own leave and only if NOT approved */}
-                          {isOwnLeave && leave.status !== 'approved' && (
+                          {(isOwnLeave || isHrOrAdmin) && (leave.status !== 'approved' || isHrOrAdmin) && (
                             <button
                               className="ist-action-btn"
                               title="Edit"
@@ -2269,7 +2332,7 @@ function Leaves() {
 
       {
         showModal && (
-          <div onClick={() => { setShowModal(false); setEditingLeave(null); setAttachmentFile(null); }} style={{
+          <div onClick={() => { if (!isSubmitting) { setShowModal(false); setEditingLeave(null); setAttachmentFile(null); setExistingAttachment(''); setIsAttachmentRemoved(false); setAttachmentError(''); } }} style={{
             position: 'fixed',
             top: 0,
             left: 0,
@@ -2327,20 +2390,25 @@ function Leaves() {
                     }}>{editingLeave ? 'Update your leave request' : 'Submit your leave request'}</p>
                   </div>
                 </div>
-                <button onClick={() => { setShowModal(false); setEditingLeave(null); setAttachmentFile(null); }} style={{
-                  background: 'transparent',
-                  border: 'none',
-                  fontSize: '24px',
-                  color: '#94a3b8',
-                  cursor: 'pointer',
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: '6px',
-                  transition: 'all 0.2s ease'
-                }}
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => { if (!isSubmitting) { setShowModal(false); setEditingLeave(null); setAttachmentFile(null); setExistingAttachment(''); setIsAttachmentRemoved(false); setAttachmentError(''); } }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    fontSize: '24px',
+                    color: '#94a3b8',
+                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '6px',
+                    transition: 'all 0.2s ease',
+                    opacity: isSubmitting ? 0.4 : 1
+                  }}
                   onMouseEnter={(e) => {
                     e.target.style.background = '#f1f5f9';
                     e.target.style.color = '#0f172a';
@@ -2355,6 +2423,7 @@ function Leaves() {
 
                 {/* Leave Type */}
                 <div style={{ marginBottom: '12px' }}>
+
                   <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>Leave Type <span style={{ color: '#ef4444' }}>*</span></label>
                   <select
                     value={formData.leaveCategory}
@@ -2372,7 +2441,8 @@ function Leaves() {
                 {/* Reason & Duration Type in Grid */}
                 <div className="leaves-date-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>Reason <span style={{ color: '#ef4444' }}>*</span></label>
+  
+                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>Reason <span style={{ color: '#ef4444' }}>*</span></label>
                     <select
                       value={formData.reason}
                       onChange={(e) => setFormData({ ...formData, reason: e.target.value, leaveType: e.target.value })}
@@ -2389,7 +2459,8 @@ function Leaves() {
                     </select>
                   </div>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>Duration Type <span style={{ color: '#ef4444' }}>*</span></label>
+  
+                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>Duration Type <span style={{ color: '#ef4444' }}>*</span></label>
                     <select
                       value={formData.durationType}
                       onChange={(e) => setFormData({ ...formData, durationType: e.target.value })}
@@ -2407,7 +2478,8 @@ function Leaves() {
                 {/* Start Date + End Date */}
                 <div className="leaves-date-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>Start Date</label>
+  
+                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>Start Date</label>
                     <input
                       type="date"
                       value={formData.startDate}
@@ -2419,7 +2491,8 @@ function Leaves() {
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>End Date</label>
+  
+                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>End Date</label>
                     <input
                       type="date"
                       value={formData.endDate}
@@ -2434,6 +2507,7 @@ function Leaves() {
 
                 {/* Description */}
                 <div style={{ marginBottom: '12px' }}>
+
                   <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>Description <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span></label>
                   <textarea
                     value={formData.description}
@@ -2448,79 +2522,141 @@ function Leaves() {
 
                 {/* Attachment below Reason */}
                 <div style={{ marginBottom: '16px' }}>
+
                   <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px', fontWeight: '600', color: '#334155', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-                    Attachment <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span>
+                    Attachment <span style={{ fontWeight: 400, color: '#94a3b8' }}>(optional)</span> <span style={{ fontWeight: 500, color: '#64748b', fontSize: '11px', marginLeft: '6px' }}>(Supported: <strong style={{ color: '#0f172a' }}>PDF, DOC, DOCX, JPG, JPEG, PNG, WEBP</strong> · Max <strong style={{ color: '#0f172a' }}>2MB</strong>)</span>
                   </label>
                   <div
-                    onClick={() => document.getElementById('leave-attachment-input').click()}
+                    onClick={() => { const el = document.getElementById('leave-attachment-input'); if (el) { el.value = ''; el.click(); } }}
                     style={{
-                      border: '1.5px dashed #e2e8f0',
+                      border: attachmentError ? '1.5px dashed #ef4444' : '1.5px dashed #e2e8f0',
                       borderRadius: '8px',
                       padding: '12px 14px',
-                      background: '#f8fafc',
+                      background: attachmentError ? '#fef2f2' : '#ffffff',
+
                       display: 'flex',
                       alignItems: 'center',
                       gap: '10px',
                       cursor: 'pointer',
                       transition: 'all 0.2s ease'
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#3b775e'; e.currentTarget.style.background = '#f0fdf4'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.background = '#f8fafc'; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = attachmentError ? '#ef4444' : '#3b775e'; e.currentTarget.style.background = attachmentError ? '#fef2f2' : '#f0fdf4'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = attachmentError ? '#ef4444' : '#e2e8f0'; e.currentTarget.style.background = attachmentError ? '#fef2f2' : '#ffffff'; }}
                   >
                     <DownloadIcon />
-                    <span style={{ fontSize: '12.5px', color: (attachmentFile || editingLeave?.attachmentFileName) ? '#0f172a' : '#94a3b8', fontFamily: 'Inter, -apple-system, sans-serif', flex: 1 }}>
+                    <span style={{ fontSize: '12.5px', color: (attachmentFile || existingAttachment) ? '#0f172a' : '#94a3b8', fontFamily: 'Inter, -apple-system, sans-serif', flex: 1 }}>
                       {attachmentFile 
-                        ? attachmentFile.name 
-                        : (editingLeave?.attachmentFileName 
-                          ? `Current: ${editingLeave.attachmentFileName} (Click to change file)` 
-                          : 'Click to upload (PDF, DOC, DOCX, JPG, PNG — max 5MB)')}
+                        ? `${attachmentFile.name} (${(attachmentFile.size / 1024).toFixed(0)} KB)` 
+                        : (existingAttachment 
+                          ? `Current: ${existingAttachment} (Click to change file)` 
+                          : 'Click to upload (PDF, DOC, DOCX, JPG, JPEG, PNG, WEBP — max 2MB)')}
                     </span>
-                    {attachmentFile && (
+                    {(attachmentFile || existingAttachment) && (
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setAttachmentFile(null); document.getElementById('leave-attachment-input').value = ''; }}
-                        style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', lineHeight: 1, padding: '0 2px' }}
+                        title="Remove attachment"
+                        onClick={handleRemoveAttachment}
+                        style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', lineHeight: 1, padding: '0 4px', display: 'flex', alignItems: 'center' }}
                       >&times;</button>
                     )}
                   </div>
                   <input
                     id="leave-attachment-input"
                     type="file"
-                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp"
                     style={{ display: 'none' }}
                     onChange={handleFileChange}
+                  />
+                  {attachmentError && (
+                    <div style={{
+                      marginTop: '8px',
+                      padding: '8px 12px',
+                      background: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '12px',
+                      color: '#b91c1c',
+                      fontFamily: 'Inter, -apple-system, sans-serif',
+                      fontWeight: 500
+                    }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                      </svg>
+                      <span>{attachmentError}</span>
+                    </div>
+                  )}
+                  <span style={{ display: 'none' }}
                   />
                 </div>
 
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                  <button type="button" className="leaves-action-btn" onClick={() => { setShowModal(false); setAttachmentFile(null); }} style={{
-                    padding: '9px 20px',
-                    border: '1.5px solid #e5e7eb',
-                    borderRadius: '9px',
-                    fontSize: '12.5px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    fontFamily: "'Inter', sans-serif",
-                    background: '#fff',
-                    color: '#64748b',
-                  }}>
+                  <button
+                    type="button"
+                    className="leaves-action-btn"
+                    disabled={isSubmitting}
+                    onClick={() => { if (!isSubmitting) { setShowModal(false); setAttachmentFile(null); setExistingAttachment(''); setIsAttachmentRemoved(false); setAttachmentError(''); } }}
+                    style={{
+                      padding: '9px 20px',
+                      border: '1.5px solid #e5e7eb',
+                      borderRadius: '9px',
+                      fontSize: '12.5px',
+                      fontWeight: '600',
+                      cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                      fontFamily: "'Inter', sans-serif",
+                      background: '#fff',
+                      color: '#64748b',
+                      opacity: isSubmitting ? 0.5 : 1
+                    }}>
                     <span style={{ position: 'relative', zIndex: 1 }}>Cancel</span>
                   </button>
-                  <button type="submit" style={{
-                    background: 'linear-gradient(135deg, #3b775e 0%, #56a07a 100%)',
-                    color: 'white',
-                    border: 'none',
-                    padding: '10px 16px',
-                    borderRadius: '10px',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    fontFamily: 'Inter, -apple-system, sans-serif',
-                    transition: 'all 0.2s ease'
-                  }}
-                    onMouseEnter={(e) => e.target.style.opacity = '0.9'}
-                    onMouseLeave={(e) => e.target.style.opacity = '1'}>
-                    {editingLeave ? 'Update Leave' : 'Apply Leave'}
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    style={{
+                      background: isSubmitting
+                        ? '#94a3b8'
+                        : 'linear-gradient(135deg, #3b775e 0%, #56a07a 100%)',
+                      color: 'white',
+                      border: 'none',
+                      padding: '10px 18px',
+                      borderRadius: '10px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                      fontFamily: 'Inter, -apple-system, sans-serif',
+                      transition: 'all 0.2s ease',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      opacity: isSubmitting ? 0.8 : 1
+                    }}
+                    onMouseEnter={(e) => { if (!isSubmitting) e.target.style.opacity = '0.9'; }}
+                    onMouseLeave={(e) => { if (!isSubmitting) e.target.style.opacity = '1'; }}>
+                    {isSubmitting ? (
+                      <>
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          style={{ animation: 'spin 0.8s linear infinite', flexShrink: 0 }}
+                        >
+                          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                        </svg>
+                        <span>{editingLeave ? 'Updating...' : 'Applying...'}</span>
+                      </>
+                    ) : (
+                      <span>{editingLeave ? 'Update Leave' : 'Apply Leave'}</span>
+                    )}
                   </button>
                 </div>
               </form>
@@ -2627,6 +2763,10 @@ function Leaves() {
                   <div>
                     <div style={{ color: '#64748b', marginBottom: '4px', fontSize: '11.5px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Period</div>
                     <div style={{ color: '#0f172a', fontWeight: '500' }}>{new Date(selectedLeave.startDate).toLocaleDateString()} - {new Date(selectedLeave.endDate).toLocaleDateString()}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: '#64748b', marginBottom: '4px', fontSize: '11.5px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Applied On</div>
+                    <div style={{ color: '#0f172a', fontWeight: '500' }}>{formatDateTimeIST(selectedLeave.createdAt, { includeZone: true })}</div>
                   </div>
                   <div style={{ gridColumn: '1 / -1' }}>
                     <div style={{ color: '#64748b', marginBottom: '4px', fontSize: '11.5px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Reason</div>
@@ -3032,7 +3172,7 @@ function Leaves() {
           <div onClick={(e) => e.stopPropagation()} style={{
             position: 'relative',
             width: '100%',
-            maxWidth: '600px',
+            maxWidth: '980px',
             transformStyle: 'preserve-3d',
             transition: 'transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1)',
             transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)'
@@ -3044,7 +3184,9 @@ function Leaves() {
               width: '100%',
               boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
               maxHeight: '90vh',
-              overflow: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden',
               position: isFlipped ? 'absolute' : 'relative',
@@ -3112,7 +3254,7 @@ function Leaves() {
             </div>
 
             {/* Modal Body */}
-            <div style={{ padding: '0' }}>
+            <div style={{ padding: '0', flex: 1, overflowY: 'auto' }}>
 
               {/* Employee Card */}
               <div style={{
@@ -3120,7 +3262,7 @@ function Leaves() {
                 alignItems: 'center',
                 gap: '14px',
                 padding: '18px 28px',
-                background: '#f8fafc',
+                background: '#ffffff',
                 borderBottom: '1px solid #f1f5f9'
               }}>
                 <div style={{
@@ -3225,18 +3367,25 @@ function Leaves() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', color: '#475569', fontWeight: 500 }}>
                           <ClockIcon />
                           <span>
-                            {selectedLeave.createdAt ? new Date(selectedLeave.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                            {formatDateTimeIST(selectedLeave.createdAt, { includeZone: true })}
                           </span>
                         </div>
                       )
                     },
                     {
                       label: 'Description',
+                      topAlign: true,
                       value: (
                         <div style={{
-                          fontSize: '12.5px',
+                          fontSize: '13px',
+                          padding: '12px 16px',
+                          background: '#ffffff',
+    
+                          borderRadius: '10px',
+                          border: '1px solid #e2e8f0',
+                          letterSpacing: '0.01em',
                           color: '#334155',
-                          lineHeight: '1.55',
+                          lineHeight: '1.65',
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-word'
                         }}>
@@ -3280,6 +3429,7 @@ function Leaves() {
                     }] : []),
                     ...(selectedLeave.approvedBy ? [{
                       label: selectedLeave.status === 'rejected' ? 'Rejected By' : 'Approved By',
+                      topAlign: true,
                       value: (
                         <div>
                           <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#0f172a' }}>
@@ -3301,24 +3451,25 @@ function Leaves() {
                   ].map((row, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{
-                        padding: '11px 28px',
-                        width: '38%',
+                        padding: '13px 28px',
+                        width: '20%',
+                        minWidth: '180px',
                         fontSize: '11px',
                         fontWeight: 700,
                         color: '#94a3b8',
                         textTransform: 'uppercase',
                         letterSpacing: '0.05em',
-                        verticalAlign: 'middle',
+                        verticalAlign: row.topAlign ? 'top' : 'middle',
                         whiteSpace: 'nowrap',
-                        background: '#fafafa'
+                        background: '#ffffff'
                       }}>
                         {row.label}
                       </td>
                       <td style={{
-                        padding: '11px 20px',
+                        padding: '13px 24px',
                         fontSize: '12.5px',
                         color: '#475569',
-                        verticalAlign: 'middle',
+                        verticalAlign: row.topAlign ? 'top' : 'middle',
                         background: '#fff'
                       }}>
                         {row.value}
@@ -3336,8 +3487,9 @@ function Leaves() {
               borderTop: '1px solid #f1f5f9',
               display: 'flex',
               justifyContent: 'flex-end',
-              background: '#f8fafc',
-              borderRadius: '0 0 16px 16px'
+              background: '#ffffff',
+              borderRadius: '0 0 16px 16px',
+              flexShrink: 0
             }}>
               <button
                 onClick={() => { setShowDetailsModal(false); setSelectedLeave(null); setIsFlipped(false); }}
@@ -3407,7 +3559,7 @@ function Leaves() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '12px',
-                background: '#f8fafc',
+                background: '#ffffff',
                 borderRadius: '16px 16px 0 0'
               }}>
                 <button onClick={() => setIsFlipped(false)} style={{
@@ -3458,7 +3610,7 @@ function Leaves() {
                             </div>
                           </div>
                           <div style={{ fontSize: '11.5px', color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                            {new Date(item.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                            {formatDateTimeIST(item.createdAt)}
                           </div>
                         </div>
                       </div>
@@ -3523,7 +3675,7 @@ function Leaves() {
             background: 'white',
             borderRadius: '16px',
             width: '100%',
-            maxWidth: '600px',
+            maxWidth: '980px',
             boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
             overflow: 'hidden',
             display: 'flex',

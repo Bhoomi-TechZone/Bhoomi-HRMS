@@ -5,22 +5,28 @@ import axios from 'axios';
 const API_URL = process.env.REACT_APP_API_URL || '/api';
 // const API_URL = 'http://localhost:9410/api';
 
-
-
 // Create axios instance
 const api = axios.create({
   baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 // Add token to requests
 api.interceptors.request.use(
   (config) => {
-    // If request data is FormData, remove manual Content-Type so browser sets correct boundary
-    if (config.data instanceof FormData) {
-      delete config.headers['Content-Type'];
+    // If request data is FormData, set Content-Type to false so Axios omits it and browser sets multipart/form-data with boundary
+    const isFormData = config.data && (
+      (typeof FormData !== 'undefined' && config.data instanceof FormData) ||
+      config.data.constructor?.name === 'FormData' ||
+      config.data.toString?.() === '[object FormData]' ||
+      typeof config.data.append === 'function'
+    );
+
+    if (isFormData) {
+      if (config.headers?.set) {
+        config.headers.set('Content-Type', false);
+      } else if (config.headers) {
+        config.headers['Content-Type'] = false;
+      }
     }
 
     // Don't add token to login endpoint

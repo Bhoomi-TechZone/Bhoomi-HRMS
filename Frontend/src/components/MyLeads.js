@@ -4,7 +4,7 @@ import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import './MyLeads.css';
 
-const STATUS_OPTIONS = ['New', 'Connected', 'Interested', 'Follow-up', 'Not Connected', 'Not Interested', 'Converted'];
+const STATUS_OPTIONS = ['New', 'Connected', 'Interested', 'Follow-up', 'Not Connected', 'Not Interested', 'Converted', 'Invalid', 'International'];
 const FOLLOW_UP_TIME_OPTIONS = Array.from({ length: 24 }, (_, i) => {
   const hour = Math.floor(i / 2) || 12;
   const minutes = i % 2 === 0 ? '00' : '30';
@@ -19,7 +19,7 @@ const META_STATUS_COLORS = {
   'Follow-up': '#6b21a8',
   'Converted': '#166534',
   'Not Interested': '#991b1b',
-  'Closed': '#334155'
+  'Closed': '#334155', 'Invalid': '#991b1b', 'International': '#0e7490'
 };
 
 const META_STATUS_BG_COLORS = {
@@ -30,7 +30,7 @@ const META_STATUS_BG_COLORS = {
   'Follow-up': '#f3e8ff',
   'Converted': '#dcfce7',
   'Not Interested': '#fee2e2',
-  'Closed': '#f1f5f9'
+  'Closed': '#f1f5f9', 'Invalid': '#fee2e2', 'International': '#ecfeff'
 };
 
 // Cutoff timestamp: old leads data (before this cutoff) is strictly visible ONLY to Admin
@@ -722,7 +722,7 @@ function MyLeads() {
     const followUp = statsLeads.filter(l => {
       const hasFollowUpDate = l.followUpDate || l.nextFollowUp;
       const isCompleted = l.followUpCompleted;
-      const isActiveLead = !['Converted', 'Closed', 'Not Interested'].includes(l.status);
+      const isActiveLead = !['Converted', 'Closed', 'Not Interested', 'Invalid'].includes(l.status);
       return (hasFollowUpDate && !isCompleted && isActiveLead) || l.status === 'Follow-up';
     }).length;
     const notInterested = statsLeads.filter(l => l.status === 'Not Interested').length;
@@ -840,7 +840,7 @@ function MyLeads() {
 
       const hasPendingFollowUp = !!(lead.followUpDate || lead.nextFollowUp)
         && !lead.followUpCompleted
-        && !['Converted', 'Closed', 'Not Interested', 'Lost'].includes(lead.status);
+        && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Invalid'].includes(lead.status);
 
       const matchesStatus = !filterStatus || (
         filterStatus === 'Follow-up'
@@ -971,7 +971,7 @@ function MyLeads() {
   const getStatusClass = (status) => ({
     'New': 'status-new', 'Contacted': 'status-contacted', 'Qualified': 'status-qualified',
     'Interested': 'status-interested', 'Follow-up': 'status-follow-up',
-    'Converted': 'status-converted', 'Not Interested': 'status-not-interested', 'Closed': 'status-closed',
+    'Converted': 'status-converted', 'Not Interested': 'status-not-interested', 'Closed': 'status-closed', 'Invalid': 'status-invalid', 'International': 'status-international',
   }[status] || 'status-new');
 
   const getAssigneeName = (lead) => {
@@ -986,7 +986,7 @@ function MyLeads() {
   const getEffectiveStatus = (lead) => {
     const hasPendingFollowUp = !!(lead?.followUpDate || lead?.nextFollowUp)
       && !lead?.followUpCompleted
-      && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client'].includes(lead?.status);
+      && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid'].includes(lead?.status);
     return hasPendingFollowUp ? 'Follow-up' : (lead?.status || 'New');
   };
 
@@ -1570,7 +1570,7 @@ function MyLeads() {
     }
 
     const resolvedStatus = leadEditForm.followUpDate
-      && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client'].includes(leadEditForm.status)
+      && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid'].includes(leadEditForm.status)
       ? 'Follow-up'
       : leadEditForm.status;
 
@@ -1659,7 +1659,7 @@ function MyLeads() {
     }
 
     const resolvedStatus = metaEditForm.followUpDate
-      && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client'].includes(metaEditForm.status)
+      && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid'].includes(metaEditForm.status)
       ? 'Follow-up'
       : metaEditForm.status;
 
@@ -4265,6 +4265,8 @@ function MyLeads() {
                     'Converted': { bg: '#d1fae5', color: '#047857', dot: '#059669' },
                     'Not Interested': { bg: '#fee2e2', color: '#dc2626', dot: '#ef4444' },
                     'Closed': { bg: '#f1f5f9', color: '#475569', dot: '#64748b' },
+                    'Invalid': { bg: '#fee2e2', color: '#991b1b', dot: '#dc2626' },
+                    'International': { bg: '#ecfeff', color: '#0e7490', dot: '#06b6d4' },
                   };
                   const displayStatus = getEffectiveStatus(lead);
                   const st = statusColors[displayStatus] || statusColors['New'];

@@ -689,7 +689,7 @@ router.put('/:id', auth, async (req, res) => {
 
       if (status) {
         const resolvedStatus = (nextFollowUp && nextFollowUp.trim() &&
-          !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client'].includes(status || lead.status))
+          !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid'].includes(status || lead.status))
           ? 'Follow-up' : status;
 
         if (resolvedStatus && resolvedStatus !== lead.status) {
@@ -842,7 +842,7 @@ router.put('/:id', auth, async (req, res) => {
     }
 
     // Update status
-    const resolvedStatus = (nextFollowUp && nextFollowUp.trim() && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client'].includes(status || lead.status))
+    const resolvedStatus = (nextFollowUp && nextFollowUp.trim() && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid'].includes(status || lead.status))
       ? 'Follow-up'
       : status;
 
@@ -1087,7 +1087,7 @@ router.get('/followups/due', auth, async (req, res) => {
     const query = {
       nextFollowUp: { $ne: null, $lte: now },
       followUpCompleted: { $ne: true },
-      status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost'] },
+      status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost', 'Invalid'] },
       movedToPipeline: { $ne: true }
     };
 
