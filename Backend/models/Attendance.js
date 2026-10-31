@@ -47,6 +47,26 @@ const attendanceSchema = new mongoose.Schema({
     duration: {
       type: Number,
       default: 0
+    },
+    scheduledStartTime: {
+      type: String,
+      default: null
+    },
+    scheduledEndTime: {
+      type: String,
+      default: null
+    },
+    allowedDuration: {
+      type: Number,
+      default: 0
+    },
+    exceededMinutes: {
+      type: Number,
+      default: 0
+    },
+    exceededSeconds: {
+      type: Number,
+      default: 0
     }
   }],
   status: {

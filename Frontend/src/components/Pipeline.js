@@ -651,7 +651,6 @@ const isValidCompanyDomain = (domain) => {
 const DEFAULT_PIPELINES = [
     { id: 'Lost', name: 'Lost', badgeClass: 'lost', createdAt: '2026-10-17T00:00:00+05:30' },
     { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' },
-    { id: 'Indias', name: 'Indias', badgeClass: 'custom', createdAt: '2026-10-17T00:00:00+05:30' },
     { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' },
     { id: 'Sales Pipeline', name: 'Sales Pipeline', badgeClass: 'hot', createdAt: '2026-09-01T00:00:00+05:30' },
     { id: 'Enterprise Pipeline', name: 'Enterprise Pipeline', badgeClass: 'cold', createdAt: '2026-09-01T00:00:00+05:30' },
@@ -663,7 +662,6 @@ const DEFAULT_PIPELINES = [
 const DEFAULT_STAGES = [
     { id: 'Lost', name: 'Lost', badgeClass: 'lost', createdAt: '2026-10-17T00:00:00+05:30' },
     { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' },
-    { id: 'Indias', name: 'Indias', badgeClass: 'custom', createdAt: '2026-10-17T00:00:00+05:30' },
     { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' },
     { id: 'Hot', name: 'Hot', badgeClass: 'hot', createdAt: '2026-09-01T00:00:00+05:30' },
     { id: 'Old', name: 'Old', badgeClass: 'old', createdAt: '2026-09-01T00:00:00+05:30' },
@@ -674,7 +672,6 @@ const DEFAULT_STAGES = [
 const PIPELINE_OPTIONS = [
     'Lost',
     'New Lead',
-    'Indias',
     'Initial',
     'Sales Pipeline',
     'Enterprise Pipeline',
@@ -2873,7 +2870,7 @@ function Pipeline() {
         }
 
         // 2. Core active stages in the post-cutoff system must always be visible
-        if (name === 'lost' || name === 'won' || name === 'new lead' || name === 'initial' || name === 'indias') {
+        if (name === 'lost' || name === 'won' || name === 'new lead' || name === 'initial') {
             return true;
         }
 
@@ -2937,9 +2934,7 @@ function Pipeline() {
                     if (!filtered.some(p => (p.name || p.id || '').toLowerCase() === 'new lead') && !deleted.includes('new lead')) {
                         filtered = [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' }, ...filtered];
                     }
-                    if (!filtered.some(p => (p.name || p.id || '').toLowerCase() === 'indias') && !deleted.includes('indias')) {
-                        filtered = [...filtered, { id: 'Indias', name: 'Indias', badgeClass: 'custom', createdAt: '2026-10-17T00:00:00+05:30' }];
-                    }
+
                     if (!filtered.some(p => (p.name || p.id || '').toLowerCase() === 'initial') && !deleted.includes('initial')) {
                         filtered = [...filtered, { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' }];
                     }
@@ -2952,21 +2947,19 @@ function Pipeline() {
     });
     const [stages, setStages] = useState(() => {
         try {
+            const deleted = JSON.parse(localStorage.getItem('crm_deleted_pipelines') || localStorage.getItem('crm_deleted_stages') || '[]');
             const saved = localStorage.getItem('crm_stages');
             if (saved) {
                 const parsed = JSON.parse(saved);
                 if (Array.isArray(parsed) && parsed.length > 0) {
-                    let list = [...parsed];
-                    if (!list.some(s => (s.name || s.id || '').toLowerCase() === 'lost')) {
+                    let list = parsed.filter(s => !deleted.includes((s.name || s.id || '').toLowerCase()));
+                    if (!list.some(s => (s.name || s.id || '').toLowerCase() === 'lost') && !deleted.includes('lost')) {
                         list = [{ id: 'Lost', name: 'Lost', badgeClass: 'lost', createdAt: '2026-10-17T00:00:00+05:30' }, ...list];
                     }
-                    if (!list.some(s => (s.name || s.id || '').toLowerCase() === 'new lead')) {
+                    if (!list.some(s => (s.name || s.id || '').toLowerCase() === 'new lead') && !deleted.includes('new lead')) {
                         list = [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' }, ...list];
                     }
-                    if (!list.some(s => (s.name || s.id || '').toLowerCase() === 'indias')) {
-                        list = [...list, { id: 'Indias', name: 'Indias', badgeClass: 'custom', createdAt: '2026-10-17T00:00:00+05:30' }];
-                    }
-                    if (!list.some(s => (s.name || s.id || '').toLowerCase() === 'initial')) {
+                    if (!list.some(s => (s.name || s.id || '').toLowerCase() === 'initial') && !deleted.includes('initial')) {
                         list = [...list, { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' }];
                     }
                     return list;
@@ -2990,9 +2983,7 @@ function Pipeline() {
                     if (!list.some(p => p.toLowerCase() === 'new lead') && !deleted.includes('new lead')) {
                         list = ['New Lead', ...list];
                     }
-                    if (!list.some(p => p.toLowerCase() === 'indias') && !deleted.includes('indias')) {
-                        list = [...list, 'Indias'];
-                    }
+
                     if (!list.some(p => p.toLowerCase() === 'initial') && !deleted.includes('initial')) {
                         list = [...list, 'Initial'];
                     }
@@ -3838,9 +3829,7 @@ function Pipeline() {
                         if (!cleanedPipelines.some(p => (p.name || p.id || '').toLowerCase() === 'new lead') && !deletedPipelines.includes('new lead')) {
                             cleanedPipelines = [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' }, ...cleanedPipelines];
                         }
-                        if (!cleanedPipelines.some(p => (p.name || p.id || '').toLowerCase() === 'indias') && !deletedPipelines.includes('indias')) {
-                            cleanedPipelines = [...cleanedPipelines, { id: 'Indias', name: 'Indias', badgeClass: 'custom', createdAt: '2026-10-17T00:00:00+05:30' }];
-                        }
+
                         if (!cleanedPipelines.some(p => (p.name || p.id || '').toLowerCase() === 'initial') && !deletedPipelines.includes('initial')) {
                             cleanedPipelines = [...cleanedPipelines, { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' }];
                         }
@@ -3855,9 +3844,7 @@ function Pipeline() {
                         if (!cleanedStages.some(s => (s.name || s.id || '').toLowerCase() === 'new lead')) {
                             cleanedStages = [{ id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' }, ...cleanedStages];
                         }
-                        if (!cleanedStages.some(s => (s.name || s.id || '').toLowerCase() === 'indias')) {
-                            cleanedStages = [...cleanedStages, { id: 'Indias', name: 'Indias', badgeClass: 'custom', createdAt: '2026-10-17T00:00:00+05:30' }];
-                        }
+
                         if (!cleanedStages.some(s => (s.name || s.id || '').toLowerCase() === 'initial')) {
                             cleanedStages = [...cleanedStages, { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: '2026-10-17T00:00:00+05:30' }];
                         }
@@ -3872,9 +3859,7 @@ function Pipeline() {
                         if (!cleanedPipelineOptions.some(p => p.toLowerCase() === 'new lead') && !deletedPipelines.includes('new lead')) {
                             cleanedPipelineOptions = ['New Lead', ...cleanedPipelineOptions];
                         }
-                        if (!cleanedPipelineOptions.some(p => p.toLowerCase() === 'indias') && !deletedPipelines.includes('indias')) {
-                            cleanedPipelineOptions = [...cleanedPipelineOptions, 'Indias'];
-                        }
+
                         if (!cleanedPipelineOptions.some(p => p.toLowerCase() === 'initial') && !deletedPipelines.includes('initial')) {
                             cleanedPipelineOptions = [...cleanedPipelineOptions, 'Initial'];
                         }
@@ -8281,27 +8266,31 @@ function Pipeline() {
 
             try {
                 localStorage.setItem('crm_pipelines', JSON.stringify(remaining));
+                localStorage.setItem('crm_stages', JSON.stringify(remainingStages));
                 localStorage.setItem('crm_pipeline_options', JSON.stringify(remainingOptions));
                 localStorage.setItem('crm_deleted_pipelines', JSON.stringify(uniqueDeleted));
+                localStorage.setItem('crm_deleted_stages', JSON.stringify(uniqueDeleted));
             } catch (err) { }
 
             const fallbackPipeline = remaining.length > 0 ? remaining[0].name : '';
-            setDeals(prev => prev.map(d => (d.pipeline === pipelineName || d.pipeline === pipelineId ? { ...d, pipeline: fallbackPipeline } : d)));
+            setDeals(prev => prev.map(d => (d.pipeline === pipelineName || d.pipeline === pipelineId || d.stage === pipelineName || d.stage === pipelineId ? { ...d, pipeline: fallbackPipeline, stage: fallbackPipeline } : d)));
             setActiveColMenuId(null);
 
-            // Persist fallback pipeline to backend for affected deals & sync deletedPipelines to database
+            // Persist fallback pipeline to backend for affected deals & sync deletedPipelines & deletedStages to database
             try {
-                const affected = deals.filter(d => d.pipeline === pipelineName || d.pipeline === pipelineId);
+                const affected = deals.filter(d => d.pipeline === pipelineName || d.pipeline === pipelineId || d.stage === pipelineName || d.stage === pipelineId);
                 for (const d of affected) {
                     if (d._id && !d._id.toString().startsWith('deal-')) {
-                        await api.put(`/deals/${d._id}`, { pipeline: fallbackPipeline });
+                        await api.put(`/deals/${d._id}`, { pipeline: fallbackPipeline, stage: fallbackPipeline });
                     }
                 }
 
                 await api.post('/pipeline-configs/save', {
                     pipelines: remaining,
+                    stages: remainingStages,
                     pipelineOptions: remainingOptions,
-                    deletedPipelines: uniqueDeleted
+                    deletedPipelines: uniqueDeleted,
+                    deletedStages: uniqueDeleted
                 });
             } catch (err) {
                 console.warn('Save deleted pipeline to backend:', err.message);
@@ -9040,7 +9029,6 @@ function Pipeline() {
             return [
                 { id: 'Lost', name: 'Lost', badgeClass: 'lost', createdAt: DATA_CUTOFF_DATE.toISOString() },
                 { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() },
-                { id: 'Indias', name: 'Indias', badgeClass: 'custom', createdAt: DATA_CUTOFF_DATE.toISOString() },
                 { id: 'Initial', name: 'Initial', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }
             ];
         }
@@ -9057,7 +9045,7 @@ function Pipeline() {
         });
         let list = Array.from(set);
         if (list.length === 0) {
-            return ['Lost', 'New Lead', 'Indias', 'Initial'];
+            return ['Lost', 'New Lead', 'Initial'];
         }
         return list;
     }, [visiblePipelines, pipelineOptions, isStageCreatedOnOrAfterCutoff]);

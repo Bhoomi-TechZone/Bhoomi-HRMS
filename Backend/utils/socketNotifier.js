@@ -1,5 +1,12 @@
 const Notification = require('../models/Notification');
 
+// Allowed enum types from Notification model
+const VALID_TYPES = new Set([
+  'Task', 'Leave', 'Attendance', 'Announcement', 'Project', 'General',
+  'Deal', 'Contact', 'Company', 'CRM', 'Client', 'Follow-up', 'Followup',
+  'Lead', 'Payment', 'Invoice', 'Proposal'
+]);
+
 /**
  * Sends a notification by saving it to DB and emitting via Socket.IO
  * 
@@ -7,17 +14,19 @@ const Notification = require('../models/Notification');
  * @param {String} userId - The MongoDB ObjectId of the user receiving the notification
  * @param {String} title - Notification title
  * @param {String} message - Notification message body
- * @param {String} type - Notification type (e.g., 'Task', 'Leave', 'Announcement', 'Project')
+ * @param {String} type - Notification type (e.g., 'Task', 'Leave', 'Announcement', 'Project', 'Payment')
  * @param {String} link - URL to navigate to when the notification is clicked
  */
 const sendNotification = async (io, userId, title, message, type = 'General', link = '') => {
   try {
+    const safeType = VALID_TYPES.has(type) ? type : 'General';
+
     // 1. Save to DB
     const notification = await Notification.create({
       user: userId,
       title,
       message,
-      type,
+      type: safeType,
       link
     });
 

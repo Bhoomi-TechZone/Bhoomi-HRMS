@@ -2598,60 +2598,6 @@ function Employees() {
                                   }}
                                 />
                               </div>
-
-                              {/* Lunch Time */}
-                              <div>
-                                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>
-                                  Lunch Time
-                                </label>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.8fr', gap: '4px' }}>
-                                  <select
-                                    value={parseTime12Hour(shift.lunchTime || '01:00 PM').hour}
-                                    onChange={(e) => {
-                                      const timeParts = parseTime12Hour(shift.lunchTime || '01:00 PM');
-                                      const newTime = formatTime12Hour(e.target.value, timeParts.minute, timeParts.period);
-                                      const newConfigs = [...shiftConfigs];
-                                      newConfigs[index].lunchTime = newTime;
-                                      setShiftConfigs(newConfigs);
-                                    }}
-                                    style={{ padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px' }}
-                                  >
-                                    {Array.from({ length: 12 }, (_, i) => {
-                                      const hour = String(i + 1).padStart(2, '0');
-                                      return <option key={hour} value={hour}>{hour}</option>;
-                                    })}
-                                  </select>
-                                  <select
-                                    value={parseTime12Hour(shift.lunchTime || '01:00 PM').minute}
-                                    onChange={(e) => {
-                                      const timeParts = parseTime12Hour(shift.lunchTime || '01:00 PM');
-                                      const newTime = formatTime12Hour(timeParts.hour, e.target.value, timeParts.period);
-                                      const newConfigs = [...shiftConfigs];
-                                      newConfigs[index].lunchTime = newTime;
-                                      setShiftConfigs(newConfigs);
-                                    }}
-                                    style={{ padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px' }}
-                                  >
-                                    {['00', '15', '30', '45'].map(minute => (
-                                      <option key={minute} value={minute}>{minute}</option>
-                                    ))}
-                                  </select>
-                                  <select
-                                    value={parseTime12Hour(shift.lunchTime || '01:00 PM').period}
-                                    onChange={(e) => {
-                                      const timeParts = parseTime12Hour(shift.lunchTime || '01:00 PM');
-                                      const newTime = formatTime12Hour(timeParts.hour, timeParts.minute, e.target.value);
-                                      const newConfigs = [...shiftConfigs];
-                                      newConfigs[index].lunchTime = newTime;
-                                      setShiftConfigs(newConfigs);
-                                    }}
-                                    style={{ padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px', fontWeight: '600' }}
-                                  >
-                                    <option value="AM">AM</option>
-                                    <option value="PM">PM</option>
-                                  </select>
-                                </div>
-                              </div>
                             </div>
                           </div>
                         ))}
@@ -2811,31 +2757,6 @@ function Employees() {
                               </div>
                               <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b' }}>
                                 Employees checking in after this time will be marked as late but still present.
-                              </p>
-                            </div>
-
-                            {/* Checkout Grace Period */}
-                            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
-                              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#374151', marginBottom: '8px' }}>
-                                Checkout Grace Period (Minutes)
-                              </label>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={attendanceConfig.checkoutGracePeriod || 0}
-                                  onChange={(e) => setAttendanceConfig({ ...attendanceConfig, checkoutGracePeriod: parseInt(e.target.value) || 0 })}
-                                  style={{
-                                    width: '100px',
-                                    padding: '8px 12px',
-                                    border: '1px solid #e2e8f0',
-                                    borderRadius: '6px',
-                                    fontSize: '13px'
-                                  }}
-                                />
-                              </div>
-                              <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b' }}>
-                                Time allowed after shift end before working hours calculation is capped.
                               </p>
                             </div>
                           </div>

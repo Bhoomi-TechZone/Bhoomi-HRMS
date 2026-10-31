@@ -211,13 +211,32 @@ const markMissedCheckouts = async (targetDate, label = 'manual') => {
 
         const reason = tooLong ? `${hoursOpen.toFixed(1)}h session` : 'shift ended';
 
+        // Auto-close any unended breaks so they don't remain open indefinitely
+        let updatedBreaks = rec.breaks;
+        if (Array.isArray(updatedBreaks) && updatedBreaks.length > 0) {
+          updatedBreaks = updatedBreaks.map(b => {
+            if (!b.endTime) {
+              const start = new Date(b.startTime);
+              const allowedMins = b.allowedDuration || (b.breakType === 'Lunch Break' ? 30 : 15);
+              const end = new Date(start.getTime() + allowedMins * 60 * 1000);
+              return {
+                ...(b.toObject ? b.toObject() : b),
+                endTime: end,
+                duration: allowedMins
+              };
+            }
+            return b;
+          });
+        }
+
         await Attendance.findByIdAndUpdate(rec._id, {
           $set: {
             logoutTime:     null,
             workingHours:   0,
             status:         'absent',
             logoutMethod:   'not-checkout',
-            markedAbsentAt: now
+            markedAbsentAt: now,
+            breaks:         updatedBreaks
           }
         });
 

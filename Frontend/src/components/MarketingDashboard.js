@@ -1,3 +1,4 @@
+import { getBreakScheduleInfo, getBreakWindowStatus, calculateActiveBreakStatus, calculateBreakDeductionSecs, formatDurationHMS, getBreakExceededSeconds, formatExceededTime } from '../utils/breakUtils';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Megaphone, Target, CheckCircle2, Camera, Loader2, Clock, LogIn, LogOut, Timer, BarChart2, RefreshCw, CalendarDays, Activity, FileText, XCircle, Hourglass, AlertTriangle, Coffee, Utensils } from 'lucide-react';
@@ -264,11 +265,15 @@ function MarketingDashboard() {
           });
         }
 
+        const activeStatus = calculateActiveBreakStatus(activeBreak, shiftConfig, elapsed);
+        let isExceeded = activeStatus ? activeStatus.isExceeded : false;
+
         const totalUsedSecs = pastStandardBreakSecs + elapsed;
         const limitMins = breakLimits?.totalBreakLimit || 60;
         const limitSecs = limitMins * 60;
+        if (totalUsedSecs > limitSecs) isExceeded = true;
 
-        if (totalUsedSecs > limitSecs) {
+        if (isExceeded) {
           if (!breakAudioRef.current) {
             const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.toUpperCase().indexOf('MAC') >= 0;
             const soundUrl = isMac ? '/sounds/BreakAlarm.m4r' : '/sounds/BreakAlarm.mp3';
@@ -362,7 +367,7 @@ function MarketingDashboard() {
       const shiftStart = parseShiftStartTime();
       const shiftEnd = parseShiftEndTime();
       let endTime = todayAttendance.logoutTime ? new Date(todayAttendance.logoutTime) : new Date();
-      if (shiftEnd && (endTime > shiftEnd || endTime >= new Date(shiftEnd.getTime() - 2 * 60000))) {
+      if (shiftEnd && endTime > shiftEnd) {
         endTime = shiftEnd;
       }
 
@@ -461,7 +466,7 @@ function MarketingDashboard() {
         const shiftStart = parseShiftStartTime();
         const shiftEnd = parseShiftEndTime();
         let endTime = todayAttendance.logoutTime ? new Date(todayAttendance.logoutTime) : new Date();
-        if (shiftEnd && (endTime > shiftEnd || endTime >= new Date(shiftEnd.getTime() - 2 * 60000))) {
+        if (shiftEnd && endTime > shiftEnd) {
           endTime = shiftEnd;
         }
 
@@ -1657,6 +1662,37 @@ function MarketingDashboard() {
                   />
                 </div>
 
+                {(() => {
+                  const winStatus = getBreakWindowStatus(breakForm.type, shiftConfig);
+                  if (!winStatus || !winStatus.info) return null;
+                  if (winStatus.windowStatus === 'ended') {
+                    return (
+                      <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px', fontSize: '13px', color: '#b91c1c' }}>
+                        <strong>⛔ Break Window Closed</strong><br />
+                        {winStatus.message}
+                      </div>
+                    );
+                  }
+                  if (winStatus.windowStatus === 'early') {
+                    return (
+                      <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px', fontSize: '13px', color: '#92400e' }}>
+                        <strong>🔒 Break Window Not Started</strong><br />
+                        {winStatus.message}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px', fontSize: '13px', color: '#166534' }}>
+                      <div style={{ fontWeight: 700, marginBottom: '3px' }}>
+                        ⏰ Shift Window: {winStatus.info.startStr} – {winStatus.info.endStr}
+                      </div>
+                      <div style={{ fontSize: '12.5px', color: '#15803d' }}>
+                        {winStatus.message}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {(breakForm.type === 'Briefing/Meeting' || breakForm.type === 'Breifing/Meeting' || breakForm.type === 'Other') && (
                   <div style={{ marginBottom: '20px' }}>
                     <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>Reason <span style={{ color: '#ef4444' }}>*</span></label>
@@ -1673,7 +1709,30 @@ function MarketingDashboard() {
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '28px' }}>
                   <button type="button" onClick={() => setShowBreakModal(false)} style={{ padding: '10px 22px', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '10px', color: '#64748b', cursor: 'pointer', fontWeight: 600, fontSize: '14px' }}>Cancel</button>
-                  <button type="submit" style={{ padding: '10px 22px', border: 'none', background: '#f59e0b', borderRadius: '10px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '14px', boxShadow: '0 2px 8px rgba(245,158,11,0.25)' }}>Start Break</button>
+                  {(() => {
+                    const ws = getBreakWindowStatus(breakForm.type, shiftConfig);
+                    const isDisabled = ws && !ws.canStart;
+                    return (
+                      <button
+                        type="submit"
+                        disabled={isDisabled}
+                        style={{
+                          padding: '10px 22px',
+                          border: 'none',
+                          background: isDisabled ? '#94a3b8' : '#f59e0b',
+                          borderRadius: '10px',
+                          color: '#fff',
+                          cursor: isDisabled ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          fontSize: '14px',
+                          boxShadow: isDisabled ? 'none' : '0 2px 8px rgba(245,158,11,0.25)',
+                          opacity: isDisabled ? 0.7 : 1
+                        }}
+                      >
+                        Start Break
+                      </button>
+                    );
+                  })()}
                 </div>
               </form>
             </div>
@@ -2045,6 +2104,60 @@ function MarketingDashboard() {
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
                   Today's Taken Breaks ({breakDetailsModal.breaks?.length || 0})
                 </div>
+                {(() => {
+                  const bList = breakDetailsModal?.breaks || todayAttendance?.breaks || [];
+                  const penaltyList = [];
+                  let totalSecs = 0;
+                  bList.forEach(b => {
+                    const excSecs = getBreakExceededSeconds(b, typeof shiftConfig !== 'undefined' ? shiftConfig : null);
+                    if (excSecs > 0) {
+                      totalSecs += excSecs;
+                      penaltyList.push({
+                        type: b.breakType === 'Tea Break' ? 'Refreshment Break' : (b.breakType || 'Break'),
+                        excSecs,
+                        formatted: formatExceededTime(excSecs)
+                      });
+                    }
+                  });
+                  if (totalSecs <= 0) return null;
+                  return (
+                    <div style={{
+                      padding: '12px 14px',
+                      background: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      borderRadius: '10px',
+                      marginBottom: '12px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: penaltyList.length > 0 ? '8px' : '0' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#991b1b', fontSize: '12.5px', fontWeight: 700 }}>
+                          <span style={{ fontSize: '14px' }}>⚠️</span>
+                          <span>Break Penalties Breakdown</span>
+                        </div>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#dc2626' }}>
+                          Total Deducted: -{formatExceededTime(totalSecs)}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {penaltyList.map((p, idx) => (
+                          <div key={idx} style={{
+                            fontSize: '11px',
+                            background: '#ffffff',
+                            border: '1px solid #fca5a5',
+                            borderRadius: '6px',
+                            padding: '3px 8px',
+                            color: '#991b1b',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}>
+                            <span style={{ fontWeight: 600 }}>{p.type}:</span>
+                            <span style={{ fontWeight: 800, color: '#dc2626' }}>Exceeded {p.formatted}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {breakDetailsModal.breaks && breakDetailsModal.breaks.length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '235px', overflowY: 'auto', paddingRight: '6px' }}>
                     {breakDetailsModal.breaks.map((b, idx) => {
@@ -2082,7 +2195,17 @@ function MarketingDashboard() {
                             <div style={{ fontSize: '15px', fontWeight: 800, color: '#0f172a', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums' }}>
                               {formatDurationHMS(durSecs)}
                             </div>
-                            <div style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 600 }}>duration</div>
+                        {(() => {
+                          const excSecs = getBreakExceededSeconds(b, typeof shiftConfig !== 'undefined' ? shiftConfig : null);
+                          if (excSecs > 0) {
+                            return (
+                              <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700, marginTop: '2px' }}>
+                                +{formatExceededTime(excSecs)} exceeded
+                              </div>
+                            );
+                          }
+                          return <div style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 600 }}>duration</div>;
+                        })()}
                           </div>
                         </div>
                       );
@@ -2110,35 +2233,141 @@ function MarketingDashboard() {
         );
       })()}
 
-      {/* Active Break Glassmorphism Screen */}
-      {activeBreak && !hideBreakScreen && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 999999, background: 'rgba(255, 255, 255, 0.25)',
-          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', display: 'flex',
-          flexDirection: 'column', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.4s ease'
-        }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ marginBottom: '24px', opacity: 0.8 }}>
-              <Clock size={40} color="#334155" strokeWidth={1.5} />
+            {/* Active Break Glassmorphism Screen */}
+      {activeBreak && !hideBreakScreen && (() => {
+        const activeStatus = calculateActiveBreakStatus(activeBreak, shiftConfig, breakTimer);
+        const breakTitle = activeBreak.breakType || activeBreak.type || 'Break';
+        const displayType = breakTitle === 'Tea Break' ? 'Refreshment Break' : breakTitle;
+
+        return (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 999999,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(14px)',
+            WebkitBackdropFilter: 'blur(14px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            animation: 'fadeIn 0.3s ease',
+            padding: '20px'
+          }}>
+            <div style={{
+              background: '#ffffff',
+              borderRadius: '24px',
+              padding: '36px 44px',
+              boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.3)',
+              textAlign: 'center',
+              maxWidth: '520px',
+              width: '100%',
+              border: activeStatus?.isExceeded ? '2px solid #ef4444' : '1px solid #e2e8f0'
+            }}>
+              <div style={{ marginBottom: '16px', display: 'inline-flex', padding: '14px', borderRadius: '50%', background: activeStatus?.isExceeded ? '#fee2e2' : '#fef3c7' }}>
+                <Clock size={36} color={activeStatus?.isExceeded ? '#dc2626' : '#d97706'} strokeWidth={2} />
+              </div>
+
+              <h2 style={{ fontSize: '24px', color: '#0f172a', margin: '0 0 6px 0', fontWeight: 700 }}>
+                On Break: {displayType}
+              </h2>
+
+              {activeStatus?.scheduledStartTime && activeStatus?.scheduledEndTime && (
+                <p style={{ fontSize: '13.5px', color: '#64748b', margin: '0 0 16px 0', fontWeight: 500 }}>
+                  Window: <strong>{activeStatus.scheduledStartTime} – {activeStatus.scheduledEndTime}</strong>
+                  {activeStatus.allowedDurationMins ? ` • Allowed: ${activeStatus.allowedDurationMins} mins` : ''}
+                </p>
+              )}
+
+              <div style={{
+                fontSize: '56px',
+                fontWeight: '300',
+                color: activeStatus?.isExceeded ? '#dc2626' : '#0f172a',
+                fontVariantNumeric: 'tabular-nums',
+                margin: '12px 0 20px 0',
+                letterSpacing: '-1px',
+                fontFamily: "'Inter', monospace"
+              }}>
+                {new Date(breakTimer * 1000).toISOString().substr(11, 8)}
+              </div>
+
+              {activeStatus && (
+                <div style={{ marginBottom: '28px' }}>
+                  {activeStatus.isExceeded ? (
+                    <div style={{
+                      background: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      color: '#b91c1c',
+                      padding: '12px 18px',
+                      borderRadius: '12px',
+                      fontSize: '13.5px',
+                      fontWeight: 700,
+                      lineHeight: '1.45'
+                    }}>
+                      ⚠️ EXCEEDED BY {activeStatus.exceededMinutes} MIN!<br />
+                      <span style={{ fontSize: '12px', fontWeight: 500, color: '#991b1b' }}>
+                        This extra time is being deducted from your working hours.
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{
+                      background: '#ecfdf5',
+                      border: '1px solid #a7f3d0',
+                      color: '#047857',
+                      padding: '10px 16px',
+                      borderRadius: '20px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      display: 'inline-block'
+                    }}>
+                      ⏳ Time Remaining: {formatDurationHMS(activeStatus.remainingSecs)}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                <button
+                  onClick={handleBreakEnd}
+                  style={{
+                    padding: '12px 32px',
+                    background: '#ef4444',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '12px',
+                    fontSize: '15px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(239, 68, 68, 0.3)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#dc2626'}
+                  onMouseLeave={e => e.currentTarget.style.background = '#ef4444'}
+                >
+                  End Break Now
+                </button>
+                <button
+                  onClick={() => setHideBreakScreen(true)}
+                  style={{
+                    padding: '12px 24px',
+                    background: '#f1f5f9',
+                    color: '#475569',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#e2e8f0'}
+                  onMouseLeave={e => e.currentTarget.style.background = '#f1f5f9'}
+                >
+                  Minimize
+                </button>
+              </div>
             </div>
-            <h1 style={{ fontSize: '26px', color: '#0f172a', margin: '0 0 6px 0', fontWeight: 600, letterSpacing: '-0.3px' }}>On Break</h1>
-            <p style={{ fontSize: '15px', color: '#475569', margin: '0 0 36px 0', fontWeight: 500 }}>{activeBreak.type === 'Tea Break' ? 'Refreshment Break' : activeBreak.type}</p>
-            
-            <div style={{ fontSize: '64px', fontWeight: '300', color: '#0f172a', fontVariantNumeric: 'tabular-nums', margin: '0 0 44px 0', letterSpacing: '-1.5px' }}>
-               {new Date(breakTimer * 1000).toISOString().substr(11, 8)}
-            </div>
-            
-            <button 
-               onClick={() => setHideBreakScreen(true)}
-               style={{ padding: '12px 40px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '12px', fontSize: '15px', fontWeight: 600, cursor: 'pointer', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.25)', transition: 'all 0.2s ease' }}
-               onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 20px rgba(245, 158, 11, 0.35)'; e.currentTarget.style.background = '#d97706'; }}
-               onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(245, 158, 11, 0.25)'; e.currentTarget.style.background = '#f59e0b'; }}
-            >
-               Resume Work
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {/* Success Toast Portal */}
       {successToast && createPortal(
         <div style={{

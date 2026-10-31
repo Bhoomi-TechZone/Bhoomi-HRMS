@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import { Camera, XCircle, Loader2 } from 'lucide-react';
+import { getBreakExceededSeconds, formatExceededTime } from '../utils/breakUtils';
 
 const HoverSelfie = ({ record, type, fetchEmployeeSelfie, formatTime }) => {
   const [show, setShow] = useState(false);
@@ -774,11 +775,22 @@ function Attendance() {
     }, 0);
   };
 
-  const calculateBadgeBreakDuration = (breaks) => {
+  const calculateBadgeBreakDuration = (breaks, recordDate, isClosed) => {
     if (!breaks || breaks.length === 0) return 0;
+    const isToday = recordDate ? (new Date(recordDate).toDateString() === new Date().toDateString()) : false;
+
     return breaks.reduce((sum, b) => {
       const startMs = new Date(b.startTime).getTime();
-      const endMs = b.endTime ? new Date(b.endTime).getTime() : Date.now();
+      let endMs;
+      if (b.endTime) {
+        endMs = new Date(b.endTime).getTime();
+      } else if (isToday && !isClosed) {
+        endMs = Date.now();
+      } else {
+        // Capped for past days or closed sessions (max allowed duration or scheduled end)
+        const allowedMins = b.allowedDuration || (b.breakType === 'Lunch Break' ? 30 : 15);
+        endMs = startMs + (allowedMins * 60 * 1000);
+      }
       return sum + Math.max(0, Math.floor((endMs - startMs) / 1000));
     }, 0);
   };
@@ -1997,32 +2009,6 @@ function Attendance() {
                                 Employees checking in after this duration will be marked as late check-in.
                               </p>
                             </div>
-
-                            {/* Checkout Grace Period */}
-                            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
-                              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#374151', marginBottom: '8px' }}>
-                                Checkout Grace Period (Minutes)
-                              </label>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={attendanceConfig.checkoutGracePeriod || 0}
-                                  onChange={(e) => setAttendanceConfig({ ...attendanceConfig, checkoutGracePeriod: parseInt(e.target.value) || 0 })}
-                                  style={{
-                                    width: '100px',
-                                    padding: '8px 12px',
-                                    border: '1px solid #e2e8f0',
-                                    borderRadius: '6px',
-                                    fontSize: '13px'
-                                  }}
-                                />
-
-                              </div>
-                              <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b' }}>
-                                Time allowed after shift end before working hours calculation is capped.
-                              </p>
-                            </div>
                           </div>
                         </div>
 
@@ -3186,7 +3172,8 @@ function Attendance() {
                         fontWeight: 600,
                       }}>
                         {(() => {
-                          const totalSecs = calculateBadgeBreakDuration(record.breaks);
+                          const isClosed = Boolean(record.logoutTime || record.logoutMethod === 'not-checkout' || record.status === 'absent' || record.status === 'not-checkout');
+                          const totalSecs = calculateBadgeBreakDuration(record.breaks, record.date, isClosed);
                           const hasBreaks = record.breaks && record.breaks.length > 0;
                           return (
                             <span
@@ -3279,40 +3266,49 @@ function Attendance() {
                             textTransform: "uppercase",
                             cursor: (record.lateReason || record.editReason) ? "pointer" : "default",
                             border: record.editReason ? "1px solid rgba(0, 0, 0, 0.2)" : "none",
-                            background:
-                              record.editReason ? "#0f172a" :
-                                (record.breaks && record.breaks.some(b => !b.endTime)) ? "rgba(234,179,8,0.15)" :
-                                  record.status === 'present' ? "rgba(16,185,129,0.15)" :
-                                    record.status === 'absent' ? "rgba(239,68,68,0.15)" :
-                                      record.status === 'half-day' ? "rgba(245,158,11,0.15)" :
-                                        record.status === 'checked-in' ? "rgba(59,130,246,0.15)" :
-                                          record.status === 'late-checkin' ? "rgba(245,158,11,0.15)" :
-                                            record.status === 'early-checkin' ? "rgba(14,165,233,0.15)" :
-                                              record.status === 'not-checkout' ? "rgba(239,68,68,0.12)" :
-                                                "rgba(148,163,184,0.15)",
-                            color:
-                              record.editReason ? "#ffffff" :
-                                (record.breaks && record.breaks.some(b => !b.endTime)) ? "#ca8a04" :
-                                  record.status === 'present' ? "#10b981" :
-                                    record.status === 'absent' ? "#ef4444" :
-                                      record.status === 'half-day' ? "#f59e0b" :
-                                        record.status === 'checked-in' ? "#3b82f6" :
-                                          record.status === 'late-checkin' ? "#f59e0b" :
-                                            record.status === 'early-checkin' ? "#0ea5e9" :
-                                              record.status === 'not-checkout' ? "#ef4444" :
-                                                "#64748b",
+                            background: (() => {
+                              const isToday = record.date && (new Date(record.date).toDateString() === new Date().toDateString());
+                              const isActivelyOnBreak = isToday && !record.logoutTime && record.logoutMethod !== 'not-checkout' && (record.breaks && record.breaks.some(b => !b.endTime));
+                              if (record.editReason) return "#0f172a";
+                              if (isActivelyOnBreak) return "rgba(234,179,8,0.15)";
+                              if (record.status === 'present') return "rgba(16,185,129,0.15)";
+                              if (record.status === 'absent') return "rgba(239,68,68,0.15)";
+                              if (record.status === 'half-day') return "rgba(245,158,11,0.15)";
+                              if (record.status === 'checked-in') return "rgba(59,130,246,0.15)";
+                              if (record.status === 'late-checkin') return "rgba(245,158,11,0.15)";
+                              if (record.status === 'early-checkin') return "rgba(14,165,233,0.15)";
+                              if (record.status === 'not-checkout') return "rgba(239,68,68,0.12)";
+                              return "rgba(148,163,184,0.15)";
+                            })(),
+                            color: (() => {
+                              const isToday = record.date && (new Date(record.date).toDateString() === new Date().toDateString());
+                              const isActivelyOnBreak = isToday && !record.logoutTime && record.logoutMethod !== 'not-checkout' && (record.breaks && record.breaks.some(b => !b.endTime));
+                              if (record.editReason) return "#ffffff";
+                              if (isActivelyOnBreak) return "#ca8a04";
+                              if (record.status === 'present') return "#10b981";
+                              if (record.status === 'absent') return "#ef4444";
+                              if (record.status === 'half-day') return "#f59e0b";
+                              if (record.status === 'checked-in') return "#3b82f6";
+                              if (record.status === 'late-checkin') return "#f59e0b";
+                              if (record.status === 'early-checkin') return "#0ea5e9";
+                              if (record.status === 'not-checkout') return "#ef4444";
+                              return "#64748b";
+                            })(),
                           }}
                         >
-                          {(record.breaks && record.breaks.some(b => !b.endTime)) ? 'ON BREAK' :
-                            record.status === 'present' ? 'PRESENT' :
-                              record.status === 'absent' ? 'ABSENT' :
-                                record.status === 'half-day' ? 'HALF DAY' :
-                                  record.status === 'checked-in' ? 'CHECKED IN' :
-                                    record.status === 'late-checkin' ? 'LATE CHECK-IN' :
-                                      record.status === 'early-checkin' ? 'EARLY CHECK-IN' :
-                                        record.status === 'not-checkout' ? 'NOT CHECKOUT' :
-                                          record.status ? record.status :
-                                            'CHECK-IN'}
+                          {(() => {
+                            const isToday = record.date && (new Date(record.date).toDateString() === new Date().toDateString());
+                            const isActivelyOnBreak = isToday && !record.logoutTime && record.logoutMethod !== 'not-checkout' && (record.breaks && record.breaks.some(b => !b.endTime));
+                            if (isActivelyOnBreak) return 'ON BREAK';
+                            if (record.status === 'present') return 'PRESENT';
+                            if (record.status === 'absent') return 'ABSENT';
+                            if (record.status === 'half-day') return 'HALF DAY';
+                            if (record.status === 'checked-in') return 'CHECKED IN';
+                            if (record.status === 'late-checkin') return 'LATE CHECK-IN';
+                            if (record.status === 'early-checkin') return 'EARLY CHECK-IN';
+                            if (record.status === 'not-checkout') return 'NOT CHECKOUT';
+                            return record.status ? record.status : 'CHECK-IN';
+                          })()}
                         </span>
                       </td>
                       {canReadAttendance && (
@@ -4261,6 +4257,60 @@ function Attendance() {
 
               {/* Modal Content */}
               <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
+                {(() => {
+                  const bList = breakModalRecord.breaks || [];
+                  const penaltyList = [];
+                  let totalSecs = 0;
+                  bList.forEach(b => {
+                    const excSecs = getBreakExceededSeconds(b);
+                    if (excSecs > 0) {
+                      totalSecs += excSecs;
+                      penaltyList.push({
+                        type: b.breakType === 'Tea Break' ? 'Refreshment Break' : b.breakType,
+                        excSecs,
+                        formatted: formatExceededTime(excSecs)
+                      });
+                    }
+                  });
+                  if (totalSecs <= 0) return null;
+                  return (
+                    <div style={{
+                      padding: '12px 14px',
+                      background: '#fef2f2',
+                      border: '1px solid #fecaca',
+                      borderRadius: '10px',
+                      marginBottom: '14px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: penaltyList.length > 0 ? '8px' : '0' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#991b1b', fontSize: '13px', fontWeight: 700 }}>
+                          <span style={{ fontSize: '15px' }}>⚠️</span>
+                          <span>Break Penalties Breakdown</span>
+                        </div>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#dc2626' }}>
+                          Total Deducted: -{formatExceededTime(totalSecs)}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {penaltyList.map((p, idx) => (
+                          <div key={idx} style={{
+                            fontSize: '11px',
+                            background: '#ffffff',
+                            border: '1px solid #fca5a5',
+                            borderRadius: '6px',
+                            padding: '3px 8px',
+                            color: '#991b1b',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}>
+                            <span style={{ fontWeight: 600 }}>{p.type}:</span>
+                            <span style={{ fontWeight: 800, color: '#dc2626' }}>Exceeded {p.formatted}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
@@ -4316,6 +4366,11 @@ function Attendance() {
                           </td>
                           <td style={{ padding: '12px 12px', textAlign: 'right', fontWeight: 700, color: '#1e293b', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums' }}>
                             {formatDurationHMS(durSecs)}
+                            {b.exceededMinutes > 0 && (
+                              <div style={{ fontSize: '10.5px', color: '#dc2626', fontWeight: 600, marginTop: '2px' }}>
+                                +{b.exceededMinutes}m exceeded
+                              </div>
+                            )}
                           </td>
                           <td style={{ padding: '12px 12px', color: '#64748b', fontStyle: b.reason ? 'normal' : 'italic' }}>
                             {b.reason ? (

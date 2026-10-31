@@ -194,14 +194,16 @@ function ClientPayments() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [projectsRes, invoicesRes] = await Promise.allSettled([
+      const [projectsRes, invoicesRes, paymentsRes] = await Promise.allSettled([
         api.get('/projects'),
-        api.get('/invoices')
+        api.get('/invoices'),
+        api.get('/payment-records')
       ]);
 
       // Transform projects data to include payment information
       const projects = projectsRes.status === 'fulfilled' ? (projectsRes.value.data || []) : [];
       let dbInvoices = invoicesRes.status === 'fulfilled' ? (invoicesRes.value.data || []) : [];
+      const allPaymentRecords = paymentsRes.status === 'fulfilled' && Array.isArray(paymentsRes.value.data) ? paymentsRes.value.data : [];
 
       // If local storage has invoices not yet in db, sync them to backend once
       try {
@@ -249,15 +251,37 @@ function ClientPayments() {
 
       const paymentsWithData = projects.map((project, index) => {
         const baseAmount = project.projectValue || project.budget || project.totalAmount || 0;
-        const paidAmount = project.paidAmount || 0;
+        
+        // Sum paid amounts from all PaymentRecords linked to this project
+        const linkedRecords = allPaymentRecords.filter(r => {
+          if (r.projectId && project._id && String(r.projectId) === String(project._id)) return true;
+          if (r.projectId && project.projectId && String(r.projectId) === String(project.projectId)) return true;
+          const pName = (project.projectName || project.name || '').trim().toLowerCase();
+          const rPName = (r.projectName || '').trim().toLowerCase();
+          if (pName && rPName && pName === rPName) {
+            const cName = (project.clientName || '').trim().toLowerCase();
+            const rCName = (r.clientName || '').trim().toLowerCase();
+            if (!cName || !rCName || cName === rCName) return true;
+          }
+          return false;
+        });
+
+        const recordsPaid = linkedRecords
+          .filter(r => (r.paymentStatus || 'Paid').toLowerCase() === 'paid')
+          .reduce((sum, r) => sum + (parseFloat(String(r.paidAmount).replace(/[^0-9.-]/g, '')) || 0), 0);
+
+        const paidAmount = recordsPaid > 0 ? recordsPaid : (project.paidAmount || 0);
         
         // Derive payment status
         let derivedPaymentStatus = project.paymentStatus;
-        if (!derivedPaymentStatus) {
-          if (baseAmount <= 0) derivedPaymentStatus = 'Paid';
-          else if (paidAmount >= baseAmount) derivedPaymentStatus = 'Paid';
-          else if (paidAmount > 0) derivedPaymentStatus = 'Partially Paid';
-          else derivedPaymentStatus = 'Unpaid';
+        if (baseAmount <= 0) {
+          derivedPaymentStatus = paidAmount > 0 ? 'Paid' : 'Unpaid';
+        } else if (paidAmount >= baseAmount) {
+          derivedPaymentStatus = 'Paid';
+        } else if (paidAmount > 0) {
+          derivedPaymentStatus = 'Partially Paid';
+        } else {
+          derivedPaymentStatus = 'Unpaid';
         }
         
         return {

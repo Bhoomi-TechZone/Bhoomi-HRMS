@@ -204,29 +204,103 @@ const getCurrentShiftInfo = (employee, now = new Date()) => {
 // - Only the EXCEEDED portion of Lunch/Tea break is subtracted from working hours.
 
 /**
+ * Helper to get break window settings from shiftConfig
+ */
+const getBreakWindowDetails = (breakType, shiftConfig) => {
+  if (!shiftConfig) return null;
+  let startStr = null, endStr = null, allowAnytime = false;
+  if (breakType === 'Lunch Break') {
+    startStr = shiftConfig.lunchStartTime || shiftConfig.lunchTime;
+    endStr = shiftConfig.lunchEndTime;
+    allowAnytime = Boolean(shiftConfig.allowLunchAnytime);
+  } else if (breakType === '1st Refreshment Break') {
+    startStr = shiftConfig.refreshment1StartTime;
+    endStr = shiftConfig.refreshment1EndTime;
+    allowAnytime = Boolean(shiftConfig.allowRefreshment1Anytime);
+  } else if (breakType === '2nd Refreshment Break') {
+    startStr = shiftConfig.refreshment2StartTime;
+    endStr = shiftConfig.refreshment2EndTime;
+    allowAnytime = Boolean(shiftConfig.allowRefreshment2Anytime);
+  } else if (breakType === 'Tea Break' || breakType === 'Refreshment Break') {
+    startStr = shiftConfig.refreshment1StartTime;
+    endStr = shiftConfig.refreshment1EndTime;
+    allowAnytime = Boolean(shiftConfig.allowRefreshment1Anytime);
+  }
+  if (!startStr || !endStr) return null;
+  const sP = parseTimeString(startStr);
+  const eP = parseTimeString(endStr);
+  let windowDuration = (eP.hours * 60 + eP.minutes) - (sP.hours * 60 + sP.minutes);
+  if (windowDuration < 0) windowDuration += 1440;
+  return { startStr, endStr, allowAnytime, windowDuration };
+};
+
+/**
+ * Helper to calculate allowed break limit and exceeded break time
+ */
+const calculateBreakExceededTime = (breakObj, shiftConfig, now = new Date()) => {
+  const details = getBreakWindowDetails(breakObj.breakType, shiftConfig);
+  const start = new Date(breakObj.startTime);
+  const end = breakObj.endTime ? new Date(breakObj.endTime) : now;
+  const actualDurSecs = Math.max(0, Math.round((end - start) / 1000));
+  const actualDurMins = Math.max(0, Math.round((end - start) / 60000));
+
+  let allowedDuration = breakObj.allowedDuration || 0;
+  let exceededMinutes = 0;
+  let exceededSeconds = 0;
+  let windowDuration = details ? details.windowDuration : (breakObj.breakType === 'Lunch Break' ? 30 : 15);
+  let startStr = breakObj.scheduledStartTime || (details ? details.startStr : null);
+  let endStr = breakObj.scheduledEndTime || (details ? details.endStr : null);
+
+  if (endStr && (!details || !details.allowAnytime)) {
+    const eP = parseTimeString(endStr);
+    const schedEnd = new Date(start);
+    schedEnd.setHours(eP.hours, eP.minutes, 0, 0);
+    if (schedEnd < start && eP.hours < 12) {
+      schedEnd.setDate(schedEnd.getDate() + 1);
+    }
+    // Remaining allowed duration from start time
+    allowedDuration = Math.max(0, Math.round((schedEnd - start) / 60000));
+    allowedDuration = Math.min(windowDuration, allowedDuration);
+
+    if (end > schedEnd) {
+      exceededSeconds = Math.max(0, Math.round((end - schedEnd) / 1000));
+      exceededMinutes = Math.ceil(exceededSeconds / 60);
+    }
+  } else {
+    allowedDuration = allowedDuration || windowDuration;
+    const allowedSecs = allowedDuration * 60;
+    if (actualDurSecs > allowedSecs) {
+      exceededSeconds = actualDurSecs - allowedSecs;
+      exceededMinutes = Math.ceil(exceededSeconds / 60);
+    }
+  }
+
+  return { allowedDuration, exceededMinutes, exceededSeconds, windowDuration, actualDurMins, actualDurSecs, startStr, endStr };
+};
+
+/**
  * Calculate effective working hours:
  * - Starts counting from shiftStartTime (employee's shift start time) instead of loginTime.
  * - Only the actual break time taken is deducted (Lunch + Tea only; Other breaks are fully ignored).
- * - If user takes more than allotted break time, full actual break is deducted.
- * - The break limit (totalBreakLimit) is used only for enforcement/warning, not as a flat deduction.
+ * - If employee took break late as per configured schedule, allowed break is capped at scheduled end time.
+ * - If employee exceeded the break limit, the exceeded time is subtracted from working hours.
  * @param {Date} loginTime
  * @param {Date} logoutTime
  * @param {Array} breaks - array of break objects from attendance
  * @param {Object} config - { totalBreakLimit: number (mins) }
  * @param {Date|string} shiftEndTime
  * @param {Date|string} shiftStartTime
+ * @param {string} status
+ * @param {Object} shiftConfig
  * @returns {number} working hours
  */
-const calculateWorkingHours = (loginTime, logoutTime, breaks = [], config = {}, shiftEndTime = null, shiftStartTime = null, status = null) => {
+const calculateWorkingHours = (loginTime, logoutTime, breaks = [], config = {}, shiftEndTime = null, shiftStartTime = null, status = null, shiftConfig = null) => {
   const login = new Date(loginTime);
   let logout = new Date(logoutTime);
 
   const markLateAfterHrs = config && config.markLateAfter !== undefined ? config.markLateAfter : 0.25;
   const markLateAfterMs = markLateAfterHrs * 60 * 60 * 1000;
 
-  // Determine calculationStart:
-  // - If employee checkin is on or before markPresentTill (shiftStartTime + markLateAfter grace) and not late-checkin: starts from shiftStartTime.
-  // - If employee checkin is after markPresentTill (late) or status is 'late-checkin': starts immediately from loginTime.
   let calculationStart = login;
   if (shiftStartTime) {
     let parsedStart = null;
@@ -249,34 +323,38 @@ const calculateWorkingHours = (loginTime, logoutTime, breaks = [], config = {}, 
     }
   }
 
-  // If shiftEndTime is provided, cap logout time at shiftEndTime (or align if within 2 minutes of shiftEnd)
+  // If shiftEndTime is provided, cap logout time at shiftEndTime if exceeded
   if (shiftEndTime) {
     const shiftEnd = new Date(shiftEndTime);
-    if (logout > shiftEnd || logout >= new Date(shiftEnd.getTime() - 2 * 60000)) {
+    if (logout > shiftEnd) {
       logout = shiftEnd;
     }
   }
 
   const totalElapsedSecs = Math.max(0, Math.round((logout - calculationStart) / 1000));
-  let totalBreakMins = 0;
+  let totalDeductMins = 0;
 
   if (Array.isArray(breaks) && breaks.length > 0) {
     breaks.forEach(b => {
       if (b.breakType === 'Other' || b.breakType === 'Briefing/Meeting' || b.breakType === 'Breifing/Meeting') return; // ignore Other / Briefing/Meeting breaks entirely
 
-      let breakDur = 0;
-      if (b.endTime) {
-        breakDur = b.duration !== undefined ? b.duration
-          : Math.round((new Date(b.endTime) - new Date(b.startTime)) / 60000);
-      } else {
-        breakDur = Math.round((Date.now() - new Date(b.startTime)) / 60000);
+      const calc = calculateBreakExceededTime(b, shiftConfig, logout);
+      let exceededMins = (b.exceededMinutes !== undefined && b.exceededMinutes !== null) ? b.exceededMinutes : calc.exceededMinutes;
+      if (b.endTime && calc.exceededMinutes > 0) {
+        exceededMins = Math.max(exceededMins, calc.exceededMinutes);
       }
-      totalBreakMins += Math.max(0, breakDur);
+
+      let deductMins = 0;
+      if (exceededMins > 0) {
+        // Exceeded break limit: deduct scheduled window duration + exceeded minutes
+        deductMins = calc.windowDuration + exceededMins;
+      } else {
+        // Break ended on or before scheduled end: deduct actual break duration
+        deductMins = calc.actualDurMins;
+      }
+      totalDeductMins += Math.max(0, deductMins);
     });
   }
-
-  // Only deduct actual break time taken — break limit is for enforcement/warning only
-  const totalDeductMins = totalBreakMins;
 
   const totalElapsedMins = totalElapsedSecs / 60;
   const netWorkingMins = totalElapsedMins - totalDeductMins;
@@ -289,7 +367,7 @@ const calculateWorkingHours = (loginTime, logoutTime, breaks = [], config = {}, 
  * Async version: fetches AttendanceConfig for limits, then calls calculateWorkingHours.
  * Returns: 'absent' | 'half-day' | 'present'
  */
-const calculateFinalAttendanceStatus = async (loginTime, logoutTime, breaks = [], shiftEndTime = null, shiftStartTime = null) => {
+const calculateFinalAttendanceStatus = async (loginTime, logoutTime, breaks = [], shiftEndTime = null, shiftStartTime = null, shiftConfig = null) => {
   // No checkout → absent
   if (!logoutTime) return 'absent';
 
@@ -306,7 +384,17 @@ const calculateFinalAttendanceStatus = async (loginTime, logoutTime, breaks = []
     console.warn('[calculateFinalAttendanceStatus] Could not fetch AttendanceConfig, using defaults:', e.message);
   }
 
-  const workingHours = calculateWorkingHours(loginTime, logoutTime, breaksArr, config, shiftEndTime, shiftStartTime);
+  if (!shiftConfig && (shiftStartTime || shiftEndTime)) {
+    try {
+      const ShiftConfig = require('../models/ShiftConfig');
+      shiftConfig = await ShiftConfig.findOne({ startTime: shiftStartTime, endTime: shiftEndTime });
+      if (!shiftConfig) {
+        shiftConfig = await ShiftConfig.findOne({ type: 'morning' }) || await ShiftConfig.findOne({});
+      }
+    } catch (e) {}
+  }
+
+  const workingHours = calculateWorkingHours(loginTime, logoutTime, breaksArr, config, shiftEndTime, shiftStartTime, null, shiftConfig);
 
   if (workingHours < 4) return 'absent';
 
@@ -503,7 +591,7 @@ router.post('/break/start', auth, async (req, res) => {
                 message: `You cannot take Lunch break before ${lunchStartStr}. It is only permitted between ${lunchStartStr} and ${lunchEndStr} as per your shift.`
               });
             }
-            if (normCurrent > win.endMins) {
+            if (normCurrent >= win.endMins) {
               return res.status(400).json({
                 message: `Lunch break time has ended for your shift (ended at ${lunchEndStr}). You can no longer take Lunch break today.`
               });
@@ -522,7 +610,7 @@ router.post('/break/start', auth, async (req, res) => {
                 message: `You cannot take 1st Refreshment break before ${ref1StartStr}. It is only permitted between ${ref1StartStr} and ${ref1EndStr} as per your shift.`
               });
             }
-            if (normCurrent > win.endMins) {
+            if (normCurrent >= win.endMins) {
               return res.status(400).json({
                 message: `1st Refreshment break time has ended for your shift (ended at ${ref1EndStr}). You can no longer take 1st Refreshment break today.`
               });
@@ -541,7 +629,7 @@ router.post('/break/start', auth, async (req, res) => {
                 message: `You cannot take 2nd Refreshment break before ${ref2StartStr}. It is only permitted between ${ref2StartStr} and ${ref2EndStr} as per your shift.`
               });
             }
-            if (normCurrent > win.endMins) {
+            if (normCurrent >= win.endMins) {
               return res.status(400).json({
                 message: `2nd Refreshment break time has ended for your shift (ended at ${ref2EndStr}). You can no longer take 2nd Refreshment break today.`
               });
@@ -600,14 +688,46 @@ router.post('/break/start', auth, async (req, res) => {
       }
     }
 
+    let scheduledStartTime = null;
+    let scheduledEndTime = null;
+    let allowedDuration = 15;
+
+    if (shiftConfig) {
+      const details = getBreakWindowDetails(breakType, shiftConfig);
+      if (details) {
+        scheduledStartTime = details.startStr;
+        scheduledEndTime = details.endStr;
+        if (!details.allowAnytime && details.endStr) {
+          const eP = parseTimeString(details.endStr);
+          const schedEnd = new Date();
+          schedEnd.setHours(eP.hours, eP.minutes, 0, 0);
+          allowedDuration = Math.max(0, Math.round((schedEnd.getTime() - Date.now()) / 60000));
+          allowedDuration = Math.min(details.windowDuration, allowedDuration);
+        } else {
+          allowedDuration = details.windowDuration;
+        }
+      }
+    }
+
     attendance.breaks.push({
       breakType,
       reason: (reason && typeof reason === 'string' && reason.trim()) ? reason.trim() : (reason || undefined),
-      startTime: new Date()
+      startTime: new Date(),
+      scheduledStartTime,
+      scheduledEndTime,
+      allowedDuration,
+      exceededMinutes: 0
     });
 
     await attendance.save();
-    res.json({ message: 'Break started', break: attendance.breaks[attendance.breaks.length - 1] });
+    const newBreak = attendance.breaks[attendance.breaks.length - 1];
+    res.json({
+      message: 'Break started',
+      break: newBreak,
+      allowedDuration,
+      scheduledStartTime,
+      scheduledEndTime
+    });
   } catch (error) {
     console.error('Error starting break:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -636,12 +756,42 @@ router.post('/break/end', auth, async (req, res) => {
       return res.status(400).json({ message: 'No active break found' });
     }
 
+    const ShiftConfig = require('../models/ShiftConfig');
+    let shiftConfig = await ShiftConfig.findOne({ type: req.user.shiftType });
+    if (!shiftConfig && req.user.shiftStartTime && req.user.shiftEndTime) {
+      shiftConfig = await ShiftConfig.findOne({
+        startTime: req.user.shiftStartTime,
+        endTime: req.user.shiftEndTime
+      });
+    }
+    if (!shiftConfig) {
+      shiftConfig = await ShiftConfig.findOne({ type: 'morning' }) || await ShiftConfig.findOne({});
+    }
+
     const activeBreak = attendance.breaks[activeBreakIndex];
     activeBreak.endTime = new Date();
     activeBreak.duration = Math.round((activeBreak.endTime - activeBreak.startTime) / 60000); // duration in minutes
 
+    const calc = calculateBreakExceededTime(activeBreak, shiftConfig, activeBreak.endTime);
+    activeBreak.exceededMinutes = calc.exceededMinutes;
+    activeBreak.exceededSeconds = calc.exceededSeconds;
+    if (!activeBreak.allowedDuration && calc.allowedDuration) {
+      activeBreak.allowedDuration = calc.allowedDuration;
+    }
+    if (!activeBreak.scheduledStartTime && calc.startStr) {
+      activeBreak.scheduledStartTime = calc.startStr;
+    }
+    if (!activeBreak.scheduledEndTime && calc.endStr) {
+      activeBreak.scheduledEndTime = calc.endStr;
+    }
+
     await attendance.save();
-    res.json({ message: 'Break ended', break: activeBreak });
+    res.json({
+      message: 'Break ended',
+      break: activeBreak,
+      exceededMinutes: activeBreak.exceededMinutes,
+      duration: activeBreak.duration
+    });
   } catch (error) {
     console.error('Error ending break:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -2440,11 +2590,32 @@ router.post('/checkout', auth, async (req, res) => {
     const logoutTime = new Date();
 
     // Auto-close any active breaks when checking out
+    let checkoutShiftConfig = null;
+    try {
+      const ShiftConfig = require('../models/ShiftConfig');
+      checkoutShiftConfig = await ShiftConfig.findOne({ type: req.user.shiftType });
+      if (!checkoutShiftConfig && attendance.shiftStartTime && attendance.shiftEndTime) {
+        checkoutShiftConfig = await ShiftConfig.findOne({
+          startTime: attendance.shiftStartTime,
+          endTime: attendance.shiftEndTime
+        });
+      }
+      if (!checkoutShiftConfig) {
+        checkoutShiftConfig = await ShiftConfig.findOne({ type: 'morning' }) || await ShiftConfig.findOne({});
+      }
+    } catch (e) {}
+
     if (attendance.breaks && attendance.breaks.length > 0) {
       attendance.breaks.forEach(b => {
         if (!b.endTime) {
           b.endTime = logoutTime;
           b.duration = Math.round((logoutTime - b.startTime) / 60000);
+          const calc = calculateBreakExceededTime(b, checkoutShiftConfig, logoutTime);
+          b.exceededMinutes = calc.exceededMinutes;
+          b.exceededSeconds = calc.exceededSeconds;
+          if (!b.allowedDuration) b.allowedDuration = calc.allowedDuration;
+          if (!b.scheduledStartTime) b.scheduledStartTime = calc.startStr;
+          if (!b.scheduledEndTime) b.scheduledEndTime = calc.endStr;
         }
       });
     }
@@ -2473,10 +2644,10 @@ router.post('/checkout', auth, async (req, res) => {
     const maxCheckoutTime = new Date(historicalShiftInfo.shiftEnd.getTime() + (config.checkoutGracePeriod * 60000));
     const effectiveLogoutTime = logoutTime > maxCheckoutTime ? maxCheckoutTime : logoutTime;
 
-    const workingHours = calculateWorkingHours(attendance.loginTime, logoutTime, attendance.breaks, config, historicalShiftInfo.shiftEnd, historicalShiftInfo.shiftStart, attendance.status);
+    const workingHours = calculateWorkingHours(attendance.loginTime, logoutTime, attendance.breaks, config, historicalShiftInfo.shiftEnd, historicalShiftInfo.shiftStart, attendance.status, checkoutShiftConfig);
 
     // Calculate final status: needs checkout + working hours rule
-    const status = await calculateFinalAttendanceStatus(attendance.loginTime, logoutTime, attendance.breaks, historicalShiftInfo.shiftEnd, historicalShiftInfo.shiftStart);
+    const status = await calculateFinalAttendanceStatus(attendance.loginTime, logoutTime, attendance.breaks, historicalShiftInfo.shiftEnd, historicalShiftInfo.shiftStart, checkoutShiftConfig);
 
     attendance.logoutTime = logoutTime;
     attendance.workingHours = Math.round(Math.max(0, workingHours) * 100) / 100;
@@ -2722,12 +2893,20 @@ router.put('/update-status', auth, async (req, res) => {
         };
         const historicalShiftInfo = getCurrentShiftInfo(historicalShiftUser, logoutDate);
 
-        const hours = calculateWorkingHours(loginDate, logoutDate, attendance ? attendance.breaks : [], wcConfig, historicalShiftInfo?.shiftEnd, historicalShiftInfo?.shiftStart);
+        let editShiftConfig = null;
+        try {
+          const ShiftConfig = require('../models/ShiftConfig');
+          if (historicalShiftUser.shiftStartTime && historicalShiftUser.shiftEndTime) {
+            editShiftConfig = await ShiftConfig.findOne({ startTime: historicalShiftUser.shiftStartTime, endTime: historicalShiftUser.shiftEndTime });
+          }
+          if (!editShiftConfig) editShiftConfig = await ShiftConfig.findOne({ type: 'morning' }) || await ShiftConfig.findOne({});
+        } catch (e) {}
+        const hours = calculateWorkingHours(loginDate, logoutDate, attendance ? attendance.breaks : [], wcConfig, historicalShiftInfo?.shiftEnd, historicalShiftInfo?.shiftStart, null, editShiftConfig);
         updateData.workingHours = Math.round(hours * 100) / 100;
 
         // Auto-calculate status based on working hours and late arrival if status is not manually provided
         if (!status) {
-          updateData.status = await calculateFinalAttendanceStatus(loginDate, logoutDate, attendance ? attendance.breaks : [], historicalShiftInfo?.shiftEnd, historicalShiftInfo?.shiftStart);
+          updateData.status = await calculateFinalAttendanceStatus(loginDate, logoutDate, attendance ? attendance.breaks : [], historicalShiftInfo?.shiftEnd, historicalShiftInfo?.shiftStart, editShiftConfig);
         }
       } else if (workingHours !== undefined && workingHours !== null && workingHours !== '') {
         // Only use manual working hours if times are not both available
@@ -2841,12 +3020,20 @@ router.put('/:id', auth, async (req, res) => {
         };
         const historicalShiftInfo = getCurrentShiftInfo(historicalShiftUser, new Date(logoutTime));
 
-        const hours = calculateWorkingHours(attendance.loginTime, logoutTime, attendance.breaks, putConfig, historicalShiftInfo?.shiftEnd, historicalShiftInfo?.shiftStart);
+        let putShiftConfig = null;
+        try {
+          const ShiftConfig = require('../models/ShiftConfig');
+          if (historicalShiftUser.shiftStartTime && historicalShiftUser.shiftEndTime) {
+            putShiftConfig = await ShiftConfig.findOne({ startTime: historicalShiftUser.shiftStartTime, endTime: historicalShiftUser.shiftEndTime });
+          }
+          if (!putShiftConfig) putShiftConfig = await ShiftConfig.findOne({ type: 'morning' }) || await ShiftConfig.findOne({});
+        } catch (e) {}
+        const hours = calculateWorkingHours(attendance.loginTime, logoutTime, attendance.breaks, putConfig, historicalShiftInfo?.shiftEnd, historicalShiftInfo?.shiftStart, null, putShiftConfig);
         updateData.workingHours = Math.round(Math.max(0, hours) * 100) / 100;
 
         // Auto-calculate status based on working hours
         if (!status) {
-          updateData.status = await calculateFinalAttendanceStatus(attendance.loginTime, logoutTime, attendance.breaks, historicalShiftInfo?.shiftEnd, historicalShiftInfo?.shiftStart);
+          updateData.status = await calculateFinalAttendanceStatus(attendance.loginTime, logoutTime, attendance.breaks, historicalShiftInfo?.shiftEnd, historicalShiftInfo?.shiftStart, putShiftConfig);
         }
       }
     }

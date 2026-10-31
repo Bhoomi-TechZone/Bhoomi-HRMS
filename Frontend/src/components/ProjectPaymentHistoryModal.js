@@ -117,6 +117,23 @@ export default function ProjectPaymentHistoryModal({
 
       await api.post('/payment-records', payload);
 
+      // Proactively update project paidAmount & paymentStatus in DB
+      const targetProjId = project?._id || project?.id;
+      if (targetProjId) {
+        try {
+          const newEffectivePaid = paidFromRecords + numAmount;
+          let newStatus = 'Unpaid';
+          if (totalAmount > 0 && newEffectivePaid >= totalAmount) newStatus = 'Paid';
+          else if (newEffectivePaid > 0) newStatus = 'Partially Paid';
+          await api.put(`/projects/${targetProjId}`, {
+            paidAmount: newEffectivePaid,
+            paymentStatus: newStatus
+          });
+        } catch (projPutErr) {
+          console.warn('Update project paidAmount directly:', projPutErr.message);
+        }
+      }
+
       // Reset form
       setAmount('');
       setNotes('');
@@ -125,7 +142,7 @@ export default function ProjectPaymentHistoryModal({
       // Refresh records and parent list
       await fetchRecords();
       if (onPaymentUpdated) {
-        onPaymentUpdated();
+        await onPaymentUpdated();
       }
       alert('Payment record added successfully!');
     } catch (err) {
