@@ -126,29 +126,38 @@ router.get('/', auth, async (req, res) => {
       const strName = (typeof item === 'string' ? item : (item?.name || item?.id || '')).toLowerCase().trim();
       if (!strName) return false;
 
-      // If explicitly stamped with createdAt, check against cutoff date
+      // 1. If explicitly stamped with createdAt, check against cutoff date
       if (typeof item === 'object' && item !== null && item.createdAt) {
         return new Date(item.createdAt) >= DATA_CUTOFF_DATE;
       }
 
-      // If it's a known pre-cutoff legacy stage, strictly hide it
+      // 2. If it's a known pre-cutoff legacy stage, strictly hide it
       if (preCutoffOnlyStageNames.has(strName) || PRE_CUTOFF_LEGACY_STAGES.has(strName)) {
         return false;
       }
 
-      // If stage exists in post-cutoff data, it is visible
-      if (postCutoffStageNames.has(strName)) {
+      // 3. Base post-cutoff stages
+      if (strName === 'new lead' || strName === 'initial') {
         return true;
       }
 
-      // Otherwise, stage was not created on/after 17 Oct 2026: do not show
-      return false;
+      // 4. Any stage that is not a pre-cutoff legacy stage was created on or after 17 Oct 2026.
+      // All sales roles (Sales Head, Sales Manager, Sales Executives / Sales Role) must see all
+      // these stages, even if they currently do not have any deals in those stages!
+      return true;
     };
 
     const filteredConfig = config.toObject ? config.toObject() : { ...config };
 
     if (Array.isArray(filteredConfig.pipelines)) {
-      filteredConfig.pipelines = filteredConfig.pipelines.filter(isStageCreatedOnOrAfterCutoff);
+      filteredConfig.pipelines = filteredConfig.pipelines
+        .filter(isStageCreatedOnOrAfterCutoff)
+        .map(p => {
+          if (typeof p === 'object' && p !== null && !p.createdAt) {
+            return { ...p, createdAt: DATA_CUTOFF_DATE.toISOString() };
+          }
+          return p;
+        });
       if (filteredConfig.pipelines.length === 0) {
         filteredConfig.pipelines = [
           { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() },
@@ -157,7 +166,14 @@ router.get('/', auth, async (req, res) => {
       }
     }
     if (Array.isArray(filteredConfig.stages)) {
-      filteredConfig.stages = filteredConfig.stages.filter(isStageCreatedOnOrAfterCutoff);
+      filteredConfig.stages = filteredConfig.stages
+        .filter(isStageCreatedOnOrAfterCutoff)
+        .map(s => {
+          if (typeof s === 'object' && s !== null && !s.createdAt) {
+            return { ...s, createdAt: DATA_CUTOFF_DATE.toISOString() };
+          }
+          return s;
+        });
       if (filteredConfig.stages.length === 0) {
         filteredConfig.stages = [
           { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() },
@@ -166,7 +182,14 @@ router.get('/', auth, async (req, res) => {
       }
     }
     if (Array.isArray(filteredConfig.contactStages)) {
-      filteredConfig.contactStages = filteredConfig.contactStages.filter(isStageCreatedOnOrAfterCutoff);
+      filteredConfig.contactStages = filteredConfig.contactStages
+        .filter(isStageCreatedOnOrAfterCutoff)
+        .map(cs => {
+          if (typeof cs === 'object' && cs !== null && !cs.createdAt) {
+            return { ...cs, createdAt: DATA_CUTOFF_DATE.toISOString() };
+          }
+          return cs;
+        });
       if (filteredConfig.contactStages.length === 0) {
         filteredConfig.contactStages = [
           { id: 'New Lead', name: 'New Lead', badgeClass: 'new', createdAt: DATA_CUTOFF_DATE.toISOString() }

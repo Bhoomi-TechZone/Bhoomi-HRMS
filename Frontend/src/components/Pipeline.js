@@ -2916,22 +2916,11 @@ function Pipeline() {
       return true;
     }
 
-    // 3. Active stages created post-cutoff and used by deals or contacts from 17 Oct 2026
-    const hasPostCutoffDeal = (deals || []).some(d =>
-      getItemCreationDate(d) >= DATA_CUTOFF_DATE &&
-      ((d.pipeline || '').toLowerCase().trim() === name || (d.stage || '').toLowerCase().trim() === name)
-    );
-    if (hasPostCutoffDeal) return true;
-
-    const hasPostCutoffContact = (contacts || []).some(c =>
-      getItemCreationDate(c) >= DATA_CUTOFF_DATE &&
-      (c.leadStage || '').toLowerCase().trim() === name
-    );
-    if (hasPostCutoffContact) return true;
-
-    // Any stage without post-cutoff timestamp or post-cutoff deals/contacts was NOT created from 17 Oct 2026!
-    return false;
-  }, [isAdmin, adminDataViewMode, deals, contacts, PRE_CUTOFF_LEGACY_STAGES]);
+    // 3. All stages that are not in PRE_CUTOFF_LEGACY_STAGES were created from 17 Oct 2026 onwards.
+    // They MUST be shown to ALL sales roles (Sales Head, Sales Manager, and Sales Role users),
+    // even if the user currently has no deals of their own in those stages!
+    return true;
+  }, [isAdmin, adminDataViewMode, PRE_CUTOFF_LEGACY_STAGES]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [pipelines, setPipelines] = useState(() => {
