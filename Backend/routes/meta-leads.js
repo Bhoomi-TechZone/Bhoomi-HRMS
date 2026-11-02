@@ -421,6 +421,7 @@ router.get('/', auth, async (req, res) => {
 
     const [leads, total] = await Promise.all([
       MetaLead.find(query)
+        .select('-history')
         .populate('assignedTo', 'firstName lastName email employeeId')
         .sort(sort)
         .skip(skip)
@@ -892,6 +893,38 @@ router.get('/:id', auth, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
+
+// Get meta lead activity history on-demand
+router.get('/:id/history', auth, async (req, res) => {
+  try {
+    const lead = await MetaLead.findById(req.params.id)
+      .select('history createdTime createdAt pageName formName name phone')
+      .populate('history.by', 'firstName lastName email')
+      .lean();
+
+    if (!lead) return res.status(404).json({ message: 'Lead not found' });
+
+    let history = Array.isArray(lead.history) ? [...lead.history] : [];
+    const createdDate = lead.createdTime || lead.createdAt || new Date();
+    const hasCreationEntry = history.some(h =>
+      h.action && (h.action.toLowerCase().includes('created') || h.action.toLowerCase().includes('imported') || h.action.toLowerCase().includes('meta'))
+    );
+
+    if (!hasCreationEntry) {
+      history.unshift({
+        action: 'Meta Lead Received',
+        details: lead.pageName ? `Form submitted on ${lead.pageName}` : 'Lead received from Meta Ads',
+        date: createdDate,
+        by: 'Meta Webhook'
+      });
+    }
+
+    res.json({ history });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 
 /**
  * PATCH /api/meta-leads/:id

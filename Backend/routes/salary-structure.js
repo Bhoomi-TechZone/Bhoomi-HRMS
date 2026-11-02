@@ -138,7 +138,8 @@ router.put('/:id', auth, checkPermission('payroll', 'update'), async (req, res) 
       (Number(deductions?.advance) || 0) +
       (Number(deductions?.other) || 0);
 
-    const grossSalaryCalculated = basic;
+    const totalAllowances = (Number(allowances?.hra) || 0) + (Number(allowances?.da) || 0) + (Number(allowances?.conveyance) || 0) + (Number(allowances?.food) || 0) + (Number(allowances?.medical) || 0) + (Number(allowances?.transport) || 0) + (Number(allowances?.other) || 0);
+    const grossSalaryCalculated = basic + totalAllowances;
     const netSalaryCalculated = basic + (Number(bonus) || 0) - totalDeductions - penaltyDeductionCalculated;
 
     const salaryStructure = await SalaryStructure.findByIdAndUpdate(

@@ -143,5 +143,7 @@ const leadSchema = new mongoose.Schema({
 leadSchema.index({ status: 1, createdAt: -1 });
 leadSchema.index({ assignedTo: 1, status: 1 });
 leadSchema.index({ phone: 1 });
+leadSchema.index({ movedToPipeline: 1, createdAt: -1 });
+leadSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Lead', leadSchema);

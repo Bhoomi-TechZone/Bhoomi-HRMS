@@ -155,8 +155,8 @@ const generateSalaryReceiptPDF = async (payroll) => {
 
             const empName = `${employee.firstName || ''} ${employee.lastName || ''}`.trim() || 'N/A';
             const empId = employee.employeeId || payroll.employeeId || 'N/A';
-            const dept = employee.department || 'N/A';
-            const desig = employee.designation || 'N/A';
+            const dept = typeof employee.department === 'object' ? (employee.department?.name || 'N/A') : (employee.department || 'N/A');
+            const desig = typeof employee.designation === 'object' ? (employee.designation?.name || 'N/A') : (employee.designation || 'N/A');
             const email = employee.email || 'N/A';
             const lopDays = payroll.workingDays?.absent || 0;
             const paidDays = (payroll.workingDays?.present || 0) + (payroll.workingDays?.weekoff || 0) + (payroll.workingDays?.holiday || 0) + (payroll.workingDays?.leave || 0);
@@ -203,32 +203,49 @@ const generateSalaryReceiptPDF = async (payroll) => {
 
             y += subH;
 
-            // Earnings Rows: Always show all standard earnings titles (Basic Salary, HRA, Conveyance, Food, Additional Bonus)
-            const basicSal = sd.basicSalary || 0;
-            const hra = allowances.hra || 0;
-            const conveyance = allowances.conveyance || allowances.transport || 0;
-            const food = allowances.food || 0;
-            const bonus = sd.bonus || 0;
+            // Earnings Rows: Basic, HRA, Conveyance, Food + other allowances & bonus
+            const basicSal = Number(sd.basicSalary) || 0;
+            const hra = Number(allowances.hra) || 0;
+            const conveyance = Number(allowances.conveyance || allowances.transport) || 0;
+            const food = Number(allowances.food) || 0;
+            const da = Number(allowances.da) || 0;
+            const medical = Number(allowances.medical) || 0;
+            const otherAllowance = Number(allowances.other) || 0;
+            const bonus = Number(sd.bonus) || 0;
 
             const earningsItems = [
                 ['Basic Salary', basicSal],
                 ['House Rent Allowance (HRA)', hra],
                 ['Conveyance Allowance', conveyance],
-                ['Food Allowance', food],
-                ['Additional Bonus', bonus]
+                ['Food Allowance', food]
             ];
+            if (da > 0) earningsItems.push(['Dearness Allowance (DA)', da]);
+            if (medical > 0) earningsItems.push(['Medical Allowance', medical]);
+            if (otherAllowance > 0) earningsItems.push(['Other Allowance', otherAllowance]);
+            earningsItems.push(['Additional Bonus', bonus]);
 
-            // Deductions Rows: Only show Penalty and Loss of Pay (LOP)
-            const manualPenalty = deductions.penalty || 0;
-            const lateDed = deductions.lateDeduction || 0;
-            const halfDayDed = deductions.halfDayDeduction || 0;
+            // Deductions Rows: Penalty, LOP, PF, ESI, Tax, Loan/Advance, Other
+            const manualPenalty = Number(deductions.penalty) || 0;
+            const lateDed = Number(deductions.lateDeduction) || 0;
+            const halfDayDed = Number(deductions.halfDayDeduction) || 0;
             const totalPenalty = manualPenalty + lateDed + halfDayDed;
-            const lopDeduction = deductions.lossOfPay || 0;
+            const lopDeduction = Number(deductions.lossOfPay) || 0;
+            const pf = Number(deductions.pf) || 0;
+            const esi = Number(deductions.esi) || 0;
+            const tax = Number(deductions.tax) || 0;
+            const loan = Number(deductions.loan) || 0;
+            const advance = Number(deductions.advance) || 0;
+            const otherDed = Number(deductions.other) || 0;
 
             const deductionItems = [
                 ['Penalty', totalPenalty, totalPenalty > 0],
                 ['Loss of Pay (LOP)', lopDeduction, false]
             ];
+            if (pf > 0) deductionItems.push(['Provident Fund (PF)', pf, false]);
+            if (esi > 0) deductionItems.push(['Employee State Insurance (ESI)', esi, false]);
+            if (tax > 0) deductionItems.push(['Tax / TDS', tax, false]);
+            if (loan > 0 || advance > 0) deductionItems.push(['Loan / Advance', loan + advance, false]);
+            if (otherDed > 0) deductionItems.push(['Other Deductions', otherDed, false]);
 
             const rowHeight = 22;
             const numRows = Math.max(earningsItems.length, deductionItems.length);
@@ -263,10 +280,8 @@ const generateSalaryReceiptPDF = async (payroll) => {
             y += contentBoxH;
 
             // Total Earnings & Total Deductions Summary Row
-            // Total Earnings = Basic Salary + All Allowances + Bonus
-            const totalEarnings = basicSal + hra + conveyance + food + bonus;
-            // Total Deductions = Penalty (Late + HalfDay + Manual) + Loss of Pay (LOP)
-            const totalDeductions = totalPenalty + lopDeduction;
+            const totalEarnings = basicSal + hra + conveyance + food + da + medical + otherAllowance + bonus;
+            const totalDeductions = totalPenalty + lopDeduction + pf + esi + tax + loan + advance + otherDed;
             const netPayable = Math.max(0, totalEarnings - totalDeductions);
 
             const totH = 24;

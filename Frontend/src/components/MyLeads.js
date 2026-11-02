@@ -120,9 +120,22 @@ function MyLeads() {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [serverStats, setServerStats] = useState(null);
+  const [totalLeadsCount, setTotalLeadsCount] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
   const [filterStatus, setFilterStatus] = useState('');
   const [filterSource, setFilterSource] = useState('');
   const [filterDate, setFilterDate] = useState('');
@@ -295,25 +308,90 @@ function MyLeads() {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [showHeaderSelectMenu]);
   // ── Fetch ─────────────────────────────────────────────────────────────────
+  const initialFetchDoneRef = useRef(false);
+
+  const fetchLeadsForPage = useCallback(async (pageToLoad = currentPage, limitToLoad = leadsPerPage) => {
+    try {
+      setPageLoading(true);
+      const isMetaSource = filterSource && filterSource.startsWith('Meta');
+      if (isMetaSource) {
+        const metaParams = {
+          page: pageToLoad,
+          limit: limitToLoad,
+          ...(debouncedSearch && { search: debouncedSearch }),
+          ...(filterStatus && { status: filterStatus }),
+          ...(filterEmployee && { assignedTo: filterEmployee }),
+          ...(sortBy && { sortBy: 'createdTime', sortOrder: sortBy === 'oldest' ? 'asc' : 'desc' })
+        };
+        const res = await api.get('/meta-leads', { params: metaParams });
+        const data = res.data;
+        const fetchedMeta = Array.isArray(data) ? data : (data?.leads || []);
+        setMetaLeads(fetchedMeta);
+        setLeads([]);
+        setTotalLeadsCount(data?.pagination?.total || fetchedMeta.length);
+      } else {
+        const params = {
+          page: pageToLoad,
+          limit: limitToLoad,
+          includeHistory: 'false',
+          ...(debouncedSearch && { search: debouncedSearch }),
+          ...(filterStatus && { status: filterStatus }),
+          ...(filterSource && { source: filterSource }),
+          ...(filterEmployee && { assignedTo: filterEmployee }),
+          ...(filterDate && { startDate: filterDate }),
+          ...(filterEndDate && { endDate: filterEndDate }),
+          ...(sortBy && { sortBy })
+        };
+        const res = await api.get('/leads', { params });
+        const data = res.data;
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          setLeads(data.leads || []);
+          setTotalLeadsCount(data.total || 0);
+        } else if (Array.isArray(data)) {
+          setLeads(data);
+          setTotalLeadsCount(data.length);
+        }
+      }
+    } catch (err) {
+      console.error('fetchLeadsForPage error:', err);
+    } finally {
+      setPageLoading(false);
+    }
+  }, [currentPage, leadsPerPage, debouncedSearch, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy]);
+
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [leadsRes, metaRes, empRes] = await Promise.allSettled([
-        api.get('/leads'),
-        api.get('/meta-leads?limit=5000'),
+      const [leadsRes, statsRes, empRes] = await Promise.allSettled([
+        api.get('/leads', {
+          params: {
+            page: 1,
+            limit: leadsPerPage,
+            includeHistory: 'false',
+            ...(debouncedSearch && { search: debouncedSearch }),
+            ...(filterStatus && { status: filterStatus }),
+            ...(filterSource && { source: filterSource }),
+            ...(filterEmployee && { assignedTo: filterEmployee }),
+            ...(filterDate && { startDate: filterDate }),
+            ...(filterEndDate && { endDate: filterEndDate }),
+            ...(sortBy && { sortBy })
+          }
+        }),
+        api.get('/leads/stats/overview'),
         api.get('/employees/list').catch(() => api.get('/employees')),
       ]);
+
       if (leadsRes.status === 'fulfilled') {
         const raw = leadsRes.value.data;
-        setLeads(Array.isArray(raw) ? raw : (raw?.leads || []));
-      } else {
-        console.error('Failed to fetch regular leads:', leadsRes.reason);
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+          setLeads(raw.leads || []);
+          setTotalLeadsCount(raw.total || 0);
+        } else {
+          setLeads(Array.isArray(raw) ? raw : (raw?.leads || []));
+        }
       }
-      if (metaRes.status === 'fulfilled') {
-        const raw = metaRes.value.data;
-        setMetaLeads(Array.isArray(raw) ? raw : (raw?.leads || []));
-      } else {
-        console.error('Failed to fetch meta leads:', metaRes.reason);
+      if (statsRes.status === 'fulfilled' && statsRes.value?.data) {
+        setServerStats(statsRes.value.data);
       }
       if (empRes.status === 'fulfilled') {
         const rawEmp = empRes.value.data;
@@ -324,10 +402,29 @@ function MyLeads() {
       console.error('fetchAll error:', err);
     } finally {
       setLoading(false);
+      initialFetchDoneRef.current = true;
     }
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => {
+    fetchAll();
+  }, []);
+
+  // When currentPage or leadsPerPage changes after initial fetch, load that exact page instantly in ~30ms
+  useEffect(() => {
+    if (!initialFetchDoneRef.current) return;
+    fetchLeadsForPage(currentPage, leadsPerPage);
+  }, [currentPage, leadsPerPage]);
+
+  // When filters change, reset to page 1 and fetch
+  useEffect(() => {
+    if (!initialFetchDoneRef.current) return;
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+    } else {
+      fetchLeadsForPage(1, leadsPerPage);
+    }
+  }, [debouncedSearch, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy]);
 
   // Close assign dropdown on outside click
   useEffect(() => {
@@ -713,6 +810,19 @@ function MyLeads() {
 
   // ── Stats from merged data ────────────────────────────────────────────────
   const stats = useMemo(() => {
+    if (serverStats && statsLeads.length < (serverStats.total || 0)) {
+      return {
+        total: serverStats.total || statsLeads.length,
+        newLeads: serverStats.newLeads ?? serverStats.new ?? 0,
+        contacted: serverStats.contacted || 0,
+        converted: serverStats.converted || 0,
+        closed: serverStats.lost || 0,
+        followUp: serverStats.followUp || 0,
+        notInterested: serverStats.notInterested || 0,
+        todayLeads: serverStats.todayLeads || 0,
+        sources: [...new Set(statsLeads.map(l => l.source).filter(Boolean))]
+      };
+    }
     const total = statsLeads.length;
     const newLeads = statsLeads.filter(l => l.status === 'New').length;
     const contacted = statsLeads.filter(l => l.status === 'Contacted' || l.status === 'Connected').length;
@@ -816,71 +926,11 @@ function MyLeads() {
   };
 
   // ── Filtered + sorted ─────────────────────────────────────────────────────
+  // Since role visibility, search, status, source, date and sorting are executed on the server via fast MongoDB indexes,
+  // allLeads contains the exact page slice requested.
   const filteredLeads = useMemo(() => {
-    const uid = String(user?._id || user?.id || '');
-    return allLeads.filter(lead => {
-      // Sales, executives, and regular employees only see leads assigned to them or created/added by them
-      if (!hasFullAccess && uid) {
-        const isAssigned = Array.isArray(lead.assignedTo)
-          ? lead.assignedTo.some(a => String(a?._id || a || '') === uid)
-          : String(lead.assignedTo?._id || lead.assignedTo || '') === uid;
-        const isCreator = String(lead.createdBy?._id || lead.createdBy || '') === uid;
-        if (!isAssigned && !isCreator) return false;
-      }
-
-      const term = searchTerm.toLowerCase();
-      const matchesSearch =
-        (lead.leadName?.toLowerCase().includes(term)) ||
-        (lead.name?.toLowerCase().includes(term)) ||
-        (lead.contactNumber?.includes(term)) ||
-        (lead.phone?.includes(term)) ||
-        (lead.email?.toLowerCase().includes(term)) ||
-        (lead.company?.toLowerCase().includes(term)) ||
-        (lead.product?.toLowerCase().includes(term));
-
-      const hasPendingFollowUp = !!(lead.followUpDate || lead.nextFollowUp)
-        && !lead.followUpCompleted
-        && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Invalid'].includes(lead.status);
-
-      const matchesStatus = !filterStatus || (
-        filterStatus === 'Follow-up'
-          ? hasPendingFollowUp || lead.status === 'Follow-up'
-          : lead.status === filterStatus
-      );
-
-      const matchesSource = !filterSource || lead.source === filterSource;
-      const matchesEmployee = !filterEmployee ||
-        (Array.isArray(lead.assignedTo)
-          ? lead.assignedTo.some(e => String(e?._id || e?.id || e || '') === String(filterEmployee))
-          : String(lead.assignedTo?._id || lead.assignedTo?.id || lead.assignedTo || '') === String(filterEmployee)) ||
-        (String(lead.createdBy?._id || lead.createdBy?.id || lead.createdBy || '') === String(filterEmployee));
-
-      let matchesDate = true;
-      if (filterDate || filterEndDate) {
-        const leadDate = new Date(lead.createdAt);
-        leadDate.setHours(0, 0, 0, 0);
-        let passesStart = true;
-        let passesEnd = true;
-        if (filterDate) {
-          const [yf, mf, df] = filterDate.split('-').map(Number);
-          const start = new Date(yf, mf - 1, df);
-          if (leadDate < start) passesStart = false;
-        }
-        if (filterEndDate) {
-          const [yf, mf, df] = filterEndDate.split('-').map(Number);
-          const end = new Date(yf, mf - 1, df);
-          if (leadDate > end) passesEnd = false;
-        }
-        matchesDate = passesStart && passesEnd;
-      }
-      return matchesSearch && matchesStatus && matchesSource && matchesEmployee && matchesDate;
-    }).sort((a, b) => {
-      if (sortBy === 'newest') return new Date(b.createdAt) - new Date(a.createdAt);
-      if (sortBy === 'oldest') return new Date(a.createdAt) - new Date(b.createdAt);
-      return 0;
-    });
-  }, [allLeads, searchTerm, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy, hasFullAccess, user?._id, user?.id]);
-
+    return allLeads;
+  }, [allLeads]);
   const isAnyModalOpen = showDetailsModal || showStatusModal || showNoteModal || showHistoryModal || showMetaModal || showConversionModal || showUploadModal || showMultiAssignModal || showMovePipelineModal;
 
   // ── Follow-up reminder polling for the currently visible page data ───────
@@ -958,15 +1008,10 @@ function MyLeads() {
   }, [showFollowUpPanel]);
 
   // ── Pagination calculations ──────────────────────────────────────────────
-  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / leadsPerPage));
+  const displayedTotal = totalLeadsCount || serverStats?.total || filteredLeads.length;
+  const totalPages = Math.max(1, Math.ceil(displayedTotal / leadsPerPage));
   const startIndex = (currentPage - 1) * leadsPerPage;
-  const paginatedLeads = filteredLeads.slice(startIndex, startIndex + leadsPerPage);
-
-  // Reset to first page when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy, leadsPerPage]);
-
+  const paginatedLeads = filteredLeads.length <= leadsPerPage ? filteredLeads : filteredLeads.slice(startIndex, startIndex + leadsPerPage);
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getStatusClass = (status) => ({
     'New': 'status-new', 'Contacted': 'status-contacted', 'Qualified': 'status-qualified',
@@ -1473,6 +1518,7 @@ function MyLeads() {
     setActiveFollowUpPicker(null);
     setIsRequirementExpanded(false);
     setSelectedLead(lead);
+    setLoadingHistory(true);
     setLeadEditForm({
       assignedTo: lead.assignedTo?._id || lead.assignedTo || '',
       status: getEffectiveStatus(lead),
@@ -1492,6 +1538,36 @@ function MyLeads() {
     });
     setIsEditing(editMode);
     setShowDetailsModal(true);
+
+    if (lead && lead._id && lead._type !== 'meta') {
+      api.get(`/leads/${lead._id}/history`).then(res => {
+        if (res.data && Array.isArray(res.data.history)) {
+          setSelectedLead(prev => (prev && prev._id === lead._id ? { ...prev, history: res.data.history } : prev));
+        }
+      }).catch(err => {
+        console.error('Error fetching on-demand lead history:', err);
+      }).finally(() => {
+        setLoadingHistory(false);
+      });
+    } else {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleViewHistory = async (lead) => {
+    setOpenActionMenuDrop(null);
+    setSelectedLead(lead);
+    setShowHistoryModal(true);
+    if (lead && lead._id && lead._type !== 'meta') {
+      try {
+        const res = await api.get(`/leads/${lead._id}`);
+        if (res.data) {
+          setSelectedLead(res.data);
+        }
+      } catch (err) {
+        // use local lead fallback
+      }
+    }
   };
 
   const fetchAndShowEmployeeSummary = async (empId) => {
@@ -1624,6 +1700,7 @@ function MyLeads() {
   const openMetaLead = (lead, editMode = false) => {
     setActiveFollowUpPicker(null);
     setMetaSelected(lead);
+    setLoadingHistory(true);
     setMetaEditForm({
       assignedTo: lead.assignedTo?._id || lead.assignedTo || '',
       status: getEffectiveStatus(lead),
@@ -1632,6 +1709,20 @@ function MyLeads() {
     });
     setIsEditing(editMode);
     setShowMetaModal(true);
+
+    if (lead && lead._id) {
+      api.get(`/meta-leads/${lead._id}/history`).then(res => {
+        if (res.data && Array.isArray(res.data.history)) {
+          setMetaSelected(prev => (prev && prev._id === lead._id ? { ...prev, history: res.data.history } : prev));
+        }
+      }).catch(err => {
+        console.error('Error fetching on-demand meta lead history:', err);
+      }).finally(() => {
+        setLoadingHistory(false);
+      });
+    } else {
+      setLoadingHistory(false);
+    }
   };
 
   // ── Meta-lead actions ─────────────────────────────────────────────────────
@@ -2605,66 +2696,85 @@ function MyLeads() {
   };
 
   // ── Export all filtered leads to Excel ────────────────────────────────────
-  const handleExportExcel = () => {
-    const headers = [
-      '#', 'Client Name', 'Company', 'Phone', 'Email',
-      'Requirement', 'Country', 'Industry', 'Source',
-      'Assigned To', 'Status', 'Lead Type', 'Budget', 'Notes', 'Assign Date', 'Added On', 'Added By'
-    ];
-
-    const asText = (val) => val ? `="${val}"` : '';
-
-    const rows = filteredLeads.map((lead, idx) => [
-      idx + 1,
-      lead.leadName || lead.name || '',
-      lead.company || '',
-      asText(lead.contactNumber && lead.contactNumber !== 'N/A' ? lead.contactNumber : lead.phone && lead.phone !== 'N/A' ? lead.phone : ''),
-      lead.email || '',
-      lead.requirement || lead.requirements || lead.product || lead.description?.slice(0, 100) || '',
-      lead.country || '',
-      lead.industry || '',
-      lead._type === 'meta'
-        ? `Meta · ${lead.pageName || 'Facebook / Instagram'}`
-        : (lead.source || 'Manual'),
-      getAssigneeName(lead),
-      lead.status || 'New',
-      lead.leadType || '',
-      lead.budget || '',
-      lead.notes || '',
-      lead.assignedTo ? fmtDate(getAssignedDate(lead)) : '—',
-      fmtDate(lead.addedOn),
-      lead.createdBy ? `${lead.createdBy.firstName || ''} ${lead.createdBy.lastName || ''}`.trim() || lead.createdBy.email : '—',
-    ]);
-
-    const escape = (val) => {
-      const str = String(val ?? '');
-      return str.includes(',') || str.includes('"') || str.includes('\n')
-        ? `"${str.replace(/"/g, '""')}"`
-        : str;
-    };
-
-    const csvContent = [headers, ...rows].map(row => row.map(escape).join(',')).join('\n');
-    // UTF-8 BOM ensures Excel opens the file correctly
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `leads_export_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    // Immediately notify all admins of lead export activity
+  const handleExportExcel = async () => {
     try {
-      api.post('/leads/export-notify', {
-        count: filteredLeads.length,
-        category: 'Leads',
-        details: `${filteredLeads.length} lead(s) exported to CSV/Excel`
-      }).catch(err => console.error('Export notify error:', err));
-    } catch (e) {
-      console.error('Export notification call error:', e);
+      setExporting(true);
+      const params = {
+        includeHistory: 'false',
+        ...(debouncedSearch && { search: debouncedSearch }),
+        ...(filterStatus && { status: filterStatus }),
+        ...(filterSource && { source: filterSource }),
+        ...(filterEmployee && { assignedTo: filterEmployee }),
+        ...(filterDate && { startDate: filterDate }),
+        ...(filterEndDate && { endDate: filterEndDate }),
+        ...(sortBy && { sortBy })
+      };
+      const res = await api.get('/leads', { params });
+      const exportList = Array.isArray(res.data) ? res.data : (res.data?.leads || []);
+
+      const headers = [
+        '#', 'Client Name', 'Company', 'Phone', 'Email',
+        'Requirement', 'Country', 'Industry', 'Source',
+        'Assigned To', 'Status', 'Lead Type', 'Budget', 'Notes', 'Assign Date', 'Added On', 'Added By'
+      ];
+
+      const asText = (val) => val ? `="${val}"` : '';
+
+      const rows = exportList.map((lead, idx) => [
+        idx + 1,
+        lead.leadName || lead.name || '',
+        lead.company || '',
+        asText(lead.contactNumber && lead.contactNumber !== 'N/A' ? lead.contactNumber : lead.phone && lead.phone !== 'N/A' ? lead.phone : ''),
+        lead.email || '',
+        lead.requirement || lead.requirements || lead.product || lead.description?.slice(0, 100) || '',
+        lead.country || '',
+        lead.industry || '',
+        lead._type === 'meta'
+          ? `Meta · ${lead.pageName || 'Facebook / Instagram'}`
+          : (lead.source || 'Manual'),
+        getAssigneeName(lead),
+        lead.status || 'New',
+        lead.leadType || '',
+        lead.budget || '',
+        lead.notes || '',
+        lead.assignedTo ? fmtDate(getAssignedDate(lead)) : '—',
+        fmtDate(lead.addedOn),
+        lead.createdBy ? `${lead.createdBy.firstName || ''} ${lead.createdBy.lastName || ''}`.trim() || lead.createdBy.email : '—',
+      ]);
+
+      const escape = (val) => {
+        const str = String(val ?? '');
+        return str.includes(',') || str.includes('"') || str.includes('\n')
+          ? `"${str.replace(/"/g, '""')}"`
+          : str;
+      };
+
+      const csvContent = [headers, ...rows].map(row => row.map(escape).join(',')).join('\n');
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `leads_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      try {
+        api.post('/leads/export-notify', {
+          count: exportList.length,
+          category: 'Leads',
+          details: `${exportList.length} lead(s) exported to CSV/Excel`
+        }).catch(err => console.error('Export notify error:', err));
+      } catch (e) {
+        console.error('Export notification call error:', e);
+      }
+    } catch (err) {
+      console.error('Export Excel error:', err);
+      alert('Failed to export leads. Please try again.');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -3068,6 +3178,7 @@ function MyLeads() {
               ref={exportButtonRef}
               className="leads-upload-btn"
               onClick={handleExportExcel}
+              disabled={exporting}
               title="Export all leads to Excel"
               style={{
                 display: 'inline-flex',
@@ -3089,7 +3200,7 @@ function MyLeads() {
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
               </svg>
-              <span style={{ position: 'relative', zIndex: 1 }}>Export Excel</span>
+              <span style={{ position: 'relative', zIndex: 1 }}>{exporting ? 'Exporting...' : 'Export Excel'}</span>
             </button>
           )}
           {canCreate && (
@@ -3833,7 +3944,7 @@ function MyLeads() {
           )}
 
           <span style={{ fontSize: '12px', color: '#94a3b8', marginLeft: 'auto', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 600 }}>
-            {filteredLeads.length} of {statsLeads.length}
+            {displayedTotal} of {stats.total || displayedTotal}
           </span>
         </div>
 
@@ -4850,11 +4961,7 @@ function MyLeads() {
                                     {/* History — for all leads */}
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        setOpenActionMenuDrop(null);
-                                        setSelectedLead(lead);
-                                        setShowHistoryModal(true);
-                                      }}
+                                      onClick={() => handleViewHistory(lead)}
                                       style={{
                                         display: 'flex',
                                         alignItems: 'center',
@@ -4896,7 +5003,7 @@ function MyLeads() {
         <div style={{ padding: '12px 16px', borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
-              Page {currentPage} of {totalPages} ({filteredLeads.length} total leads)
+              Page {currentPage} of {totalPages} ({displayedTotal} total leads)
             </span>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#64748b' }}>
               <span>Show:</span>
@@ -5378,30 +5485,63 @@ function MyLeads() {
 
                 {/* RIGHT — activity timeline */}
                 <div className="is-mlead-right">
-                  <p className="is-mlead-section-title">Activity History</p>
-                  {selectedLead.history?.length > 0 ? (
-                    <div className="is-timeline">
-                      {selectedLead.history.slice().reverse().map((h, i) => (
-                        <div key={i} className="is-timeline-item">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <p className="is-mlead-section-title" style={{ margin: 0 }}>Activity History</p>
+                    {loadingHistory && (
+                      <span style={{ fontSize: '11px', color: '#2563eb', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ width: '10px', height: '10px', border: '2px solid #93c5fd', borderTopColor: '#2563eb', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.6s linear infinite' }}></span>
+                        Loading...
+                      </span>
+                    )}
+                  </div>
+                  {(() => {
+                    const history = selectedLead.history || [];
+                    if (history.length > 0) {
+                      return (
+                        <div className="is-timeline">
+                          {history.slice().reverse().map((h, i) => (
+                            <div key={i} className="is-timeline-item">
+                              <div className="is-timeline-dot"></div>
+                              <div className="is-timeline-content">
+                                <div className="is-timeline-top">
+                                  <strong className="is-timeline-action">{h.action}</strong>
+                                  <span className="is-timeline-date">{fmtDate(h.date)}</span>
+                                </div>
+                                <p className="is-timeline-details">{h.details}</p>
+                                {h.by && (
+                                  <span className="is-timeline-by">
+                                    {typeof h.by === 'object' ? `${h.by.firstName} ${h.by.lastName || ''}`.trim() : h.by}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+                    const createdDate = selectedLead.createdAt || selectedLead.addedOn;
+                    return (
+                      <div className="is-timeline">
+                        <div className="is-timeline-item">
                           <div className="is-timeline-dot"></div>
                           <div className="is-timeline-content">
                             <div className="is-timeline-top">
-                              <strong className="is-timeline-action">{h.action}</strong>
-                              <span className="is-timeline-date">{fmtDate(h.date)}</span>
+                              <strong className="is-timeline-action">Lead Created</strong>
+                              <span className="is-timeline-date">{createdDate ? fmtDate(createdDate) : '—'}</span>
                             </div>
-                            <p className="is-timeline-details">{h.details}</p>
-                            {h.by && (
-                              <span className="is-timeline-by">
-                                {typeof h.by === 'object' ? `${h.by.firstName} ${h.by.lastName || ''}`.trim() : h.by}
-                              </span>
-                            )}
+                            <p className="is-timeline-details">
+                              {selectedLead.source ? `Created via ${selectedLead.source}` : 'Lead registered in CRM'}
+                            </p>
+                            <span className="is-timeline-by">
+                              {selectedLead.createdBy?.firstName
+                                ? `${selectedLead.createdBy.firstName} ${selectedLead.createdBy.lastName || ''}`.trim()
+                                : (selectedLead.source === 'Excel Import' ? 'Admin System' : 'System')}
+                            </span>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="is-mlead-empty">No activity yet.</p>
-                  )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
               </div>

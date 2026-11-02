@@ -133,17 +133,114 @@ router.get('/', auth, async (req, res) => {
       query.source = req.query.source;
     }
 
+    // Filter by search query if provided
+    if (req.query.search && req.query.search.trim()) {
+      const s = req.query.search.trim();
+      const escaped = s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      const searchConditions = [
+        { name: regex },
+        { leadName: regex },
+        { phone: regex },
+        { contactNumber: regex },
+        { email: regex },
+        { company: regex },
+        { requirement: regex },
+        { product: regex }
+      ];
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: searchConditions }];
+        delete query.$or;
+      } else {
+        query.$or = searchConditions;
+      }
+    }
+
+    // Filter by assigned employee if provided
+    if (req.query.assignedTo) {
+      const empId = req.query.assignedTo;
+      const validEmpId = mongoose.Types.ObjectId.isValid(empId) ? new mongoose.Types.ObjectId(empId) : empId;
+      const empConditions = [{ assignedTo: validEmpId }, { createdBy: validEmpId }];
+      if (query.$and) {
+        query.$and.push({ $or: empConditions });
+      } else if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: empConditions }];
+        delete query.$or;
+      } else {
+        query.$or = empConditions;
+      }
+    }
+
+    // Filter by date range if provided
+    if (req.query.startDate || req.query.endDate) {
+      const dateCond = {};
+      if (req.query.startDate) {
+        dateCond.$gte = new Date(req.query.startDate);
+      }
+      if (req.query.endDate) {
+        const end = new Date(req.query.endDate);
+        end.setHours(23, 59, 59, 999);
+        dateCond.$lte = end;
+      }
+      if (query.createdAt) {
+        query.$and = query.$and || [];
+        query.$and.push({ createdAt: dateCond });
+      } else {
+        query.createdAt = dateCond;
+      }
+    }
+
     // Exclude leads moved to pipeline by default so they only appear in Deals in Pipeline
     if (req.query.includeMoved !== 'true') {
       query.movedToPipeline = { $ne: true };
     }
 
-    const leads = await Lead.find(query)
+    const sortOrder = req.query.sortBy === 'oldest' ? { createdAt: 1 } : { createdAt: -1 };
+
+    let leadQuery = Lead.find(query)
       .populate('assignedTo', 'firstName lastName email employeeId')
       .populate('createdBy', 'firstName lastName email')
-      .populate('history.by', 'firstName lastName')
-      .sort({ createdAt: -1 })
-      .lean();
+      .sort(sortOrder);
+
+    if (req.query.includeHistory !== 'true') {
+      leadQuery = leadQuery.select('-history');
+    }
+
+    // Server-side pagination support
+    const isPaginated = req.query.page !== undefined || req.query.paginated === 'true';
+    if (isPaginated) {
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.max(1, parseInt(req.query.limit, 10) || 10);
+      const skip = (page - 1) * limit;
+
+      const [leads, total] = await Promise.all([
+        leadQuery.skip(skip).limit(limit).lean(),
+        Lead.countDocuments(query)
+      ]);
+
+      return res.json({
+        leads,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit)
+      });
+    }
+
+    if (req.query.limit) {
+      const lim = parseInt(req.query.limit, 10);
+      if (!isNaN(lim) && lim > 0) {
+        leadQuery = leadQuery.limit(lim);
+      }
+    }
+
+    if (req.query.skip) {
+      const sk = parseInt(req.query.skip, 10);
+      if (!isNaN(sk) && sk > 0) {
+        leadQuery = leadQuery.skip(sk);
+      }
+    }
+
+    const leads = await leadQuery.lean();
 
     res.json(leads);
   } catch (error) {
@@ -189,6 +286,47 @@ router.get('/:id', auth, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
+
+// Get lead activity history on-demand
+router.get('/:id/history', auth, async (req, res) => {
+  try {
+    const lead = await Lead.findById(req.params.id)
+      .select('history createdAt addedOn source createdBy name leadName company')
+      .populate('history.by', 'firstName lastName email')
+      .populate('createdBy', 'firstName lastName email')
+      .lean();
+
+    if (!lead) {
+      return res.status(404).json({ message: 'Lead not found' });
+    }
+
+    let history = Array.isArray(lead.history) ? [...lead.history] : [];
+
+    const createdDate = lead.createdAt || lead.addedOn || new Date();
+    const hasCreationEntry = history.some(h =>
+      h.action && (h.action.toLowerCase().includes('created') || h.action.toLowerCase().includes('imported'))
+    );
+
+    if (!hasCreationEntry) {
+      const creatorName = lead.createdBy
+        ? `${lead.createdBy.firstName || ''} ${lead.createdBy.lastName || ''}`.trim() || lead.createdBy.email
+        : (lead.source === 'Excel Import' ? 'Admin System' : 'System');
+
+      history.unshift({
+        action: lead.source === 'Excel Import' ? 'Lead Imported' : 'Lead Created',
+        details: lead.source ? `Created via ${lead.source}` : 'Lead registered in CRM',
+        date: createdDate,
+        by: creatorName
+      });
+    }
+
+    res.json({ history });
+  } catch (error) {
+    console.error('Get lead history error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 
 // Create new lead
 router.post('/', auth, checkPermission('leads', 'create'), async (req, res) => {
@@ -998,20 +1136,39 @@ router.get('/stats/overview', auth, async (req, res) => {
       ];
     }
 
-    const [total, newLeads, inProgress, converted, lost] = await Promise.all([
-      Lead.countDocuments(query),
-      Lead.countDocuments({ ...query, status: 'New' }),
-      Lead.countDocuments({ ...query, status: 'In Progress' }),
-      Lead.countDocuments({ ...query, status: 'Converted' }),
-      Lead.countDocuments({ ...query, status: 'Lost' })
+    const baseQuery = { ...query, movedToPipeline: { $ne: true } };
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const [total, newLeads, inProgress, converted, lost, followUp, notInterested, contacted, todayLeads] = await Promise.all([
+      Lead.countDocuments(baseQuery),
+      Lead.countDocuments({ ...baseQuery, status: 'New' }),
+      Lead.countDocuments({ ...baseQuery, status: 'In Progress' }),
+      Lead.countDocuments({ ...baseQuery, status: 'Converted' }),
+      Lead.countDocuments({ ...baseQuery, status: 'Lost' }),
+      Lead.countDocuments({
+        ...baseQuery,
+        $or: [
+          { status: 'Follow-up' },
+          { nextFollowUp: { $ne: null }, followUpCompleted: { $ne: true }, status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Invalid', 'Lost'] } }
+        ]
+      }),
+      Lead.countDocuments({ ...baseQuery, status: 'Not Interested' }),
+      Lead.countDocuments({ ...baseQuery, status: { $in: ['Contacted', 'Connected'] } }),
+      Lead.countDocuments({ ...baseQuery, createdAt: { $gte: startOfToday } })
     ]);
 
     res.json({
       total,
+      newLeads,
       new: newLeads,
       inProgress,
       converted,
       lost,
+      followUp,
+      notInterested,
+      contacted,
+      todayLeads,
       conversionRate: total > 0 ? ((converted / total) * 100).toFixed(2) : 0
     });
   } catch (error) {

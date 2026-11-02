@@ -193,25 +193,65 @@ function Payroll() {
     setShowGenerateSlipModal(true);
   };
 
-  const handleSelectEmployeeForSlip = (empId) => {
-    const struct = structures.find(s => (s.employee?._id || s.employee) === empId);
+  const handleSelectEmployeeForSlip = async (empId) => {
+    let struct = structures.find(s => {
+      const sEmpId = (typeof s.employee === 'object' ? s.employee?._id : s.employee) || '';
+      return sEmpId.toString() === (empId || '').toString();
+    });
+
+    if (!struct && empId) {
+      try {
+        const res = await api.get(`/salary-structure/employee/${empId}`);
+        if (res.data) struct = res.data;
+      } catch (err) {
+        // ignore
+      }
+    }
+
     if (struct) {
+      const basic = struct.basicSalary || '';
+      const hra = struct.allowances?.hra || struct.hra || '';
+      const conv = struct.allowances?.conveyance || struct.allowances?.transport || struct.conveyance || struct.transport || '';
+      const food = struct.allowances?.food || struct.food || '';
+      const bonus = struct.bonus || '';
+      const penalty = struct.penaltyDeduction || '';
+      const pf = struct.deductions?.pf || '';
+      const esi = struct.deductions?.esi || '';
+      const tax = struct.deductions?.tax || '';
+
+      const gross = (parseFloat(basic) || 0) + (parseFloat(hra) || 0) + (parseFloat(conv) || 0) + (parseFloat(food) || 0);
+      const lopDaysVal = parseFloat(generateSlipFormData.lopDays) || 0;
+      const perDay = gross / 30;
+      const lopDed = (lopDaysVal * perDay).toFixed(2);
+
       setGenerateSlipFormData(prev => ({
         ...prev,
         employee: empId,
-        basicSalary: struct.basicSalary || '',
-        hra: struct.allowances?.hra || '',
-        conveyance: struct.allowances?.conveyance || struct.allowances?.transport || '',
-        food: struct.allowances?.food || '',
-        bonus: struct.bonus || '',
-        pf: struct.deductions?.pf || '',
-        esi: struct.deductions?.esi || '',
-        tax: struct.deductions?.tax || '',
+        basicSalary: basic,
+        hra: hra,
+        conveyance: conv,
+        food: food,
+        bonus: bonus,
+        penalty: penalty,
+        lopDeduction: lopDed,
+        pf: pf,
+        esi: esi,
+        tax: tax,
       }));
     } else {
       setGenerateSlipFormData(prev => ({
         ...prev,
-        employee: empId
+        employee: empId,
+        basicSalary: '',
+        hra: '',
+        conveyance: '',
+        food: '',
+        bonus: '',
+        penalty: '',
+        lopDeduction: '0',
+        pf: '',
+        esi: '',
+        tax: ''
       }));
     }
   };
@@ -3101,7 +3141,7 @@ function Payroll() {
                       <th>Employee Name</th>
                       <th>Designation</th>
                       <th>Department</th>
-                      <th>Basic Salary</th>
+                      <th>Gross Salary</th>
                       <th>Allowance</th>
                       <th>Allowance Type</th>
                       <th>Created On</th>
@@ -3140,7 +3180,8 @@ function Payroll() {
                         const n = `${s.employee?.firstName || ''} ${s.employee?.lastName || ''} ${s.employee?.employeeId || ''} ${s.employee?.email || ''} ${s.employee?.designation || ''}`.toLowerCase();
                         return n.includes(q);
                       }).map((structure, index) => {
-                        const totalAllowances = (parseFloat(structure.hra) || 0) + (parseFloat(structure.da) || 0) + (parseFloat(structure.transport) || 0) + (parseFloat(structure.medical) || 0) + (parseFloat(structure.bonus) || 0);
+                        const totalAllowances = (parseFloat(structure.allowances?.hra || structure.hra) || 0) + (parseFloat(structure.allowances?.da || structure.da) || 0) + (parseFloat(structure.allowances?.conveyance || structure.allowances?.transport || structure.conveyance || structure.transport) || 0) + (parseFloat(structure.allowances?.food || structure.food) || 0) + (parseFloat(structure.allowances?.medical || structure.medical) || 0) + (parseFloat(structure.bonus) || 0) + (parseFloat(structure.allowances?.other) || 0);
+                        const grossSalary = (parseFloat(structure.basicSalary) || 0) + totalAllowances;
                         const totalPenalties = parseFloat(structure.penaltyDeduction) || 0;
 
                         return (
@@ -3162,14 +3203,15 @@ function Payroll() {
                                 {typeof structure.employee?.department === 'object' ? structure.employee?.department?.name : (structure.employee?.department || '-')}
                               </span>
                             </td>
-                            <td><span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>{formatCurrency(structure.basicSalary)}</span></td>
+                            <td><span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>{formatCurrency(grossSalary)}</span></td>
                             <td><span style={{ fontSize: '13px', fontWeight: 600, color: '#16a34a' }}>{formatCurrency(totalAllowances)}</span></td>
                             <td>
                               <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', maxWidth: '180px' }}>
-                                {(parseFloat(structure.hra) > 0) && <span style={{ padding: '2px 6px', background: '#eff6ff', color: '#3b82f6', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #bfdbfe' }}>HRA</span>}
-                                {(parseFloat(structure.da) > 0) && <span style={{ padding: '2px 6px', background: '#ecfdf5', color: '#10b981', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #a7f3d0' }}>DA</span>}
-                                {(parseFloat(structure.transport) > 0) && <span style={{ padding: '2px 6px', background: '#fffbeb', color: '#f59e0b', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #fde68a' }}>Transport</span>}
-                                {(parseFloat(structure.medical) > 0) && <span style={{ padding: '2px 6px', background: '#fef2f2', color: '#ef4444', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #fecaca' }}>Medical</span>}
+                                {(parseFloat(structure.allowances?.hra || structure.hra) > 0) && <span style={{ padding: '2px 6px', background: '#eff6ff', color: '#3b82f6', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #bfdbfe' }}>HRA</span>}
+                                {(parseFloat(structure.allowances?.da || structure.da) > 0) && <span style={{ padding: '2px 6px', background: '#ecfdf5', color: '#10b981', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #a7f3d0' }}>DA</span>}
+                                {(parseFloat(structure.allowances?.conveyance || structure.conveyance || structure.transport || structure.allowances?.transport) > 0) && <span style={{ padding: '2px 6px', background: '#fffbeb', color: '#f59e0b', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #fde68a' }}>Conveyance</span>}
+                                {(parseFloat(structure.allowances?.food || structure.food) > 0) && <span style={{ padding: '2px 6px', background: '#fef3c7', color: '#d97706', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #fde68a' }}>Food</span>}
+                                {(parseFloat(structure.allowances?.medical || structure.medical) > 0) && <span style={{ padding: '2px 6px', background: '#fef2f2', color: '#ef4444', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #fecaca' }}>Medical</span>}
                                 {(parseFloat(structure.bonus) > 0) && <span style={{ padding: '2px 6px', background: '#f5f3ff', color: '#8b5cf6', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600, border: '1px solid #ddd6fe' }}>Bonus</span>}
                                 {totalAllowances === 0 && <span style={{ fontSize: '11px', color: '#94a3b8' }}>Not Provided</span>}
                               </div>
@@ -3811,7 +3853,14 @@ function Payroll() {
                           const basic = payslip.salaryDetails?.basicSalary || 0;
                           const gross = payslip.salaryDetails?.grossSalary || 0;
                           const bonus = payslip.salaryDetails?.bonus || 0;
-                          const allow = Math.max(0, gross - basic);
+                          const allAllowances = 
+                            (payslip.salaryDetails?.allowances?.hra || 0) +
+                            (payslip.salaryDetails?.allowances?.conveyance || payslip.salaryDetails?.allowances?.transport || 0) +
+                            (payslip.salaryDetails?.allowances?.food || 0) +
+                            (payslip.salaryDetails?.allowances?.da || 0) +
+                            (payslip.salaryDetails?.allowances?.medical || 0) +
+                            (payslip.salaryDetails?.allowances?.other || 0);
+                          const allow = allAllowances > 0 ? allAllowances : Math.max(0, gross - basic);
                           const totalDed = payslip.salaryDetails?.totalDeductions || 0;
                           const netSalary = payslip.salaryDetails?.netSalary || 0;
 
@@ -4600,7 +4649,11 @@ function Payroll() {
                         onChange={(e) => {
                           const lop = parseFloat(e.target.value) || 0;
                           const basic = parseFloat(generateSlipFormData.basicSalary) || 0;
-                          const perDay = basic / 30;
+                          const hra = parseFloat(generateSlipFormData.hra) || 0;
+                          const conv = parseFloat(generateSlipFormData.conveyance) || 0;
+                          const food = parseFloat(generateSlipFormData.food) || 0;
+                          const gross = basic + hra + conv + food;
+                          const perDay = gross / 30;
                           setGenerateSlipFormData({
                             ...generateSlipFormData,
                             lopDays: e.target.value,
@@ -5000,15 +5053,30 @@ function Payroll() {
 
 
 
-                      <div className="struct-footer">
-                        <button type="button" className="struct-btn-ghost" onClick={() => setShowStructureModal(false)}>
-                          <span>{isStructureViewMode ? 'Close' : 'Cancel'}</span>
-                        </button>
-                        {!isStructureViewMode && (
-                          <button type="button" className="struct-btn-primary" onClick={handleSaveStructure}>
-                            <span>{selectedStructure ? 'Update Structure' : 'Create Structure'}</span>
+                      <div className="struct-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '6px 12px', borderRadius: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: '#15803d' }}>Total Gross Salary:</span>
+                          <span style={{ fontSize: '14px', fontWeight: 700, color: '#166534' }}>
+                            {formatCurrency(
+                              (parseFloat(structureFormData.basicSalary) || 0) +
+                              (parseFloat(structureFormData.hra) || 0) +
+                              (parseFloat(structureFormData.conveyance) || 0) +
+                              (parseFloat(structureFormData.food) || 0) +
+                              (parseFloat(structureFormData.da) || 0) +
+                              (parseFloat(structureFormData.allowancesOther) || 0)
+                            )}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <button type="button" className="struct-btn-ghost" onClick={() => setShowStructureModal(false)}>
+                            <span>{isStructureViewMode ? 'Close' : 'Cancel'}</span>
                           </button>
-                        )}
+                          {!isStructureViewMode && (
+                            <button type="button" className="struct-btn-primary" onClick={handleSaveStructure}>
+                              <span>{selectedStructure ? 'Update Structure' : 'Create Structure'}</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                     </div>

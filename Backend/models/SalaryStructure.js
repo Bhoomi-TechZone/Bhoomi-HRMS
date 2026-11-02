@@ -89,8 +89,10 @@ salaryStructureSchema.pre('save', function (next) {
   // Safe helper to get number
   const getVal = (val) => Number(val) || 0;
 
-  // Gross Salary = Basic Salary (as requested)
-  this.grossSalary = getVal(this.basicSalary);
+  // Gross Salary = Basic Salary + Total Allowances
+  const allowances = this.allowances || {};
+  const totalAllowances = getVal(allowances.hra) + getVal(allowances.da) + getVal(allowances.conveyance) + getVal(allowances.food) + getVal(allowances.medical) + getVal(allowances.transport) + getVal(allowances.other);
+  this.grossSalary = getVal(this.basicSalary) + totalAllowances;
 
   // Standard deductions from salary structure
   const deductions = this.deductions || {};
