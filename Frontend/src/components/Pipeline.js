@@ -4,6 +4,11 @@ import * as XLSX from 'xlsx';
 import { useContextualQueryState } from '../utils/routeUtils';
 import {
     ArrowUpDown,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    ArrowDown,
+    GripVertical,
     List,
     Kanban,
     Download,
@@ -3319,6 +3324,11 @@ function Pipeline() {
     const [addPipelineModalName, setAddPipelineModalName] = useState('');
     const [showAddStageModal, setShowAddStageModal] = useState(false);
     const [addStageModalName, setAddStageModalName] = useState('');
+    const [showReorderStagesModal, setShowReorderStagesModal] = useState(false);
+    const [reorderStagesList, setReorderStagesList] = useState([]);
+    const [savingStageOrder, setSavingStageOrder] = useState(false);
+    const [draggedStageColIndex, setDraggedStageColIndex] = useState(null);
+    const [dragOverStageColIndex, setDragOverStageColIndex] = useState(null);
 
     // Contacts Management State
     const [contactStages, setContactStages] = useState(() => {
@@ -9398,10 +9408,130 @@ function Pipeline() {
         }
     };
 
+    // Reorder / Shuffle stages handler (Restricted to Admin, Sales Head, Sales Manager)
+    const handleReorderStages = async (reorderedList) => {
+        if (!hasFullAccess) {
+            alert('Only Admin, Sales Head, and Sales Manager can reorder pipeline stages.');
+            return;
+        }
+        if (!Array.isArray(reorderedList) || reorderedList.length === 0) return;
+
+        const normalized = reorderedList.map((item, idx) => ({
+            id: item.id || item.name || `stage-${idx}`,
+            name: item.name || item.id || `Stage ${idx + 1}`,
+            badgeClass: item.badgeClass || 'new',
+            createdAt: item.createdAt || DATA_CUTOFF_DATE.toISOString()
+        }));
+        const newOptions = normalized.map(s => s.name);
+
+        // Immediate responsive UI update
+        setPipelines(normalized);
+        setStages(normalized);
+        setPipelineOptions(newOptions);
+
+        try {
+            localStorage.setItem('crm_pipelines', JSON.stringify(normalized));
+            localStorage.setItem('crm_stages', JSON.stringify(normalized));
+            localStorage.setItem('crm_pipeline_options', JSON.stringify(newOptions));
+        } catch (e) { }
+
+        // Persist to server MongoDB config so all sales executives see the exact arranged order
+        try {
+            setSavingStageOrder(true);
+            await api.post('/pipeline-configs/save', {
+                pipelines: normalized,
+                stages: normalized,
+                pipelineOptions: newOptions
+            });
+        } catch (err) {
+            console.error('Failed to save reordered stages to server:', err);
+            alert('Failed to save stage order to server. Please try again.');
+        } finally {
+            setSavingStageOrder(false);
+        }
+    };
+
+    const handleShiftStageOrder = (fromIndex, toIndex) => {
+        if (!hasFullAccess) return;
+        if (fromIndex < 0 || toIndex < 0 || fromIndex >= visiblePipelines.length || toIndex >= visiblePipelines.length) return;
+        const current = [...visiblePipelines];
+        const [moved] = current.splice(fromIndex, 1);
+        current.splice(toIndex, 0, moved);
+        handleReorderStages(current);
+    };
+
+    const handleStageHeaderDragStart = (e, index) => {
+        if (!hasFullAccess) return;
+        e.dataTransfer.setData('text/plain', `stage-header-${index}`);
+        e.dataTransfer.effectAllowed = 'move';
+        setDraggedStageColIndex(index);
+    };
+
+    const handleStageHeaderDragOver = (e, index) => {
+        if (!hasFullAccess || draggedStageColIndex === null) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dragOverStageColIndex !== index) {
+            setDragOverStageColIndex(index);
+        }
+    };
+
+    const handleStageHeaderDragLeave = (e) => {
+        // Clear highlight if dragged out of column
+        if (e && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) {
+            setDragOverStageColIndex(null);
+        }
+    };
+
+    const handleStageHeaderDragEnd = () => {
+        setDraggedStageColIndex(null);
+        setDragOverStageColIndex(null);
+    };
+
+    // Auto-clear any stuck drag/highlight state on mouseup, window blur, or drag end
+    useEffect(() => {
+        const clearDragHighlight = () => {
+            setDraggedStageColIndex(null);
+            setDragOverStageColIndex(null);
+        };
+        window.addEventListener('mouseup', clearDragHighlight);
+        window.addEventListener('dragend', clearDragHighlight);
+        window.addEventListener('drop', clearDragHighlight);
+        window.addEventListener('pointerup', clearDragHighlight);
+        return () => {
+            window.removeEventListener('mouseup', clearDragHighlight);
+            window.removeEventListener('dragend', clearDragHighlight);
+            window.removeEventListener('drop', clearDragHighlight);
+            window.removeEventListener('pointerup', clearDragHighlight);
+        };
+    }, []);
+
+    const handleStageHeaderDrop = (e, targetIndex) => {
+        if (!hasFullAccess) return;
+        const data = e.dataTransfer.getData('text/plain');
+        if (data && data.startsWith('stage-header-')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const fromIndex = parseInt(data.replace('stage-header-', ''), 10);
+            if (!isNaN(fromIndex) && fromIndex !== targetIndex) {
+                handleShiftStageOrder(fromIndex, targetIndex);
+            }
+        }
+        setDraggedStageColIndex(null);
+        setDragOverStageColIndex(null);
+    };
+
     const handleDrop = async (e, targetPipelineName) => {
         e.preventDefault();
-        if (!canUpdate) return;
         const dealId = e.dataTransfer?.getData('text/plain') || draggedDealId;
+        if (dealId && dealId.startsWith('stage-header-')) {
+            setDraggedStageColIndex(null);
+            setDragOverStageColIndex(null);
+            return;
+        }
+        setDraggedStageColIndex(null);
+        setDragOverStageColIndex(null);
+        if (!canUpdate) return;
         if (dealId) {
             const targetDealIds = (selectedKanbanDealIds.includes(dealId))
                 ? selectedKanbanDealIds
@@ -14349,6 +14479,20 @@ function Pipeline() {
                                                             <span>Add Stage</span>
                                                         </div>
                                                     </button>
+                                                    <button
+                                                        type="button"
+                                                        className="pipeline-card-menu-item"
+                                                        onClick={() => {
+                                                            setIsDealsToolbarMenuOpen(false);
+                                                            setReorderStagesList([...visiblePipelines]);
+                                                            setShowReorderStagesModal(true);
+                                                        }}
+                                                    >
+                                                        <div className="pipeline-card-menu-item-left">
+                                                            <ArrowUpDown size={14} style={{ color: '#0284c7' }} />
+                                                            <span>Reorder Stages</span>
+                                                        </div>
+                                                    </button>
                                                 </div>
                                             )}
                                         </div>
@@ -14397,13 +14541,41 @@ function Pipeline() {
                                             return (
                                                 <div
                                                     key={colKey}
-                                                    className={`pipeline-column ${dragOverColumnId === colKey ? 'drag-over' : ''}`}
-                                                    onDragOver={e => handleDragOver(e, colKey)}
-                                                    onDragLeave={e => handleDragLeave(e, colKey)}
-                                                    onDrop={e => handleDrop(e, pipeline.name)}
+                                                    className={`pipeline-column ${dragOverColumnId === colKey ? 'drag-over' : ''} ${draggedStageColIndex !== null && dragOverStageColIndex === pIndex ? 'stage-col-highlight' : ''}`}
+                                                    onDragOver={e => {
+                                                        if (draggedStageColIndex !== null) {
+                                                            handleStageHeaderDragOver(e, pIndex);
+                                                        } else {
+                                                            handleDragOver(e, colKey);
+                                                        }
+                                                    }}
+                                                    onDragLeave={e => {
+                                                        if (draggedStageColIndex !== null) {
+                                                            handleStageHeaderDragLeave(e);
+                                                        } else {
+                                                            handleDragLeave(e, colKey);
+                                                        }
+                                                    }}
+                                                    onDrop={e => {
+                                                        const headerData = e.dataTransfer?.getData('text/plain');
+                                                        if (draggedStageColIndex !== null || (headerData && headerData.startsWith('stage-header-'))) {
+                                                            handleStageHeaderDrop(e, pIndex);
+                                                        } else {
+                                                            handleDrop(e, pipeline.name);
+                                                        }
+                                                    }}
                                                 >
                                                     {/* Column Header */}
-                                                    <div className="pipeline-column-header">
+                                                    <div
+                                                        className={`pipeline-column-header ${draggedStageColIndex !== null && dragOverStageColIndex === pIndex ? 'stage-drag-over' : ''}`}
+                                                        draggable={hasFullAccess}
+                                                        onDragStart={(e) => handleStageHeaderDragStart(e, pIndex)}
+                                                        onDragOver={(e) => handleStageHeaderDragOver(e, pIndex)}
+                                                        onDragLeave={handleStageHeaderDragLeave}
+                                                        onDragEnd={handleStageHeaderDragEnd}
+                                                        onDrop={(e) => handleStageHeaderDrop(e, pIndex)}
+                                                        style={hasFullAccess ? { cursor: 'grab' } : {}}
+                                                    >
                                                         {isColEditing ? (
                                                             <div className="pipeline-inline-edit-wrap">
                                                                 <input
@@ -14437,6 +14609,11 @@ function Pipeline() {
                                                         ) : (
                                                             <>
                                                                 <div className="pipeline-stage-info">
+                                                                    {hasFullAccess && (
+                                                                        <span title="Drag column header to reorder stage" style={{ display: 'inline-flex', alignItems: 'center', color: '#94a3b8', cursor: 'grab', flexShrink: 0 }}>
+                                                                            <GripVertical size={13} />
+                                                                        </span>
+                                                                    )}
                                                                     <h3 className="pipeline-stage-name" title={pipeline.name}>
                                                                         {pipeline.name}
                                                                     </h3>
@@ -14506,26 +14683,78 @@ function Pipeline() {
                                                                                 </button>
                                                                             )}
                                                                             {hasFullAccess && (
-                                                                                <button
-                                                                                    type="button"
-                                                                                    className="pipeline-card-menu-item"
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        setActiveColMenuId(null);
-                                                                                        setEditingStageModal({
-                                                                                            type: 'pipeline',
-                                                                                            id: colKey,
-                                                                                            name: pipeline.name,
-                                                                                            originalName: pipeline.name,
-                                                                                            index: pIndex
-                                                                                        });
-                                                                                    }}
-                                                                                >
-                                                                                    <div className="pipeline-card-menu-item-left">
-                                                                                        <Edit2 size={13} style={{ color: '#64748b' }} />
-                                                                                        <span>Edit Stage</span>
-                                                                                    </div>
-                                                                                </button>
+                                                                                <>
+                                                                                    {pIndex > 0 && (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            className="pipeline-card-menu-item"
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                setActiveColMenuId(null);
+                                                                                                handleShiftStageOrder(pIndex, pIndex - 1);
+                                                                                            }}
+                                                                                            title={`Move "${pipeline.name}" left`}
+                                                                                        >
+                                                                                            <div className="pipeline-card-menu-item-left">
+                                                                                                <ArrowLeft size={13} style={{ color: '#0284c7' }} />
+                                                                                                <span>Move Left (←)</span>
+                                                                                            </div>
+                                                                                        </button>
+                                                                                    )}
+                                                                                    {pIndex < visiblePipelines.length - 1 && (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            className="pipeline-card-menu-item"
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                setActiveColMenuId(null);
+                                                                                                handleShiftStageOrder(pIndex, pIndex + 1);
+                                                                                            }}
+                                                                                            title={`Move "${pipeline.name}" right`}
+                                                                                        >
+                                                                                            <div className="pipeline-card-menu-item-left">
+                                                                                                <ArrowRight size={13} style={{ color: '#0284c7' }} />
+                                                                                                <span>Move Right (→)</span>
+                                                                                            </div>
+                                                                                        </button>
+                                                                                    )}
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        className="pipeline-card-menu-item"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            setActiveColMenuId(null);
+                                                                                            setReorderStagesList([...visiblePipelines]);
+                                                                                            setShowReorderStagesModal(true);
+                                                                                        }}
+                                                                                        title="Reorder all stages in list"
+                                                                                    >
+                                                                                        <div className="pipeline-card-menu-item-left">
+                                                                                            <ArrowUpDown size={13} style={{ color: '#0284c7' }} />
+                                                                                            <span>Reorder Stages</span>
+                                                                                        </div>
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        className="pipeline-card-menu-item"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            setActiveColMenuId(null);
+                                                                                            setEditingStageModal({
+                                                                                                type: 'pipeline',
+                                                                                                id: colKey,
+                                                                                                name: pipeline.name,
+                                                                                                originalName: pipeline.name,
+                                                                                                index: pIndex
+                                                                                            });
+                                                                                        }}
+                                                                                    >
+                                                                                        <div className="pipeline-card-menu-item-left">
+                                                                                            <Edit2 size={13} style={{ color: '#64748b' }} />
+                                                                                            <span>Edit Stage</span>
+                                                                                        </div>
+                                                                                    </button>
+                                                                                </>
                                                                             )}
                                                                             {hasFullAccess && (
                                                                                 <>
@@ -22414,6 +22643,148 @@ function Pipeline() {
             {/* ------------------------------------------------------------------
         Add Contact Stage Modal
         ------------------------------------------------------------------ */}
+            {/* ------------------------------------------------------------------
+         Reorder Pipeline Stages Modal
+        ------------------------------------------------------------------ */}
+            {
+                showReorderStagesModal && (
+                    <div className="pipeline-modal-backdrop" onClick={() => setShowReorderStagesModal(false)}>
+                        <div className="pipeline-modal-card" style={{ maxWidth: '520px', width: '90%', borderRadius: '14px', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+                            <div className="pipeline-modal-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #e2e8f0', background: '#ffffff' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <div className="pipeline-modal-icon-badge" style={{ background: '#e0f2fe', color: '#0284c7', width: '34px', height: '34px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <ArrowUpDown size={17} />
+                                    </div>
+                                    <div>
+                                        <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
+                                            Reorder Pipeline Stages
+                                        </h3>
+                                        <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                                            Move stages up or down to set the exact order for all sales executives.
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="pipeline-modal-close-btn"
+                                    onClick={() => setShowReorderStagesModal(false)}
+                                    title="Close"
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+
+                            <div className="pipeline-modal-body" style={{ padding: '16px 20px', maxHeight: '420px', overflowY: 'auto' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {reorderStagesList.map((stage, idx) => {
+                                        const count = deals.filter(d => (d.pipeline || d.stage || '').toLowerCase().trim() === (stage.name || '').toLowerCase().trim()).length;
+                                        return (
+                                            <div
+                                                key={stage.id || stage.name || idx}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                    padding: '10px 14px',
+                                                    background: '#f8fafc',
+                                                    border: '1px solid #e2e8f0',
+                                                    borderRadius: '8px',
+                                                    transition: 'all 0.15s ease'
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', background: '#e2e8f0', width: '22px', height: '22px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                        {idx + 1}
+                                                    </span>
+                                                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                                                        {stage.name}
+                                                    </span>
+                                                    <span className={`pipeline-stage-badge ${stage.badgeClass || 'new'}`} style={{ fontSize: '10px', padding: '1px 6px' }}>
+                                                        {count} deals
+                                                    </span>
+                                                </div>
+
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <button
+                                                        type="button"
+                                                        disabled={idx === 0}
+                                                        onClick={() => {
+                                                            if (idx === 0) return;
+                                                            const copy = [...reorderStagesList];
+                                                            const [moved] = copy.splice(idx, 1);
+                                                            copy.splice(idx - 1, 0, moved);
+                                                            setReorderStagesList(copy);
+                                                        }}
+                                                        style={{
+                                                            padding: '5px 8px',
+                                                            borderRadius: '6px',
+                                                            border: '1px solid #cbd5e1',
+                                                            background: idx === 0 ? '#f1f5f9' : '#fff',
+                                                            color: idx === 0 ? '#cbd5e1' : '#0284c7',
+                                                            cursor: idx === 0 ? 'not-allowed' : 'pointer'
+                                                        }}
+                                                        title="Move Up"
+                                                    >
+                                                        <ArrowUp size={13} />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        disabled={idx === reorderStagesList.length - 1}
+                                                        onClick={() => {
+                                                            if (idx === reorderStagesList.length - 1) return;
+                                                            const copy = [...reorderStagesList];
+                                                            const [moved] = copy.splice(idx, 1);
+                                                            copy.splice(idx + 1, 0, moved);
+                                                            setReorderStagesList(copy);
+                                                        }}
+                                                        style={{
+                                                            padding: '5px 8px',
+                                                            borderRadius: '6px',
+                                                            border: '1px solid #cbd5e1',
+                                                            background: idx === reorderStagesList.length - 1 ? '#f1f5f9' : '#fff',
+                                                            color: idx === reorderStagesList.length - 1 ? '#cbd5e1' : '#0284c7',
+                                                            cursor: idx === reorderStagesList.length - 1 ? 'not-allowed' : 'pointer'
+                                                        }}
+                                                        title="Move Down"
+                                                    >
+                                                        <ArrowDown size={13} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            <div className="pipeline-modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '14px 20px', borderTop: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                                <button
+                                    type="button"
+                                    className="pipeline-btn-cancel"
+                                    onClick={() => setShowReorderStagesModal(false)}
+                                    style={{ padding: '7px 16px', fontSize: '13px' }}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    className="pipeline-btn-primary"
+                                    disabled={savingStageOrder}
+                                    onClick={async () => {
+                                        await handleReorderStages(reorderStagesList);
+                                        setShowReorderStagesModal(false);
+                                    }}
+                                    style={{ padding: '7px 18px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                                >
+                                    <CheckCircle size={14} />
+                                    <span>{savingStageOrder ? 'Saving Order...' : 'Save Stage Order'}</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
             {
                 showAddStageModal && (
                     <div className="pipeline-modal-backdrop" onClick={() => setShowAddStageModal(false)}>

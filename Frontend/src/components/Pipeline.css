@@ -7479,3 +7479,16 @@ body.sidebar-expanded .pipeline-page-wrapper {
   display: inline-block;
   flex-shrink: 0;
 }
+
+/* Reorder Stage drag and drop styles */
+.pipeline-column.stage-col-highlight {
+  border: 2px dashed #0284c7 !important;
+  background-color: #f0f9ff !important;
+  transform: scale(1.01);
+  transition: all 0.15s ease;
+}
+
+.pipeline-column-header.stage-drag-over {
+  background-color: #e0f2fe !important;
+  border-radius: 8px;
+}

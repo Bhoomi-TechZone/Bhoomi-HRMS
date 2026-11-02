@@ -403,6 +403,25 @@ function MyLeads() {
     } finally {
       setLoading(false);
       initialFetchDoneRef.current = true;
+
+      // Background sync: Smoothly load all leads without history in background
+      // This enables instant filtering, multi-page selection, and full Excel export
+      setTimeout(() => {
+        api.get('/leads', {
+          params: {
+            includeHistory: 'false'
+          }
+        }).then(res => {
+          const data = res.data;
+          const all = Array.isArray(data) ? data : (data?.leads || []);
+          if (all.length > 50) {
+            setLeads(all);
+            setTotalLeadsCount(all.length);
+          }
+        }).catch(err => {
+          console.warn('Background sync error (page-based fallback active):', err.message);
+        });
+      }, 500);
     }
   };
 
@@ -1011,7 +1030,8 @@ function MyLeads() {
   const displayedTotal = totalLeadsCount || serverStats?.total || filteredLeads.length;
   const totalPages = Math.max(1, Math.ceil(displayedTotal / leadsPerPage));
   const startIndex = (currentPage - 1) * leadsPerPage;
-  const paginatedLeads = filteredLeads.length <= leadsPerPage ? filteredLeads : filteredLeads.slice(startIndex, startIndex + leadsPerPage);
+  const isServerPaginated = totalLeadsCount > 0 && filteredLeads.length < displayedTotal && filteredLeads.length <= leadsPerPage;
+  const paginatedLeads = isServerPaginated ? filteredLeads : (filteredLeads.length <= leadsPerPage && startIndex === 0 ? filteredLeads : filteredLeads.slice(startIndex, startIndex + leadsPerPage));
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getStatusClass = (status) => ({
     'New': 'status-new', 'Contacted': 'status-contacted', 'Qualified': 'status-qualified',
@@ -1545,7 +1565,14 @@ function MyLeads() {
           setSelectedLead(prev => (prev && prev._id === lead._id ? { ...prev, history: res.data.history } : prev));
         }
       }).catch(err => {
-        console.error('Error fetching on-demand lead history:', err);
+        console.warn('History endpoint error, falling back to full lead fetch:', err.message);
+        return api.get(`/leads/${lead._id}`).then(res2 => {
+          if (res2.data && Array.isArray(res2.data.history)) {
+            setSelectedLead(prev => (prev && prev._id === lead._id ? { ...prev, history: res2.data.history } : prev));
+          }
+        });
+      }).catch(() => {
+        // Fallback to local default history
       }).finally(() => {
         setLoadingHistory(false);
       });
