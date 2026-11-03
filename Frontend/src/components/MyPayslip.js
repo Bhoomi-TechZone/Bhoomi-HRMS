@@ -274,7 +274,11 @@ function MyPayslip() {
             });
 
             if (response.data) {
-                setEmployeePayslip(response.data);
+                if (response.data.status !== 'paid') {
+                    setEmployeePayslip(null);
+                } else {
+                    setEmployeePayslip(response.data);
+                }
             }
         } catch (error) {
             if (error.response && error.response.status === 404) {
@@ -940,8 +944,8 @@ function MyPayslip() {
                         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
                         </div>
-                        <h3 style={{ fontSize: '14px', color: '#0f172a', marginBottom: '4px', fontWeight: 600 }}>No Salary Slip Found</h3>
-                        <p style={{ fontSize: '12.5px', color: '#64748b', margin: 0 }}>Salary slip has not been generated for {months.find(m => m.value === selectedMonth)?.label} {selectedYear} yet.</p>
+                        <h3 style={{ fontSize: '14px', color: '#0f172a', marginBottom: '4px', fontWeight: 600 }}>No Paid Salary Slip Available</h3>
+                        <p style={{ fontSize: '12.5px', color: '#64748b', margin: 0 }}>Salary slip for {months.find(m => m.value === selectedMonth)?.label} {selectedYear} will be available once the payroll status is marked as Paid.</p>
                     </div>
                 )}
 
@@ -1180,34 +1184,63 @@ function MyPayslip() {
                                         <span style={{ fontSize: '11px', fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Amount</span>
                                     </div>
                                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
-                                            <span>Basic Salary</span>
-                                            <span style={{ fontWeight: 600, color: '#0f172a' }}>{formatCurrency(employeePayslip.salaryDetails?.basicSalary || 0)}</span>
-                                        </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
-                                            <span>House Rent Allowance (HRA)</span>
-                                            <span style={{ fontWeight: 600, color: (employeePayslip.salaryDetails?.allowances?.hra > 0) ? '#16a34a' : '#64748b' }}>
-                                                {formatCurrency(employeePayslip.salaryDetails?.allowances?.hra || 0)}
-                                            </span>
-                                        </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
-                                            <span>Conveyance Allowance</span>
-                                            <span style={{ fontWeight: 600, color: (employeePayslip.salaryDetails?.allowances?.conveyance > 0 || employeePayslip.salaryDetails?.allowances?.transport > 0) ? '#16a34a' : '#64748b' }}>
-                                                {formatCurrency(employeePayslip.salaryDetails?.allowances?.conveyance || employeePayslip.salaryDetails?.allowances?.transport || 0)}
-                                            </span>
-                                        </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
-                                            <span>Food Allowance</span>
-                                            <span style={{ fontWeight: 600, color: (employeePayslip.salaryDetails?.allowances?.food > 0) ? '#16a34a' : '#64748b' }}>
-                                                {formatCurrency(employeePayslip.salaryDetails?.allowances?.food || 0)}
-                                            </span>
-                                        </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
-                                            <span>Additional Bonus</span>
-                                            <span style={{ fontWeight: 600, color: (employeePayslip.salaryDetails?.bonus > 0) ? '#16a34a' : '#64748b' }}>
-                                                {(employeePayslip.salaryDetails?.bonus > 0) ? `+${formatCurrency(employeePayslip.salaryDetails.bonus)}` : '₹0.00'}
-                                            </span>
-                                        </div>
+                                        {(() => {
+                                            const struct = employeePayslip.salaryStructure || {};
+                                            const sAllow = struct.allowances || {};
+                                            const curAllow = employeePayslip.salaryDetails?.allowances || {};
+                                            const sTot = (Number(sAllow.hra) || 0) + (Number(sAllow.conveyance || sAllow.transport) || 0) + (Number(sAllow.food) || 0);
+                                            const curTot = (Number(curAllow.hra) || 0) + (Number(curAllow.conveyance || curAllow.transport) || 0) + (Number(curAllow.food) || 0);
+
+                                            const useStruct = (sTot > 0 && curTot === 0);
+                                            const dispBasic = useStruct ? struct.basicSalary : (employeePayslip.salaryDetails?.basicSalary || 0);
+                                            const dispHra = useStruct ? (sAllow.hra || struct.hra || 0) : (curAllow.hra || 0);
+                                            const dispConv = useStruct ? (sAllow.conveyance || sAllow.transport || struct.conveyance || 0) : (curAllow.conveyance || curAllow.transport || 0);
+                                            const dispFood = useStruct ? (sAllow.food || struct.food || 0) : (curAllow.food || 0);
+
+                                            return (
+                                                <>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                                                        <span>Basic Salary</span>
+                                                        <span style={{ fontWeight: 600, color: '#0f172a' }}>{formatCurrency(dispBasic)}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                                                        <span>House Rent Allowance (HRA)</span>
+                                                        <span style={{ fontWeight: 600, color: dispHra > 0 ? '#16a34a' : '#64748b' }}>
+                                                            {formatCurrency(dispHra)}
+                                                        </span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                                                        <span>Conveyance Allowance</span>
+                                                        <span style={{ fontWeight: 600, color: dispConv > 0 ? '#16a34a' : '#64748b' }}>
+                                                            {formatCurrency(dispConv)}
+                                                        </span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                                                        <span>Food Allowance</span>
+                                                        <span style={{ fontWeight: 600, color: dispFood > 0 ? '#16a34a' : '#64748b' }}>
+                                                            {formatCurrency(dispFood)}
+                                                        </span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                                                        <span>Additional Bonus</span>
+                                                        <span style={{ fontWeight: 600, color: (employeePayslip.salaryDetails?.bonus > 0) ? '#16a34a' : '#64748b' }}>
+                                                            {(employeePayslip.salaryDetails?.bonus > 0) ? `+${formatCurrency(employeePayslip.salaryDetails.bonus)}` : '₹0.00'}
+                                                        </span>
+                                                    </div>
+                                                    {((employeePayslip.customComponents || []).filter(c => (c.type || '').toLowerCase() === 'addition' && Number(c.amount) > 0)).map((comp, idx) => (
+                                                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                                                            <div>
+                                                                <span style={{ fontWeight: 600, color: '#0f172a' }}>{comp.title}</span>
+                                                                {comp.remarks && <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>{comp.remarks}</span>}
+                                                            </div>
+                                                            <span style={{ fontWeight: 600, color: '#16a34a' }}>
+                                                                +{formatCurrency(comp.amount)}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                     {/* Total Gross Row */}
                                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 18px', background: '#f8fafc', fontSize: '12.5px', fontWeight: 700, color: '#0f172a', borderTop: '1px solid #f1f5f9', marginTop: 'auto' }}>
@@ -1222,36 +1255,69 @@ function MyPayslip() {
                                         <span style={{ fontSize: '11px', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Deductions Description</span>
                                         <span style={{ fontSize: '11px', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Amount</span>
                                     </div>
-                                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                                        {(() => {
-                                            const manualPen = employeePayslip.salaryDetails?.deductions?.penalty || 0;
-                                            const latePen = employeePayslip.salaryDetails?.deductions?.lateDeduction || 0;
-                                            const halfDayPen = employeePayslip.salaryDetails?.deductions?.halfDayDeduction || 0;
-                                            const goalPen = employeePayslip.salaryDetails?.deductions?.goalDeduction || 0;
-                                            const totalPen = manualPen + latePen + halfDayPen + goalPen;
-                                            return (
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
-                                                    <span>Penalty</span>
-                                                    <span style={{ fontWeight: 600, color: totalPen > 0 ? '#dc2626' : '#64748b' }}>
-                                                        {totalPen > 0 ? `-${formatCurrency(totalPen)}` : '₹0.00'}
+                                    {(() => {
+                                        const absentDays = Number(employeePayslip.workingDays?.absent) || 0;
+                                        const halfDays = Number(employeePayslip.workingDays?.halfDay ?? employeePayslip.workingDays?.halfDays) || 0;
+                                        const unpaidDays = absentDays + (halfDays * 0.5);
+
+                                        const bSal = employeePayslip.salaryDetails?.basicSalary || employeePayslip.salaryStructure?.basicSalary || 0;
+                                        const al = employeePayslip.salaryDetails?.allowances || employeePayslip.salaryStructure?.allowances || {};
+                                        const totAl = (Number(al.hra) || 0) + (Number(al.conveyance || al.transport) || 0) + (Number(al.food) || 0) + (Number(al.da) || 0) + (Number(al.medical) || 0) + (Number(al.other) || 0);
+                                        const fullGross = (bSal + totAl) > 0 ? (bSal + totAl) : (employeePayslip.salaryDetails?.grossSalary || 0);
+                                        const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+                                        const calculatedLop = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : 0;
+
+                                        const manualPen = Number(employeePayslip.salaryDetails?.deductions?.penalty) || 0;
+                                        const latePen = Number(employeePayslip.salaryDetails?.deductions?.lateDeduction) || 0;
+                                        const goalPen = Number(employeePayslip.salaryDetails?.deductions?.goalDeduction) || 0;
+                                        const totalPen = manualPen + latePen + goalPen;
+
+                                        const effectiveLop = calculatedLop;
+
+                                        const d = employeePayslip.salaryDetails?.deductions || {};
+                                        const customDedTotal = (employeePayslip.customComponents || []).filter(c => (c.type || '').toLowerCase() === 'deduction').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+                                        const customAddTotal = (employeePayslip.customComponents || []).filter(c => (c.type || '').toLowerCase() === 'addition').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+                                        const stdDed = (Number(d.pf) || 0) + (Number(d.esi) || 0) + (Number(d.tax) || 0) + (Number(d.loan) || 0) + (Number(d.advance) || 0) + (Number(d.other) || 0);
+                                        const totalDeductionsCalc = effectiveLop + totalPen + stdDed + customDedTotal;
+                                        const netSalaryCalc = Number((fullGross + (employeePayslip.salaryDetails?.bonus || 0) + customAddTotal - totalDeductionsCalc).toFixed(2));
+
+                                        return (
+                                            <>
+                                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                                                        <span>Penalty</span>
+                                                        <span style={{ fontWeight: 600, color: totalPen > 0 ? '#dc2626' : '#64748b' }}>
+                                                            {totalPen > 0 ? `-${formatCurrency(totalPen)}` : '₹0.00'}
+                                                        </span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                                                        <span>Loss of Pay (LOP) {unpaidDays > 0 ? `(${unpaidDays}d)` : ''}</span>
+                                                        <span style={{ fontWeight: 600, color: effectiveLop > 0 ? '#dc2626' : '#64748b' }}>
+                                                            {effectiveLop > 0 ? `-${formatCurrency(effectiveLop)}` : '₹0.00'}
+                                                        </span>
+                                                    </div>
+                                                    {((employeePayslip.customComponents || []).filter(c => (c.type || '').toLowerCase() === 'deduction' && Number(c.amount) > 0)).map((comp, idx) => (
+                                                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                                                            <div>
+                                                                <span style={{ fontWeight: 600, color: '#0f172a' }}>{comp.title}</span>
+                                                                {comp.remarks && <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>{comp.remarks}</span>}
+                                                            </div>
+                                                            <span style={{ fontWeight: 600, color: '#dc2626' }}>
+                                                                -{formatCurrency(comp.amount)}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                {/* Total Deductions Row */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 18px', background: '#f8fafc', fontSize: '12.5px', fontWeight: 700, color: '#0f172a', borderTop: '1px solid #f1f5f9', marginTop: 'auto' }}>
+                                                    <span>Total Deductions</span>
+                                                    <span style={{ color: totalDeductionsCalc > 0 ? '#dc2626' : '#64748b' }}>
+                                                        {totalDeductionsCalc > 0 ? `-${formatCurrency(totalDeductionsCalc)}` : '₹0.00'}
                                                     </span>
                                                 </div>
-                                            );
-                                        })()}
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', fontSize: '12.5px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
-                                            <span>Loss of Pay (LOP)</span>
-                                            <span style={{ fontWeight: 600, color: (employeePayslip.salaryDetails?.deductions?.lossOfPay > 0) ? '#dc2626' : '#64748b' }}>
-                                                {(employeePayslip.salaryDetails?.deductions?.lossOfPay > 0) ? `-${formatCurrency(employeePayslip.salaryDetails.deductions.lossOfPay)}` : '₹0.00'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    {/* Total Deductions Row */}
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 18px', background: '#f8fafc', fontSize: '12.5px', fontWeight: 700, color: '#0f172a', borderTop: '1px solid #f1f5f9', marginTop: 'auto' }}>
-                                        <span>Total Deductions</span>
-                                        <span style={{ color: (employeePayslip.salaryDetails?.totalDeductions || 0) > 0 ? '#dc2626' : '#64748b' }}>
-                                            {(employeePayslip.salaryDetails?.totalDeductions || 0) > 0 ? `-${formatCurrency(employeePayslip.salaryDetails?.totalDeductions)}` : '₹0.00'}
-                                        </span>
-                                    </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             </div>
 
@@ -1259,7 +1325,36 @@ function MyPayslip() {
                             <div style={{ padding: '12px 20px', background: '#f0fdf4', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#166534' }}>Net In-Hand Salary:</span>
-                                    <span style={{ fontSize: '15px', fontWeight: 800, color: '#15803d' }}>{formatCurrency(employeePayslip.salaryDetails?.netSalary || 0)}</span>
+                                    <span style={{ fontSize: '15px', fontWeight: 800, color: '#15803d' }}>
+                                        {(() => {
+                                            const absentDays = Number(employeePayslip.workingDays?.absent) || 0;
+                                            const halfDays = Number(employeePayslip.workingDays?.halfDay ?? employeePayslip.workingDays?.halfDays) || 0;
+                                            const unpaidDays = absentDays + (halfDays * 0.5);
+
+                                            const bSal = employeePayslip.salaryDetails?.basicSalary || employeePayslip.salaryStructure?.basicSalary || 0;
+                                            const al = employeePayslip.salaryDetails?.allowances || employeePayslip.salaryStructure?.allowances || {};
+                                            const totAl = (Number(al.hra) || 0) + (Number(al.conveyance || al.transport) || 0) + (Number(al.food) || 0) + (Number(al.da) || 0) + (Number(al.medical) || 0) + (Number(al.other) || 0);
+                                            const fullGross = (bSal + totAl) > 0 ? (bSal + totAl) : (employeePayslip.salaryDetails?.grossSalary || 0);
+                                            const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+                                            const calculatedLop = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : 0;
+
+                                            const manualPen = Number(employeePayslip.salaryDetails?.deductions?.penalty) || 0;
+                                            const latePen = Number(employeePayslip.salaryDetails?.deductions?.lateDeduction) || 0;
+                                            const goalPen = Number(employeePayslip.salaryDetails?.deductions?.goalDeduction) || 0;
+                                            const totalPen = manualPen + latePen + goalPen;
+
+                                            const effectiveLop = calculatedLop;
+
+                                            const customDedTotal = (employeePayslip.customComponents || []).filter(c => (c.type || '').toLowerCase() === 'deduction').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+                                            const customAddTotal = (employeePayslip.customComponents || []).filter(c => (c.type || '').toLowerCase() === 'addition').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+
+                                            const d = employeePayslip.salaryDetails?.deductions || {};
+                                            const stdDed = (Number(d.pf) || 0) + (Number(d.esi) || 0) + (Number(d.tax) || 0) + (Number(d.loan) || 0) + (Number(d.advance) || 0) + (Number(d.other) || 0);
+                                            const totalDeductionsCalc = effectiveLop + totalPen + stdDed + customDedTotal;
+                                            const netSalaryCalc = Number((fullGross + (employeePayslip.salaryDetails?.bonus || 0) + customAddTotal - totalDeductionsCalc).toFixed(2));
+                                            return formatCurrency(netSalaryCalc);
+                                        })()}
+                                    </span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '12px', color: '#166534' }}>
                                     {employeePayslip.paidAt && (

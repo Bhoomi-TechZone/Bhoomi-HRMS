@@ -4,6 +4,7 @@ const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
 const SalaryStructure = require('../models/SalaryStructure');
 const User = require('../models/User');
+const Payroll = require('../models/Payroll');
 
 // Get all salary structures
 router.get('/', auth, checkPermission('payroll', 'read'), async (req, res) => {
@@ -32,6 +33,34 @@ router.get('/employee/:employeeId', auth, checkPermission('payroll', 'read'), as
 
     if (!salaryStructure) {
       return res.status(404).json({ message: 'Salary structure not found' });
+    }
+
+    // Auto-sync updated structure to existing payrolls for this employee
+    try {
+      const empId = salaryStructure.employee?._id || salaryStructure.employee;
+      if (empId) {
+        await Payroll.updateMany(
+          {
+            $or: [{ employee: empId }, { employee: empId.toString() }],
+            status: { $in: ['draft', 'approved', 'processed'] }
+          },
+          {
+            $set: {
+              salaryStructure: salaryStructure._id,
+              'salaryDetails.basicSalary': salaryStructure.basicSalary,
+              'salaryDetails.allowances': salaryStructure.allowances || {},
+              'salaryDetails.deductions.pf': salaryStructure.deductions?.pf || 0,
+              'salaryDetails.deductions.esi': salaryStructure.deductions?.esi || 0,
+              'salaryDetails.deductions.tax': salaryStructure.deductions?.tax || 0,
+              'salaryDetails.deductions.loan': salaryStructure.deductions?.loan || 0,
+              'salaryDetails.deductions.advance': salaryStructure.deductions?.advance || 0,
+              'salaryDetails.deductions.other': salaryStructure.deductions?.other || 0
+            }
+          }
+        );
+      }
+    } catch (syncErr) {
+      console.warn('Warning syncing updated salary structure to payrolls:', syncErr.message);
     }
 
     res.json(salaryStructure);
@@ -100,6 +129,31 @@ router.post('/', auth, checkPermission('payroll', 'create'), async (req, res) =>
 
     await salaryStructure.populate('employee', 'firstName lastName employeeId department designation');
     await salaryStructure.populate('createdBy', 'firstName lastName');
+
+    // Auto-sync new structure to existing payrolls for this employee
+    try {
+      await Payroll.updateMany(
+        {
+          $or: [{ employee: employeeExists._id }, { employee: employeeExists._id.toString() }],
+          status: { $in: ['draft', 'approved', 'processed'] }
+        },
+        {
+          $set: {
+            salaryStructure: salaryStructure._id,
+            'salaryDetails.basicSalary': salaryStructure.basicSalary,
+            'salaryDetails.allowances': salaryStructure.allowances || {},
+            'salaryDetails.deductions.pf': salaryStructure.deductions?.pf || 0,
+            'salaryDetails.deductions.esi': salaryStructure.deductions?.esi || 0,
+            'salaryDetails.deductions.tax': salaryStructure.deductions?.tax || 0,
+            'salaryDetails.deductions.loan': salaryStructure.deductions?.loan || 0,
+            'salaryDetails.deductions.advance': salaryStructure.deductions?.advance || 0,
+            'salaryDetails.deductions.other': salaryStructure.deductions?.other || 0
+          }
+        }
+      );
+    } catch (syncErr) {
+      console.warn('Warning syncing salary structure to payrolls:', syncErr.message);
+    }
 
     res.status(201).json(salaryStructure);
   } catch (error) {

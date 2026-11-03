@@ -8,6 +8,7 @@ function UserProfile() {
   const [user, setUser] = useState(contextUser);
   const [loading, setLoading] = useState(false);
   const [shiftName, setShiftName] = useState('');
+  const [managerName, setManagerName] = useState('');
   
   // Toggle visibility states for sensitive fields
   const [showAadhar, setShowAadhar] = useState(false);
@@ -59,6 +60,33 @@ function UserProfile() {
       }
     }
   }, [contextUser]);
+
+  // Resolve manager display name
+  useEffect(() => {
+    if (user?.isManager) {
+      setManagerName('He is manager');
+    } else if (user?.assignedManager) {
+      if (typeof user.assignedManager === 'object' && user.assignedManager.firstName) {
+        const idPart = user.assignedManager.employeeId ? ` (${user.assignedManager.employeeId})` : '';
+        setManagerName(`${user.assignedManager.firstName} ${user.assignedManager.lastName || ''}${idPart}`.trim());
+      } else if (typeof user.assignedManager === 'string' && user.assignedManager.trim() !== '') {
+        // Fallback: fetch from /employees/list to resolve manager name if only ID is present
+        api.get('/employees/list')
+          .then(res => {
+            const mgr = (res.data || []).find(e => e._id === user.assignedManager);
+            if (mgr) {
+              const idPart = mgr.employeeId ? ` (${mgr.employeeId})` : '';
+              setManagerName(`${mgr.firstName} ${mgr.lastName || ''}${idPart}`.trim());
+            }
+          })
+          .catch(err => console.error('Error resolving manager name:', err));
+      } else {
+        setManagerName('');
+      }
+    } else {
+      setManagerName('');
+    }
+  }, [user?.assignedManager, user?.isManager]);
 
   if (loading && !user) {
     return (
@@ -375,7 +403,7 @@ function UserProfile() {
                 </div>
               </div>
               
-              <FieldDisplay label="Assigned Manager" value={user?.assignedManager?.firstName ? `${user.assignedManager.firstName} ${user.assignedManager.lastName}` : ''} />
+              <FieldDisplay label="Assigned Manager" value={managerName} />
               <FieldDisplay label="Shift Type" value={shiftName} />
               <FieldDisplay 
                 label="Shift Timing" 

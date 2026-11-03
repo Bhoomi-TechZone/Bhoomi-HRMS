@@ -147,7 +147,7 @@ router.get('/stats', auth, checkPermission('employees', 'read'), async (req, res
 router.get('/list', auth, async (req, res) => {
   try {
     const employees = await User.find({ isActive: true })
-      .select('firstName lastName employeeId designation role isActive email phone department officialEmail joiningDate')
+      .select('firstName lastName employeeId designation role isActive email phone department officialEmail joiningDate isManager')
       .populate('role', 'name')
       .sort({ firstName: 1 });
     res.json(employees);
@@ -276,9 +276,7 @@ const exportEmployeesToExcel = async (req, res) => {
     const { employees, params } = await getExportEmployees(req);
 
     const data = employees.map((emp, i) => {
-      const managerName = emp.assignedManager
-        ? `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim()
-        : 'N/A';
+      const managerName = emp.isManager ? 'Self (Manager)' : (emp.assignedManager ? `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim() : 'N/A');
 
       const shiftTimings = (emp.shiftStartTime && emp.shiftEndTime)
         ? `${emp.shiftStartTime} - ${emp.shiftEndTime}`
@@ -528,9 +526,7 @@ const exportEmployeesToPDF = async (req, res) => {
     const cardGap = 12;
 
     const drawEmployeeCard = (emp, index, cardY) => {
-      const managerName = emp.assignedManager
-        ? `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim()
-        : 'N/A';
+      const managerName = emp.isManager ? 'Self (Manager)' : (emp.assignedManager ? `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim() : 'N/A');
 
       const shiftTimings = (emp.shiftStartTime && emp.shiftEndTime)
         ? `${emp.shiftStartTime} - ${emp.shiftEndTime}`
@@ -889,6 +885,12 @@ router.post('/', auth, checkPermission('employees', 'create'), (req, res) => {
 
     try {
       const data = { ...req.body };
+      if (data.isManager !== undefined) {
+        data.isManager = data.isManager === true || data.isManager === 'true';
+      }
+      if (data.isManager) {
+        data.assignedManager = null;
+      }
 
       // Add file paths if they exist
       if (req.files) {
@@ -993,6 +995,12 @@ router.put('/bulk/gender', auth, checkPermission('employees', 'update'), async (
   router.put('/:id', auth, checkPermission('employees', 'update'), async (req, res) => {
     try {
       const { password, ...updateData } = req.body;
+      if (updateData.isManager !== undefined) {
+        updateData.isManager = updateData.isManager === true || updateData.isManager === 'true';
+      }
+      if (updateData.isManager) {
+        updateData.assignedManager = null;
+      }
   
       const existingEmployee = await User.findById(req.params.id);
       if (!existingEmployee) {

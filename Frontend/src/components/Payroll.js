@@ -51,9 +51,55 @@ function Payroll() {
   const [selectedPayrollIds, setSelectedPayrollIds] = useState([]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
+  const [activeStatusMenu, setActiveStatusMenu] = useState(null);
+  const [statusMenuPos, setStatusMenuPos] = useState({ top: 0, left: 0 });
+
+  const handleOpenStatusMenu = (e, payrollId) => {
+    e.stopPropagation();
+    if (activeStatusMenu === payrollId) {
+      setActiveStatusMenu(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const showAbove = spaceBelow < 150;
+    setStatusMenuPos({
+      top: showAbove ? Math.max(10, rect.top - 130) : rect.bottom + 4,
+      left: Math.max(10, rect.left - 10)
+    });
+    setActiveStatusMenu(payrollId);
+    setActivePayrollMenu(null);
+  };
+
+  const handleStatusChange = async (payrollId, newStatus) => {
+    try {
+      setActiveStatusMenu(null);
+      setPayrolls(prev => prev.map(p => p._id === payrollId ? { ...p, status: newStatus } : p));
+
+      const response = await api.patch(`/payroll/${payrollId}/status`, { status: newStatus });
+      if (response.data) {
+        setPayrolls(prev => prev.map(p => p._id === payrollId ? { ...p, ...response.data } : p));
+      }
+    } catch (err) {
+      console.error('Error updating status:', err);
+      alert(err.response?.data?.message || 'Failed to update payroll status');
+      fetchPayrolls();
+    }
+  };
+
+  const getStatusBadgeConfig = (status) => {
+    const s = (status || 'draft').toLowerCase();
+    if (s === 'paid') {
+      return { key: 'paid', bg: '#d1fae5', color: '#047857', dot: '#059669', border: '#a7f3d0', label: 'Paid' };
+    }
+    if (s === 'approved' || s === 'processed') {
+      return { key: 'approved', bg: '#dbeafe', color: '#1d4ed8', dot: '#3b82f6', border: '#bfdbfe', label: 'Approved' };
+    }
+    return { key: 'draft', bg: '#fef3c7', color: '#92400e', dot: '#f59e0b', border: '#fde68a', label: 'Draft' };
+  };
 
   useEffect(() => {
-    const handleClose = () => setActivePayrollMenu(null);
+    const handleClose = () => { setActivePayrollMenu(null); setActiveStatusMenu(null); };
     window.addEventListener('click', handleClose);
     window.addEventListener('scroll', handleClose, true);
     return () => {
@@ -150,6 +196,9 @@ function Payroll() {
   const [activePayrollMenu, setActivePayrollMenu] = useState(null);
   const [showEditPayrollModal, setShowEditPayrollModal] = useState(false);
   const [editPayrollData, setEditPayrollData] = useState(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [payrollHistoryData, setPayrollHistoryData] = useState(null);
 
   // Manual Generate Slip Modal State
   const [showGenerateSlipModal, setShowGenerateSlipModal] = useState(false);
@@ -419,11 +468,11 @@ function Payroll() {
     }
   }, []);
 
-  // Fetch payslips (all generated payrolls for this month)
+  // Fetch payslips (only PAID payroll records are shown as salary slips)
   const fetchPaidPayslips = useCallback(async () => {
     try {
       const response = await api.get('/payroll', {
-        params: { month: selectedMonth, year: selectedYear }
+        params: { month: selectedMonth, year: selectedYear, status: 'paid' }
       });
       if (response.data) {
         setPaidPayslips(response.data);
@@ -702,23 +751,124 @@ function Payroll() {
   // Edit Payroll Handlers
   const handleEditPayrollClick = (payroll) => {
     setActivePayrollMenu(null);
+    const existingCustomComponents = Array.isArray(payroll.customComponents) 
+      ? payroll.customComponents.map(c => ({
+          title: c.title || '',
+          type: (c.type || 'addition').toLowerCase() === 'deduction' ? 'Deduction' : 'Addition',
+          amount: c.amount || '',
+          remarks: c.remarks || ''
+        }))
+      : [];
+
+    const empName = payroll.employee?.firstName 
+      ? `${payroll.employee.firstName} ${payroll.employee.lastName || ''}`.trim()
+      : (payroll.employeeId?.firstName 
+          ? `${payroll.employeeId.firstName} ${payroll.employeeId.lastName || ''}`.trim()
+          : 'Employee');
+
+    // Attendance and paid days calculation (standard 30-day base)
+    const presentDays = payroll.attendance?.present || 0;
+    const absentDays = payroll.workingDays?.absent || 0;
+    const halfDays = payroll.workingDays?.halfDay || 0;
+    const unpaidDays = absentDays + (halfDays * 0.5);
+    const paidDays = Math.max(0, 30 - unpaidDays);
+
+    const allowances = payroll.salaryDetails?.allowances || {};
+    const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
+    const basicSalary = payroll.salaryDetails?.basicSalary || 0;
+    const fullMonthlyGross = (basicSalary + totalAllowances) > 0 ? (basicSalary + totalAllowances) : (payroll.salaryDetails?.grossSalary || 0);
+    const perDaySalary = fullMonthlyGross > 0 ? (fullMonthlyGross / 30) : 0;
+    
+    // Earned gross as per paid days
+    const paidDaysSalary = fullMonthlyGross > 0 ? Number((paidDays * perDaySalary).toFixed(2)) : (payroll.salaryDetails?.grossSalary || 0);
+    const lopAmount = unpaidDays > 0 
+      ? Number((unpaidDays * perDaySalary).toFixed(2)) 
+      : (Number(payroll.salaryDetails?.deductions?.lossOfPay) || 0);
+
+    const deductions = payroll.salaryDetails?.deductions || {};
+    const totalStdDeductions = (deductions.pf || 0) + (deductions.esi || 0) + (deductions.tax || 0) + (deductions.loan || 0) + (deductions.advance || 0) + (deductions.other || 0);
+
     setEditPayrollData({
       id: payroll._id,
-      employeeName: payroll.employeeId?.firstName ? `${payroll.employeeId.firstName} ${payroll.employeeId.lastName}` : 'Employee',
-      basicSalary: payroll.salaryDetails?.basicSalary || 0,
+      employeeName: empName,
+      basicSalary: basicSalary,
+      fullMonthlyGross: fullMonthlyGross,
+      paidDays: paidDays,
+      unpaidDays: unpaidDays,
+      paidDaysSalary: paidDaysSalary,
+      lopAmount: lopAmount,
       bonus: payroll.salaryDetails?.bonus || 0,
-      penalty: payroll.salaryDetails?.deductions?.penalty || 0,
-      originalGross: payroll.salaryDetails?.grossSalary || 0,
-      originalTotalDeductions: payroll.salaryDetails?.totalDeductions || 0,
+      penalty: deductions.penalty || 0,
+      originalPenalty: deductions.penalty || 0,
+      totalStdDeductions: totalStdDeductions,
+      customComponents: existingCustomComponents,
+      newTitle: '',
+      newType: 'Addition',
+      newAmount: '',
+      newRemarks: ''
     });
     setShowEditPayrollModal(true);
   };
 
+  const handleAddCustomComponent = () => {
+    if (!editPayrollData) return;
+    const title = (editPayrollData.newTitle || '').trim();
+    const amount = parseFloat(editPayrollData.newAmount);
+
+    if (!title) {
+      alert('Please enter a component title');
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      alert('Please enter a valid component amount greater than 0');
+      return;
+    }
+
+    const newComp = {
+      title,
+      type: editPayrollData.newType === 'Deduction' ? 'Deduction' : 'Addition',
+      amount: amount,
+      remarks: (editPayrollData.newRemarks || '').trim()
+    };
+
+    setEditPayrollData({
+      ...editPayrollData,
+      customComponents: [...(editPayrollData.customComponents || []), newComp],
+      newTitle: '',
+      newType: 'Addition',
+      newAmount: '',
+      newRemarks: ''
+    });
+  };
+
+  const handleRemoveCustomComponent = (indexToRemove) => {
+    if (!editPayrollData) return;
+    setEditPayrollData({
+      ...editPayrollData,
+      customComponents: editPayrollData.customComponents.filter((_, idx) => idx !== indexToRemove)
+    });
+  };
+
   const handleSaveEditPayroll = async () => {
     try {
+      // Auto-include pending input component if user filled in title & amount but didn't click "+ Add Component" before clicking "Save Changes"
+      let componentsToSave = [...(editPayrollData.customComponents || [])];
+      const pendingTitle = (editPayrollData.newTitle || '').trim();
+      const pendingAmount = parseFloat(editPayrollData.newAmount);
+      if (pendingTitle && !isNaN(pendingAmount) && pendingAmount > 0) {
+        componentsToSave.push({
+          title: pendingTitle,
+          type: (editPayrollData.newType || 'Addition').toString().trim().toLowerCase() === 'deduction' ? 'Deduction' : 'Addition',
+          amount: pendingAmount,
+          remarks: (editPayrollData.newRemarks || '').trim()
+        });
+      }
+
       await api.put(`/payroll/${editPayrollData.id}`, {
         bonus: editPayrollData.bonus,
-        penalty: editPayrollData.penalty
+        penalty: editPayrollData.penalty,
+        customComponents: componentsToSave,
+        remarks: (editPayrollData.newRemarks || '').trim()
       });
       setShowEditPayrollModal(false);
       setEditPayrollData(null);
@@ -726,12 +876,47 @@ function Payroll() {
       
       setActiveToast({
         title: 'Payroll Updated',
-        message: 'Bonus and penalty have been successfully updated.',
+        message: 'Payroll components and adjustments updated successfully.',
         type: 'success'
       });
     } catch (error) {
       console.error('Error updating payroll:', error);
       alert(error.response?.data?.message || 'Failed to update payroll');
+    }
+  };
+
+  // Open Payroll History Modal
+  const handleOpenHistoryModal = async (payroll) => {
+    setActivePayrollMenu(null);
+    setShowHistoryModal(true);
+    setHistoryLoading(true);
+    setPayrollHistoryData(null);
+    try {
+      const res = await api.get(`/payroll/${payroll._id}/history`);
+      setPayrollHistoryData(res.data);
+    } catch (err) {
+      console.error('Error fetching payroll history:', err);
+      const allowances = payroll.salaryDetails?.allowances || {};
+      const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
+      const basicSalary = payroll.salaryDetails?.basicSalary || 0;
+      const baseGross = (basicSalary + totalAllowances) > 0 ? (basicSalary + totalAllowances) : (payroll.salaryDetails?.grossSalary || 0);
+      setPayrollHistoryData({
+        payrollId: payroll._id,
+        employee: payroll.employee,
+        payPeriod: payroll.payPeriod,
+        status: payroll.status,
+        baseGross: baseGross,
+        currentGross: payroll.salaryDetails?.grossSalary || baseGross,
+        currentNet: payroll.salaryDetails?.netSalary || 0,
+        currentBonus: payroll.salaryDetails?.bonus || 0,
+        currentPenalty: payroll.salaryDetails?.deductions?.penalty || 0,
+        currentComponents: payroll.customComponents || [],
+        createdAt: payroll.createdAt,
+        processedBy: payroll.processedBy,
+        history: (payroll.editHistory || []).slice().reverse()
+      });
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -1159,6 +1344,26 @@ function Payroll() {
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
   // Export Monthly Payroll PDF
+  const resolveProcessedByName = (pb) => {
+    if (!pb) return 'Admin';
+    if (typeof pb === 'object') {
+      const name = `${pb.firstName || ''} ${pb.lastName || ''}`.trim();
+      if (name) return name;
+    }
+    if (typeof pb === 'string') {
+      if (/^[0-9a-fA-F]{24}$/.test(pb)) {
+        const found = allEmployees.find(e => (e._id === pb || e.id === pb));
+        if (found) {
+          const foundName = `${found.firstName || ''} ${found.lastName || ''}`.trim();
+          if (foundName) return foundName;
+        }
+        return 'Admin';
+      }
+      return pb;
+    }
+    return 'Admin';
+  };
+
   const handleExportPayroll = () => {
     try {
       const doc = new jsPDF('landscape', 'pt', 'a4');
@@ -1178,8 +1383,7 @@ function Payroll() {
       doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN')} ${new Date().toLocaleTimeString('en-IN')}`, 630, 32);
 
       const tableColumn = [
-        "Sr", "Date", "Emp ID", "Employee Name", "Designation",
-        "Present", "Late", "Basic Salary", "Allowances", "Deductions", "Net Salary", "Status"
+        "Sr", "Date", "Emp ID", "Employee Name", "Gross Salary", "LOP", "Paid Days", "Unpaid Days", "Final Pay", "Status", "Generated By"
       ];
 
       const filtered = payrolls.filter((payroll) => {
@@ -1201,32 +1405,53 @@ function Payroll() {
       });
 
       const listToExport = filtered.length > 0 ? filtered : payrolls;
+      let totalGrossSum = 0;
+      let totalLopSum = 0;
       let totalNet = 0;
-      let totalDed = 0;
 
       const tableRows = listToExport.map((p, idx) => {
         const emp = p.employee || {};
-        const basic = p.salaryDetails?.basicSalary || 0;
-        const gross = p.salaryDetails?.grossSalary || 0;
-        const ded = p.salaryDetails?.totalDeductions || 0;
-        const net = p.salaryDetails?.netSalary || 0;
-        const allow = gross - basic;
-        totalNet += net;
-        totalDed += ded;
+        const absentDays = p.workingDays?.absent || 0;
+        const halfDays = p.workingDays?.halfDay || 0;
+        const unpaidDays = absentDays + (halfDays * 0.5);
+        const paidDays = Math.max(0, 30 - unpaidDays);
+
+        const allowances = p.salaryDetails?.allowances || {};
+        const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
+        const basicSalary = p.salaryDetails?.basicSalary || 0;
+        const fullGross = (basicSalary + totalAllowances) > 0 ? (basicSalary + totalAllowances) : (p.salaryDetails?.grossSalary || 0);
+        const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+        const earnedGross = fullGross > 0 ? Number((paidDays * perDaySalary).toFixed(2)) : (p.salaryDetails?.grossSalary || 0);
+        const lopAmount = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : (Number(p.salaryDetails?.deductions?.lossOfPay) || 0);
+
+        const deductions = p.salaryDetails?.deductions || {};
+        const totalStdDeductions = (deductions.pf || 0) + (deductions.esi || 0) + (deductions.tax || 0) + (deductions.loan || 0) + (deductions.advance || 0) + (deductions.other || 0);
+        const manualPenalty = deductions.penalty || 0;
+        const latePenalty = deductions.lateDeduction || 0;
+        const totalPenalties = manualPenalty + latePenalty;
+
+        const comps = Array.isArray(p.customComponents) ? p.customComponents : [];
+        const cAdd = comps.filter(c => (c.type || '').toLowerCase() === 'addition').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+        const cDed = comps.filter(c => (c.type || '').toLowerCase() === 'deduction').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+        const displayGross = Number((fullGross + cAdd).toFixed(2));
+        const netSalary = Number((earnedGross + (p.salaryDetails?.bonus || 0) + cAdd - totalStdDeductions - totalPenalties - cDed).toFixed(2));
+
+        totalGrossSum += displayGross;
+        totalLopSum += lopAmount;
+        totalNet += netSalary;
 
         return [
           idx + 1,
           p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '-',
           emp.employeeId || 'N/A',
           `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'N/A',
-          emp.designation || '-',
-          p.attendance?.present || 0,
-          p.attendance?.lateCheckIns || 0,
-          formatCurrencyForPDF(basic),
-          formatCurrencyForPDF(allow > 0 ? allow : 0),
-          formatCurrencyForPDF(ded),
-          formatCurrencyForPDF(net),
-          (p.status || 'Draft').toUpperCase()
+          formatCurrencyForPDF(displayGross),
+          lopAmount > 0 ? formatCurrencyForPDF(lopAmount) : '—',
+          Number.isInteger(paidDays) ? paidDays : paidDays.toFixed(1),
+          Number.isInteger(unpaidDays) ? unpaidDays : unpaidDays.toFixed(1),
+          formatCurrencyForPDF(netSalary),
+          (p.status || 'Draft').toUpperCase(),
+          resolveProcessedByName(p.processedBy)
         ];
       });
 
@@ -1249,24 +1474,25 @@ function Payroll() {
         },
         columnStyles: {
           0: { halign: 'center', cellWidth: 25 },
-          1: { halign: 'center', cellWidth: 55 },
+          1: { halign: 'center', cellWidth: 60 },
           2: { halign: 'center', cellWidth: 55 },
-          3: { halign: 'left', cellWidth: 100 },
-          4: { halign: 'left', cellWidth: 90 },
-          5: { halign: 'center', cellWidth: 45 },
-          6: { halign: 'center', cellWidth: 40 },
-          7: { halign: 'right', cellWidth: 70 },
-          8: { halign: 'right', cellWidth: 65 },
-          9: { halign: 'right', cellWidth: 65, textColor: [220, 38, 38] },
-          10: { halign: 'right', cellWidth: 75, fontStyle: 'bold', textColor: [22, 101, 52] },
-          11: { halign: 'center', cellWidth: 55 }
+          3: { halign: 'left', cellWidth: 110 },
+          4: { halign: 'right', cellWidth: 75 },
+          5: { halign: 'right', cellWidth: 60, textColor: [220, 38, 38] },
+          6: { halign: 'center', cellWidth: 50 },
+          7: { halign: 'center', cellWidth: 55 },
+          8: { halign: 'right', cellWidth: 75, fontStyle: 'bold', textColor: [22, 101, 52] },
+          9: { halign: 'center', cellWidth: 60 },
+          10: { halign: 'center', cellWidth: 85 }
         },
         foot: [[
-          { content: 'TOTALS', colSpan: 7, styles: { halign: 'right', fontStyle: 'bold' } },
-          { content: formatCurrencyForPDF(listToExport.reduce((acc, p) => acc + (p.salaryDetails?.basicSalary || 0), 0)), styles: { halign: 'right', fontStyle: 'bold' } },
-          { content: formatCurrencyForPDF(listToExport.reduce((acc, p) => acc + Math.max(0, (p.salaryDetails?.grossSalary || 0) - (p.salaryDetails?.basicSalary || 0)), 0)), styles: { halign: 'right', fontStyle: 'bold' } },
-          { content: formatCurrencyForPDF(totalDed), styles: { halign: 'right', fontStyle: 'bold', textColor: [220, 38, 38] } },
+          { content: 'TOTALS', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: formatCurrencyForPDF(totalGrossSum), styles: { halign: 'right', fontStyle: 'bold' } },
+          { content: formatCurrencyForPDF(totalLopSum), styles: { halign: 'right', fontStyle: 'bold', textColor: [220, 38, 38] } },
+          { content: '', styles: { halign: 'center' } },
+          { content: '', styles: { halign: 'center' } },
           { content: formatCurrencyForPDF(totalNet), styles: { halign: 'right', fontStyle: 'bold', textColor: [22, 101, 52] } },
+          { content: '', styles: { halign: 'center' } },
           { content: '', styles: { halign: 'center' } }
         ]],
         footStyles: {
@@ -1307,11 +1533,30 @@ function Payroll() {
 
       const exportData = (filtered.length > 0 ? filtered : payrolls).map((p, idx) => {
         const emp = p.employee || {};
-        const presentDays = p.attendance?.present || 0;
-        const lateCheckIns = p.attendance?.lateCheckIns || 0;
         const absentDays = p.workingDays?.absent || 0;
         const halfDays = p.workingDays?.halfDay || 0;
-        const paidDays = presentDays + (halfDays * 0.5) + (p.leaves?.paid || 0);
+        const unpaidDays = absentDays + (halfDays * 0.5);
+        const paidDays = Math.max(0, 30 - unpaidDays);
+
+        const allowances = p.salaryDetails?.allowances || {};
+        const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
+        const basicSalary = p.salaryDetails?.basicSalary || 0;
+        const fullGross = (basicSalary + totalAllowances) > 0 ? (basicSalary + totalAllowances) : (p.salaryDetails?.grossSalary || 0);
+        const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+        const earnedGross = fullGross > 0 ? Number((paidDays * perDaySalary).toFixed(2)) : (p.salaryDetails?.grossSalary || 0);
+        const lopAmount = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : (Number(p.salaryDetails?.deductions?.lossOfPay) || 0);
+
+        const deductions = p.salaryDetails?.deductions || {};
+        const totalStdDeductions = (deductions.pf || 0) + (deductions.esi || 0) + (deductions.tax || 0) + (deductions.loan || 0) + (deductions.advance || 0) + (deductions.other || 0);
+        const manualPenalty = deductions.penalty || 0;
+        const latePenalty = deductions.lateDeduction || 0;
+        const totalPenalties = manualPenalty + latePenalty;
+
+        const comps = Array.isArray(p.customComponents) ? p.customComponents : [];
+        const cAdd = comps.filter(c => (c.type || '').toLowerCase() === 'addition').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+        const cDed = comps.filter(c => (c.type || '').toLowerCase() === 'deduction').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+        const displayGross = Number((fullGross + cAdd).toFixed(2));
+        const netSalary = Number((earnedGross + (p.salaryDetails?.bonus || 0) + cAdd - totalStdDeductions - totalPenalties - cDed).toFixed(2));
 
         return {
           'Sr No': idx + 1,
@@ -1320,29 +1565,22 @@ function Payroll() {
           'Employee Name': `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'N/A',
           'Designation': emp.designation || 'N/A',
           'Department': typeof emp.department === 'object' ? emp.department?.name : (emp.department || 'N/A'),
-          'Present Days': presentDays,
-          'Late Check-Ins': lateCheckIns,
-          'Absent Days': absentDays,
+          'Gross Salary (INR)': displayGross,
+          'LOP (INR)': lopAmount,
           'Paid Days': paidDays,
-          'LOP Days': p.workingDays?.absent || 0,
-          'Allowances (INR)': p.salaryDetails?.allowances ? Object.values(p.salaryDetails.allowances).reduce((a, b) => a + (parseFloat(b) || 0), 0) : 0,
-          'Penalties (INR)': p.salaryDetails?.deductions?.penalty || 0,
-          'Basic Salary (INR)': p.salaryDetails?.basicSalary || 0,
-          'Gross Salary (INR)': p.salaryDetails?.grossSalary || 0,
-          'Total Deductions (INR)': p.salaryDetails?.totalDeductions || 0,
-          'Net Salary (INR)': p.salaryDetails?.netSalary || 0,
+          'Unpaid Days': unpaidDays,
+          'Final Pay (INR)': netSalary,
           'Payment Due Date': p.paymentDueDate ? new Date(p.paymentDueDate).toLocaleDateString('en-IN') : '',
           'Status': (p.status || 'Draft').toUpperCase(),
-          'Generated By': p.generatedBy ? (typeof p.generatedBy === 'object' ? `${p.generatedBy.firstName || ''} ${p.generatedBy.lastName || ''}`.trim() : p.generatedBy) : 'Admin'
+          'Generated By': resolveProcessedByName(p.processedBy)
         };
       });
 
       const ws = XLSX.utils.json_to_sheet(exportData);
       ws['!cols'] = [
         { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 20 },
-        { wch: 18 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
-        { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
-        { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 16 }
+        { wch: 18 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 12 },
+        { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 18 }
       ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Monthly Payroll');
@@ -1881,41 +2119,71 @@ function Payroll() {
                 );
               };
 
+              const computedSummary = payrolls.reduce((acc, p) => {
+                const b = p.salaryDetails?.basicSalary || 0;
+                const al = p.salaryDetails?.allowances || {};
+                const totAl = (al.hra || 0) + (al.da || 0) + (al.conveyance || 0) + (al.food || 0) + (al.transport || 0) + (al.medical || 0) + (al.other || 0);
+                const fg = (b + totAl) > 0 ? (b + totAl) : (p.salaryDetails?.grossSalary || 0);
+                const unp = (p.workingDays?.absent || 0) + ((p.workingDays?.halfDay || 0) * 0.5);
+                const pd = Math.max(0, 30 - unp);
+                const perDay = fg > 0 ? (fg / 30) : 0;
+                const pde = fg > 0 ? Number((pd * perDay).toFixed(2)) : (p.salaryDetails?.grossSalary || 0);
+                const lop = unp > 0 ? Number((unp * perDay).toFixed(2)) : (Number(p.salaryDetails?.deductions?.lossOfPay) || 0);
+                const d = p.salaryDetails?.deductions || {};
+                const stdD = (d.pf || 0) + (d.esi || 0) + (d.tax || 0) + (d.loan || 0) + (d.advance || 0) + (d.other || 0);
+                const pen = (d.penalty || 0) + (d.lateDeduction || 0);
+
+                const comps = Array.isArray(p.customComponents) ? p.customComponents : [];
+                const cAdd = comps.filter(c => (c.type || '').toLowerCase() === 'addition').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+                const cDed = comps.filter(c => (c.type || '').toLowerCase() === 'deduction').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+
+                const np = Number((pde + (p.salaryDetails?.bonus || 0) + cAdd - stdD - pen - cDed).toFixed(2));
+                acc.gross += (fg + cAdd);
+                acc.deductions += (lop + stdD + pen + cDed);
+                acc.net += np;
+                return acc;
+              }, { gross: 0, deductions: 0, net: 0 });
+
+              const totalGross = payrolls.length > 0 ? computedSummary.gross : (stats.totalGrossSalary || 0);
+              const totalDed = payrolls.length > 0 ? computedSummary.deductions : (stats.totalDeductions || 0);
+              const totalNet = payrolls.length > 0 ? computedSummary.net : (stats.totalNetSalary || 0);
+              const totalEmps = payrolls.length > 0 ? payrolls.length : (stats.totalEmployees || 0);
+
               const cards = [
                 {
                   label: 'Employees',
-                  value: stats.totalEmployees,
-                  display: stats.totalEmployees,
+                  value: totalEmps,
+                  display: totalEmps,
                   sublabel: 'payroll generated',
                   color: '#3b82f6',
-                  spark: [0, 0, 0, 0, 0, stats.totalEmployees],
+                  spark: [0, 0, 0, 0, 0, totalEmps],
                   icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
                 },
                 {
                   label: 'Total Gross Salary',
-                  value: stats.totalGrossSalary,
-                  display: formatCurrency(stats.totalGrossSalary),
+                  value: totalGross,
+                  display: formatCurrency(totalGross),
                   sublabel: 'gross payroll',
                   color: '#22c55e',
-                  spark: [0, 0, 0, 0, 0, stats.totalGrossSalary],
+                  spark: [0, 0, 0, 0, 0, totalGross],
                   icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
                 },
                 {
                   label: 'Total Deductions',
-                  value: stats.totalDeductions,
-                  display: formatCurrency(stats.totalDeductions),
+                  value: totalDed,
+                  display: formatCurrency(totalDed),
                   sublabel: 'Penalties and Deductions',
                   color: '#ef4444',
-                  spark: [0, 0, 0, 0, 0, stats.totalDeductions],
+                  spark: [0, 0, 0, 0, 0, totalDed],
                   icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
                 },
                 {
                   label: 'Total Net Salary',
-                  value: stats.totalNetSalary,
-                  display: formatCurrency(stats.totalNetSalary),
+                  value: totalNet,
+                  display: formatCurrency(totalNet),
                   sublabel: 'in-hand disbursement',
                   color: '#8b5cf6',
-                  spark: [0, 0, 0, 0, 0, stats.totalNetSalary],
+                  spark: [0, 0, 0, 0, 0, totalNet],
                   icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
                 },
               ];
@@ -2114,7 +2382,7 @@ function Payroll() {
                           {[
                             { value: 'all', label: 'All Statuses', dot: null },
                             { value: 'draft', label: 'Draft', dot: '#f59e0b' },
-                            { value: 'processed', label: 'Processed', dot: '#3b82f6' },
+                            { value: 'approved', label: 'Approved', dot: '#3b82f6' },
                             { value: 'paid', label: 'Paid', dot: '#16a34a' }
                           ].map(opt => {
                             const isSelected = payrollStatusFilter === opt.value;
@@ -2480,7 +2748,12 @@ function Payroll() {
               ) : (() => {
                 const filteredPayrolls = payrolls.filter((payroll) => {
                   if (payrollStatusFilter !== 'all') {
-                    if ((payroll.status || '').toLowerCase() !== payrollStatusFilter.toLowerCase()) {
+                    const st = (payroll.status || '').toLowerCase();
+                    const filterSt = payrollStatusFilter.toLowerCase();
+                    const isMatch = filterSt === 'approved'
+                      ? (st === 'approved' || st === 'processed')
+                      : (st === filterSt);
+                    if (!isMatch) {
                       return false;
                     }
                   }
@@ -2533,7 +2806,8 @@ function Payroll() {
                 }
 
                 return (
-                  <div className="salary-structures-table" style={{ overflowX: 'auto', background: '#fff', borderRadius: '0 0 12px 12px' }}>
+                  <>
+                    <div className="salary-structures-table" style={{ overflowX: 'auto', background: '#fff', borderRadius: '0 0 12px 12px' }}>
                     <table className="payroll-table" style={{ width: '100%', minWidth: '1150px', borderCollapse: 'collapse' }}>
                       <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                     <tr style={{ boxShadow: '0 1px 0 #f1f5f9' }}>
@@ -2552,12 +2826,11 @@ function Payroll() {
                       <th>Date</th>
                       <th>Employee</th>
                       <th>Attendance</th>
-                      <th>Earnings</th>
+                      <th>Gross Salary</th>
                       <th>LOP</th>
-                      <th>Allowance</th>
-                      <th>Penalty</th>
-                      <th>Basic Salary</th>
-                      <th>Net Salary</th>
+                      <th>Paid Days</th>
+                      <th>Unpaid Days</th>
+                      <th>Final Pay</th>
                       <th>Due Date</th>
                       <th>Status</th>
                       <th>Generated By</th>
@@ -2570,31 +2843,53 @@ function Payroll() {
                       const absentDays = payroll.workingDays?.absent || 0;
                       const totalLeaves = (payroll.leaves?.paid || 0) + (payroll.leaves?.unpaid || 0);
                       const lateCheckIns = payroll.attendance?.lateCheckIns || 0;
-                      const workingDays = payroll.workingDays?.total || payroll.attendance?.workingDays || 0;
-                      const paidDays = (payroll.workingDays?.present || 0) +
-                        ((payroll.workingDays?.halfDay || 0) * 0.5) +
-                        (payroll.workingDays?.weekoff || 0) +
-                        (payroll.workingDays?.holiday || 0) +
-                        (payroll.workingDays?.leave || 0);
-                      const lopAmount = payroll.salaryDetails?.deductions?.lossOfPay || 0;
-                      const earnedGross = payroll.salaryDetails?.grossSalary || 0;
+                      const halfDays = payroll.workingDays?.halfDay || 0;
+                      const unpaidDays = absentDays + (halfDays * 0.5);
+                      // Standard fixed 30-day base for all months
+                      const paidDays = Math.max(0, 30 - unpaidDays);
+
+                      const allowances = payroll.salaryDetails?.allowances || {};
+                      const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
+                      const basicSalary = payroll.salaryDetails?.basicSalary || 0;
+                      const fullGross = (basicSalary + totalAllowances) > 0 ? (basicSalary + totalAllowances) : (payroll.salaryDetails?.grossSalary || 0);
+                      const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+                      // Earnings is strictly calculated on paid days (out of 30 days)
+                      const earnedGross = fullGross > 0 ? Number((paidDays * perDaySalary).toFixed(2)) : (payroll.salaryDetails?.grossSalary || 0);
+                      const lopAmount = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : (Number(payroll.salaryDetails?.deductions?.lossOfPay) || 0);
 
                       const deductions = payroll.salaryDetails?.deductions || {};
-                      const allowances = payroll.salaryDetails?.allowances || {};
+                      const totalStdDeductions = (deductions.pf || 0) + (deductions.esi || 0) + (deductions.tax || 0) + (deductions.loan || 0) + (deductions.advance || 0) + (deductions.other || 0);
+                      const manualPenalty = deductions.penalty || 0;
+                      const latePenalty = deductions.lateDeduction || 0;
+                      const totalPenalties = manualPenalty + latePenalty;
 
-                      const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0) + (payroll.salaryDetails?.bonus || 0);
-                      const manualPenalty = payroll.salaryDetails?.deductions?.penalty || 0;
-                      const latePenalty = payroll.salaryDetails?.deductions?.lateDeduction || 0;
-                      const halfDayPenalty = payroll.salaryDetails?.deductions?.halfDayDeduction || 0;
-                      const totalPenalties = manualPenalty + latePenalty + halfDayPenalty;
-                      const basicSalary = payroll.salaryDetails?.basicSalary || 0;
-                      const netSalary = payroll.salaryDetails?.netSalary || 0;
+                      const comps = Array.isArray(payroll.customComponents) ? payroll.customComponents : [];
+                      const customAdditions = comps.filter(c => (c.type || '').toLowerCase() === 'addition').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+                      const customDeductions = comps.filter(c => (c.type || '').toLowerCase() === 'deduction').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+                      const displayGross = Number((fullGross + customAdditions).toFixed(2));
+                      const netSalary = Number((earnedGross + (payroll.salaryDetails?.bonus || 0) + customAdditions - totalStdDeductions - totalPenalties - customDeductions).toFixed(2));
 
-                      const processedBy = payroll.processedBy && typeof payroll.processedBy === 'object'
-                        ? `${payroll.processedBy.firstName || ''} ${payroll.processedBy.lastName || ''}`.trim()
-                        : typeof payroll.processedBy === 'string' && payroll.processedBy
-                          ? payroll.processedBy
-                          : 'Admin System';
+                      const processedBy = (() => {
+                        const pb = payroll.processedBy;
+                        if (!pb) return 'Admin';
+                        if (typeof pb === 'object') {
+                          const name = `${pb.firstName || ''} ${pb.lastName || ''}`.trim();
+                          if (name) return name;
+                        }
+                        if (typeof pb === 'string') {
+                          // If it is a 24-character MongoDB hex ObjectId, resolve from allEmployees
+                          if (/^[0-9a-fA-F]{24}$/.test(pb)) {
+                            const found = allEmployees.find(e => (e._id === pb || e.id === pb));
+                            if (found) {
+                              const foundName = `${found.firstName || ''} ${found.lastName || ''}`.trim();
+                              if (foundName) return foundName;
+                            }
+                            return 'Admin';
+                          }
+                          return pb;
+                        }
+                        return 'Admin';
+                      })();
 
                       const openUpward = index >= filteredPayrolls.length - 2 || filteredPayrolls.length <= 3;
 
@@ -2672,23 +2967,61 @@ function Payroll() {
                               View
                             </button>
                           </td>
-                          <td><span style={{ color: '#0f172a', fontWeight: 700, fontSize: '11px' }}>{formatCurrency(earnedGross)}</span></td>
+                          <td>
+                            <span style={{ color: '#0f172a', fontWeight: 700, fontSize: '11px' }}>
+                              {formatCurrency(displayGross)}
+                            </span>
+                            {customAdditions > 0 && (
+                              <div style={{ fontSize: '9.5px', fontWeight: 700, color: '#16a34a', marginTop: '1px' }}>
+                                +{formatCurrency(customAdditions)}
+                              </div>
+                            )}
+                          </td>
                           <td><span style={{ color: lopAmount > 0 ? '#ef4444' : '#94a3b8', fontWeight: 700, fontSize: '11px' }}>{lopAmount > 0 ? formatCurrency(lopAmount) : '—'}</span></td>
                           <td>
-                            <span style={{ fontSize: '11px', fontWeight: 600, color: totalAllowances > 0 ? '#10b981' : '#94a3b8' }}>
-                              {totalAllowances > 0 ? formatCurrency(totalAllowances) : '—'}
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: '2px 8px',
+                              borderRadius: '999px',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              background: '#ecfdf5',
+                              color: '#059669',
+                              border: '1px solid #a7f3d0',
+                              minWidth: '28px'
+                            }}>
+                              {Number.isInteger(paidDays) ? paidDays : paidDays.toFixed(1)}
                             </span>
                           </td>
                           <td>
-                            <span style={{ fontSize: '11px', fontWeight: 600, color: totalPenalties > 0 ? '#ef4444' : '#94a3b8' }}>
-                              {totalPenalties > 0 ? formatCurrency(totalPenalties) : '—'}
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: '2px 8px',
+                              borderRadius: '999px',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              background: unpaidDays > 0 ? '#fef2f2' : '#f8fafc',
+                              color: unpaidDays > 0 ? '#dc2626' : '#94a3b8',
+                              border: unpaidDays > 0 ? '1px solid #fecaca' : '1px solid #e2e8f0',
+                              minWidth: '28px'
+                            }}>
+                              {Number.isInteger(unpaidDays) ? unpaidDays : unpaidDays.toFixed(1)}
                             </span>
                           </td>
                           <td>
-                            <span style={{ fontSize: '11px', fontWeight: 600, color: '#0f172a' }}>{formatCurrency(basicSalary)}</span>
-                          </td>
-                          <td>
-                            <span style={{ fontSize: '11px', fontWeight: 700, color: netSalary >= 0 ? '#059669' : '#ef4444' }}>{formatCurrency(netSalary)}</span>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: netSalary >= 0 ? '#059669' : '#ef4444' }}>
+                              {formatCurrency(netSalary)}
+                            </span>
+                            {(customAdditions > 0 || customDeductions > 0 || (payroll.salaryDetails?.bonus || 0) > 0 || totalPenalties > 0) && (
+                              <div style={{ fontSize: '9.5px', color: '#64748b', marginTop: '1px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                {customAdditions > 0 && <span style={{ color: '#16a34a', fontWeight: 600 }}>+{formatCurrency(customAdditions)}</span>}
+                                {customDeductions > 0 && <span style={{ color: '#dc2626', fontWeight: 600 }}>-{formatCurrency(customDeductions)}</span>}
+                              </div>
+                            )}
                           </td>
                           <td>
                             <span style={{ fontSize: '11px', color: paymentDueDate ? '#0f172a' : '#94a3b8', fontWeight: paymentDueDate ? 600 : 400 }}>
@@ -2697,17 +3030,38 @@ function Payroll() {
                           </td>
                           <td>
                             {(() => {
-                              const s = payroll.status;
-                              const cfg = s === 'paid'
-                                ? { bg: '#d1fae5', color: '#047857', dot: '#059669', label: 'Paid' }
-                                : s === 'processed'
-                                  ? { bg: '#dbeafe', color: '#1d4ed8', dot: '#3b82f6', label: 'Processed' }
-                                  : { bg: '#fef3c7', color: '#92400e', dot: '#f59e0b', label: 'Draft' };
+                              const cfg = getStatusBadgeConfig(payroll.status);
+                              const isMenuOpen = activeStatusMenu === payroll._id;
                               return (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 9px', borderRadius: '999px', fontSize: '10px', fontWeight: 700, background: cfg.bg, color: cfg.color }}>
-                                  <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: cfg.dot, flexShrink: 0, display: 'inline-block' }} />
-                                  {cfg.label}
-                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOpenStatusMenu(e, payroll._id)}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '3px 8px 3px 10px',
+                                    borderRadius: '999px',
+                                    fontSize: '10.5px',
+                                    fontWeight: 700,
+                                    background: cfg.bg,
+                                    color: cfg.color,
+                                    border: `1px solid ${cfg.border}`,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease',
+                                    outline: 'none',
+                                    boxShadow: isMenuOpen ? '0 0 0 2px rgba(59, 130, 246, 0.3)' : '0 1px 2px rgba(0,0,0,0.04)'
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.08)'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = isMenuOpen ? '0 0 0 2px rgba(59, 130, 246, 0.3)' : '0 1px 2px rgba(0,0,0,0.04)'; }}
+                                  title="Click to change status"
+                                >
+                                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: cfg.dot, flexShrink: 0, display: 'inline-block' }} />
+                                  <span>{cfg.label}</span>
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7, transform: isMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                                    <polyline points="6 9 12 15 18 9" />
+                                  </svg>
+                                </button>
                               );
                             })()}
                           </td>
@@ -2767,7 +3121,7 @@ function Payroll() {
                                       boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.06)',
                                       border: '1px solid #cbd5e1',
                                       zIndex: 99999,
-                                      width: '135px',
+                                      width: '145px',
                                       overflow: 'hidden',
                                       padding: '4px 0'
                                     }}
@@ -2806,6 +3160,25 @@ function Payroll() {
                                     >
                                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
                                       Edit
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setActivePayrollMenu(null);
+                                        handleOpenHistoryModal(payroll);
+                                      }}
+                                      style={{
+                                        width: '100%', padding: '8px 12px', border: 'none', background: 'transparent', textAlign: 'left',
+                                        fontSize: '12px', fontWeight: 600, color: '#0f766e', cursor: 'pointer', transition: 'background 0.15s',
+                                        display: 'flex', alignItems: 'center', gap: '8px'
+                                      }}
+                                      onMouseEnter={e => e.currentTarget.style.background = '#f0fdfa'}
+                                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                    >
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <polyline points="12 6 12 12 14 14"></polyline>
+                                      </svg>
+                                      History
                                     </button>
                                     <button
                                       onClick={() => {
@@ -2850,6 +3223,75 @@ function Payroll() {
                     </tbody>
                     </table>
                   </div>
+
+                  {/* Floating Status Dropdown Menu */}
+                  {activeStatusMenu && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        position: 'fixed',
+                        top: `${statusMenuPos.top}px`,
+                        left: `${statusMenuPos.left}px`,
+                        background: '#ffffff',
+                        borderRadius: '10px',
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.06)',
+                        border: '1px solid #cbd5e1',
+                        padding: '4px',
+                        zIndex: 99999,
+                        minWidth: '135px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '2px'
+                      }}
+                    >
+                      {[
+                        { key: 'draft', label: 'Draft', dot: '#f59e0b', color: '#92400e', bg: '#fef3c7', hoverBg: '#fffbeb' },
+                        { key: 'approved', label: 'Approved', dot: '#3b82f6', color: '#1d4ed8', bg: '#dbeafe', hoverBg: '#eff6ff' },
+                        { key: 'paid', label: 'Paid', dot: '#059669', color: '#047857', bg: '#d1fae5', hoverBg: '#f0fdf4' }
+                      ].map((opt) => {
+                        const currentPayroll = payrolls.find(p => p._id === activeStatusMenu);
+                        const currentSt = (currentPayroll?.status || 'draft').toLowerCase();
+                        const isSelected = currentSt === opt.key || (opt.key === 'approved' && currentSt === 'processed');
+                        return (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            onClick={() => handleStatusChange(activeStatusMenu, opt.key)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '8px',
+                              padding: '7px 10px',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: isSelected ? 700 : 500,
+                              color: isSelected ? opt.color : '#334155',
+                              background: isSelected ? opt.bg : 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              width: '100%',
+                              transition: 'all 0.15s'
+                            }}
+                            onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = opt.hoverBg; }}
+                            onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: opt.dot, flexShrink: 0, display: 'inline-block' }} />
+                              {opt.label}
+                            </span>
+                            {isSelected && (
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={opt.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  </>
                 );
               })()}
             </div>
@@ -3850,7 +4292,7 @@ function Payroll() {
                       <tbody>
                         {filteredSlips.map((payslip, index) => {
                           const emp = payslip.employee || {};
-                          const basic = payslip.salaryDetails?.basicSalary || 0;
+                          const rawBasic = payslip.salaryDetails?.basicSalary || 0;
                           const gross = payslip.salaryDetails?.grossSalary || 0;
                           const bonus = payslip.salaryDetails?.bonus || 0;
                           const allAllowances = 
@@ -3860,7 +4302,13 @@ function Payroll() {
                             (payslip.salaryDetails?.allowances?.da || 0) +
                             (payslip.salaryDetails?.allowances?.medical || 0) +
                             (payslip.salaryDetails?.allowances?.other || 0);
-                          const allow = allAllowances > 0 ? allAllowances : Math.max(0, gross - basic);
+
+                          const struct = payslip.salaryStructure || {};
+                          const structAllow = (struct.allowances?.hra || 0) + (struct.allowances?.conveyance || struct.allowances?.transport || 0) + (struct.allowances?.food || 0) + (struct.allowances?.da || 0) + (struct.allowances?.medical || 0) + (struct.allowances?.other || 0);
+                          const useStruct = structAllow > 0 && allAllowances === 0;
+
+                          const basic = useStruct ? struct.basicSalary : rawBasic;
+                          const allow = useStruct ? structAllow : (allAllowances > 0 ? allAllowances : Math.max(0, gross - rawBasic));
                           const totalDed = payslip.salaryDetails?.totalDeductions || 0;
                           const netSalary = payslip.salaryDetails?.netSalary || 0;
 
@@ -4749,99 +5197,840 @@ function Payroll() {
         )}
 
         {/* Edit Generated Payroll Modal */}
-        {showEditPayrollModal && editPayrollData && (
-          <div className="modal-overlay" style={{ background: 'rgba(15, 23, 42, 0.3)', backdropFilter: 'blur(5px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }} onClick={() => setShowEditPayrollModal(false)}>
-            <div className="struct-modal" style={{ margin: 0, maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
-              
-              <div className="struct-modal-sticky-head">
-                <div className="struct-modal-hd">
-                  <div className="struct-modal-hd-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b775e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="struct-modal-title">Edit Generated Payroll</div>
-                    <div className="struct-modal-sub">{editPayrollData.employeeName}</div>
-                  </div>
-                  <button className="struct-close-btn" onClick={() => setShowEditPayrollModal(false)}>&times;</button>
-                </div>
-              </div>
+        {showEditPayrollModal && editPayrollData && (() => {
+          const customAdditions = (editPayrollData.customComponents || []).filter(c => (c.type || '').toLowerCase() === 'addition');
+          const customDeductions = (editPayrollData.customComponents || []).filter(c => (c.type || '').toLowerCase() === 'deduction');
+          let customAdditionsTotal = customAdditions.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+          let customDeductionsTotal = customDeductions.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 
-              <div className="struct-modal-body">
-                <div className="struct-form">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div>
-                      <div className="struct-section-lbl" style={{ margin: 0, padding: 0, border: 'none' }}>BASIC SALARY</div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', marginTop: '4px' }}>{formatCurrency(editPayrollData.basicSalary)}</div>
+          // If user filled in the input fields, include in live preview as well
+          const pendingAmt = parseFloat(editPayrollData.newAmount);
+          const hasPendingComp = !isNaN(pendingAmt) && pendingAmt > 0 && !!editPayrollData.newTitle?.trim();
+          if (hasPendingComp) {
+            if ((editPayrollData.newType || 'Addition').toLowerCase() === 'deduction') {
+              customDeductionsTotal += pendingAmt;
+            } else {
+              customAdditionsTotal += pendingAmt;
+            }
+          }
+
+          const paidDaysSal = Number(editPayrollData.paidDaysSalary) || 0;
+          const bonusAmt = Number(editPayrollData.bonus) || 0;
+          const penaltyAmt = Number(editPayrollData.penalty) || 0;
+          const stdDed = Number(editPayrollData.totalStdDeductions) || 0;
+
+          // Net Salary is Paid Days Salary + Bonus + Custom Additions - Penalty - Custom Deductions - Std Deductions
+          const netSalaryPreview = Math.max(0, Number((paidDaysSal + bonusAmt + customAdditionsTotal - penaltyAmt - customDeductionsTotal - stdDed).toFixed(2)));
+
+          return (
+            <div className="modal-overlay" style={{ background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(5px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }} onClick={() => setShowEditPayrollModal(false)}>
+              <div className="struct-modal" style={{ margin: 0, maxWidth: '920px', width: '95%', maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: '14px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' }} onClick={(e) => e.stopPropagation()}>
+                
+                <div className="struct-modal-sticky-head">
+                  <div className="struct-modal-hd">
+                    <div className="struct-modal-hd-icon">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b775e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                      </svg>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div className="struct-section-lbl" style={{ margin: 0, padding: 0, border: 'none' }}>NET SALARY (PREVIEW)</div>
-                      <div style={{ fontSize: '15px', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>
-                        {formatCurrency(
-                          (Number(editPayrollData.originalGross) || 0) + 
-                          (Number(editPayrollData.bonus) || 0) - 
-                          (
-                            (Number(editPayrollData.originalTotalDeductions) || 0) 
-                            - (Number(editPayrollData.originalPenalty) || 0) 
-                            + (Number(editPayrollData.penalty) || 0)
-                          )
+                    <div>
+                      <div className="struct-modal-title">Edit Generated Payroll</div>
+                      <div className="struct-modal-sub">{editPayrollData.employeeName}</div>
+                    </div>
+                    <button className="struct-close-btn" onClick={() => setShowEditPayrollModal(false)}>&times;</button>
+                  </div>
+                </div>
+
+                <div className="struct-modal-body" style={{ overflowY: 'auto', padding: '20px 28px' }}>
+                  <div className="struct-form">
+                    {/* Top Summary Cards: Paid Days Salary, LOP Deduction, Net Salary Preview */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '22px' }}>
+                      {/* Card 1: Paid Days Salary */}
+                      <div style={{ padding: '16px 18px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span className="struct-section-lbl" style={{ margin: 0, padding: 0, border: 'none', fontSize: '10.5px', color: '#64748b' }}>PAID DAYS SALARY</span>
+                          <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', background: '#dcfce7', color: '#15803d' }}>
+                            {editPayrollData.paidDays ?? 30}d Paid
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>
+                          {formatCurrency(editPayrollData.paidDaysSalary || 0)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>
+                          Monthly Gross: {formatCurrency(editPayrollData.fullMonthlyGross || 0)}
+                        </div>
+                      </div>
+
+                      {/* Card 2: LOP Deduction */}
+                      <div style={{ padding: '16px 18px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span className="struct-section-lbl" style={{ margin: 0, padding: 0, border: 'none', fontSize: '10.5px', color: '#64748b' }}>LOSS OF PAY (LOP)</span>
+                          <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', background: (editPayrollData.unpaidDays > 0) ? '#fee2e2' : '#f1f5f9', color: (editPayrollData.unpaidDays > 0) ? '#b91c1c' : '#64748b' }}>
+                            {editPayrollData.unpaidDays > 0 ? `${editPayrollData.unpaidDays}d Unpaid` : '0d'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: (editPayrollData.lopAmount > 0) ? '#dc2626' : '#64748b' }}>
+                          {editPayrollData.lopAmount > 0 ? `-${formatCurrency(editPayrollData.lopAmount)}` : '₹0.00'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>
+                          Base Per Day: {formatCurrency((editPayrollData.fullMonthlyGross || 0) / 30)}
+                        </div>
+                      </div>
+
+                      {/* Card 3: Net Salary (Preview) */}
+                      <div style={{ padding: '16px 18px', background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)', borderRadius: '12px', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span className="struct-section-lbl" style={{ margin: 0, padding: 0, border: 'none', fontSize: '10.5px', color: '#166534' }}>NET SALARY (PREVIEW)</span>
+                          <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', background: '#bbf7d0', color: '#14532d' }}>
+                            In-Hand
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '20px', fontWeight: 800, color: '#15803d' }}>
+                          {formatCurrency(netSalaryPreview)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#166534', marginTop: '6px' }}>
+                          Paid salary + Additions - Deductions
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quick Standard Bonus & Penalty */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '20px' }}>
+                      <div className="struct-field">
+                        <label className="struct-lbl">Additional Bonus</label>
+                        <div style={{ position: 'relative' }}>
+                          <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '13px', fontWeight: 600 }}>₹</span>
+                          <input
+                            type="number"
+                            className="struct-input"
+                            value={editPayrollData.bonus}
+                            onChange={(e) => setEditPayrollData({ ...editPayrollData, bonus: e.target.value })}
+                            style={{ paddingLeft: '28px' }}
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+                      <div className="struct-field">
+                        <label className="struct-lbl">Penalty (Deduction)</label>
+                        <div style={{ position: 'relative' }}>
+                          <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '13px', fontWeight: 600 }}>₹</span>
+                          <input
+                            type="number"
+                            className="struct-input"
+                            value={editPayrollData.penalty}
+                            onChange={(e) => setEditPayrollData({ ...editPayrollData, penalty: e.target.value })}
+                            style={{ paddingLeft: '28px' }}
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section: Additional Components */}
+                    <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '18px', marginBottom: '18px' }}>
+                      <div style={{ marginBottom: '14px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>Additional Components</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Add itemized additions or deductions with remarks</div>
+                      </div>
+
+                      {/* Add Component Form */}
+                      <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1.1fr 1.1fr 1.8fr', gap: '12px', marginBottom: '12px' }}>
+                          <div className="struct-field">
+                            <label className="struct-lbl" style={{ fontSize: '11px' }}>Title *</label>
+                            <input
+                              type="text"
+                              className="struct-input"
+                              placeholder="e.g. Travel Reimbursement"
+                              value={editPayrollData.newTitle || ''}
+                              onChange={(e) => setEditPayrollData({ ...editPayrollData, newTitle: e.target.value })}
+                              style={{ fontSize: '12.5px' }}
+                            />
+                          </div>
+                          <div className="struct-field">
+                            <label className="struct-lbl" style={{ fontSize: '11px' }}>Component *</label>
+                            <select
+                              className="struct-input"
+                              value={editPayrollData.newType || 'Addition'}
+                              onChange={(e) => setEditPayrollData({ ...editPayrollData, newType: e.target.value })}
+                              style={{ fontSize: '12.5px', background: '#fff', cursor: 'pointer' }}
+                            >
+                              <option value="Addition">Addition</option>
+                              <option value="Deduction">Deduction</option>
+                            </select>
+                          </div>
+                          <div className="struct-field">
+                            <label className="struct-lbl" style={{ fontSize: '11px' }}>Amount *</label>
+                            <div style={{ position: 'relative' }}>
+                              <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '13px', fontWeight: 600 }}>₹</span>
+                              <input
+                                type="number"
+                                className="struct-input"
+                                placeholder="0.00"
+                                value={editPayrollData.newAmount || ''}
+                                onChange={(e) => setEditPayrollData({ ...editPayrollData, newAmount: e.target.value })}
+                                style={{ paddingLeft: '26px', fontSize: '12.5px' }}
+                              />
+                            </div>
+                          </div>
+                          <div className="struct-field">
+                            <label className="struct-lbl" style={{ fontSize: '11px' }}>Remarks</label>
+                            <input
+                              type="text"
+                              className="struct-input"
+                              placeholder="e.g. Approved by HR"
+                              value={editPayrollData.newRemarks || ''}
+                              onChange={(e) => setEditPayrollData({ ...editPayrollData, newRemarks: e.target.value })}
+                              style={{ fontSize: '12.5px' }}
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleAddCustomComponent}
+                          style={{
+                            width: '100%',
+                            padding: '9px 14px',
+                            background: '#3b775e',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontSize: '12.5px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            transition: 'all 0.15s',
+                            boxShadow: '0 1px 2px rgba(59,119,94,0.2)'
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#2f604b'}
+                          onMouseLeave={e => e.currentTarget.style.background = '#3b775e'}
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                          </svg>
+                          <span>Add Component</span>
+                        </button>
+                      </div>
+
+                      {/* Added Components List */}
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                            Added Components ({(editPayrollData.customComponents || []).length + (hasPendingComp ? 1 : 0)})
+                          </span>
+                          {hasPendingComp && (
+                            <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
+                              ✓ Input ready to save with changes
+                            </span>
+                          )}
+                        </div>
+                        {(!editPayrollData.customComponents || editPayrollData.customComponents.length === 0) && !hasPendingComp ? (
+                          <div style={{ padding: '14px', background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '10px', textAlign: 'center', fontSize: '12px', color: '#94a3b8' }}>
+                            No additional components added yet.
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+                            {editPayrollData.customComponents.map((c, idx) => {
+                              const isAddition = (c.type || '').toLowerCase() === 'addition';
+                              return (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    padding: '10px 14px',
+                                    background: isAddition ? '#f0fdf4' : '#fef2f2',
+                                    border: isAddition ? '1px solid #bbf7d0' : '1px solid #fecaca',
+                                    borderRadius: '8px',
+                                    gap: '12px'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                                    <span
+                                      style={{
+                                        fontSize: '10.5px',
+                                        fontWeight: 700,
+                                        padding: '3px 8px',
+                                        borderRadius: '999px',
+                                        background: isAddition ? '#dcfce7' : '#fee2e2',
+                                        color: isAddition ? '#15803d' : '#b91c1c',
+                                        border: isAddition ? '1px solid #86efac' : '1px solid #fca5a5',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                    >
+                                      {isAddition ? '+ Addition' : '- Deduction'}
+                                    </span>
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {c.title}
+                                      </div>
+                                      {c.remarks && (
+                                        <div style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          {c.remarks}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                    <span style={{ fontSize: '13px', fontWeight: 700, color: isAddition ? '#15803d' : '#b91c1c' }}>
+                                      {isAddition ? '+' : '-'}{formatCurrency(c.amount)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveCustomComponent(idx)}
+                                      style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: '#94a3b8',
+                                        cursor: 'pointer',
+                                        padding: '4px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '6px',
+                                        transition: 'all 0.15s'
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'transparent'; }}
+                                      title="Remove component"
+                                    >
+                                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                                      </svg>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {/* Pending item preview card if filled in form */}
+                            {hasPendingComp && (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  padding: '10px 14px',
+                                  background: (editPayrollData.newType || 'Addition').toLowerCase() === 'deduction' ? '#fff5f5' : '#f0fdf4',
+                                  border: (editPayrollData.newType || 'Addition').toLowerCase() === 'deduction' ? '1.5px dashed #f87171' : '1.5px dashed #4ade80',
+                                  borderRadius: '8px',
+                                  gap: '12px'
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                                  <span
+                                    style={{
+                                      fontSize: '10.5px',
+                                      fontWeight: 700,
+                                      padding: '3px 8px',
+                                      borderRadius: '999px',
+                                      background: (editPayrollData.newType || 'Addition').toLowerCase() === 'deduction' ? '#fee2e2' : '#dcfce7',
+                                      color: (editPayrollData.newType || 'Addition').toLowerCase() === 'deduction' ? '#b91c1c' : '#15803d',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                  >
+                                    {(editPayrollData.newType || 'Addition').toLowerCase() === 'deduction' ? '- Deduction (Pending)' : '+ Addition (Pending)'}
+                                  </span>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {editPayrollData.newTitle}
+                                    </div>
+                                    {editPayrollData.newRemarks && (
+                                      <div style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {editPayrollData.newRemarks}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  <span style={{ fontSize: '13px', fontWeight: 700, color: (editPayrollData.newType || 'Addition').toLowerCase() === 'deduction' ? '#b91c1c' : '#15803d' }}>
+                                    {(editPayrollData.newType || 'Addition').toLowerCase() === 'deduction' ? '-' : '+'}{formatCurrency(pendingAmt)}
+                                  </span>
+                                  <span style={{ fontSize: '10.5px', color: '#166534', fontWeight: 600, background: '#dcfce7', padding: '2px 8px', borderRadius: '4px', border: '1px solid #86efac' }}>
+                                    Auto-saves on submit
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
-                  </div>
 
-                  <div className="struct-field-row" style={{ display: 'block', marginBottom: '16px' }}>
-                    <div className="struct-field">
-                      <label className="struct-lbl">Additional Bonus</label>
-                      <div style={{ position: 'relative' }}>
-                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '14px', fontWeight: 600 }}>₹</span>
-                        <input
-                          type="number"
-                          className="struct-input"
-                          value={editPayrollData.bonus}
-                          onChange={(e) => setEditPayrollData({ ...editPayrollData, bonus: e.target.value })}
-                          style={{ paddingLeft: '28px' }}
-                          placeholder="0"
-                        />
-                      </div>
+                    <div className="struct-footer" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '14px', marginTop: '4px' }}>
+                      <button type="button" className="struct-btn-ghost" onClick={() => setShowEditPayrollModal(false)}>
+                        <span>Cancel</span>
+                      </button>
+                      <button type="button" className="struct-btn-primary" onClick={handleSaveEditPayroll}>
+                        <span>Save Changes</span>
+                      </button>
                     </div>
-                  </div>
 
-                  <div className="struct-field-row" style={{ display: 'block' }}>
-                    <div className="struct-field">
-                      <label className="struct-lbl">Penalty (Deduction)</label>
-                      <div style={{ position: 'relative' }}>
-                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '14px', fontWeight: 600 }}>₹</span>
-                        <input
-                          type="number"
-                          className="struct-input"
-                          value={editPayrollData.penalty}
-                          onChange={(e) => setEditPayrollData({ ...editPayrollData, penalty: e.target.value })}
-                          style={{ paddingLeft: '28px' }}
-                          placeholder="0"
-                        />
-                      </div>
-                    </div>
                   </div>
-
-                  <div className="struct-footer">
-                    <button type="button" className="struct-btn-ghost" onClick={() => setShowEditPayrollModal(false)}>
-                      <span>Cancel</span>
-                    </button>
-                    <button type="button" className="struct-btn-primary" onClick={handleSaveEditPayroll}>
-                      <span>Save Changes</span>
-                    </button>
-                  </div>
-
                 </div>
+
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Payroll Record History Modal */}
+        {showHistoryModal && (
+          <div
+            className="modal-overlay"
+            style={{
+              background: 'rgba(15, 23, 42, 0.55)',
+              backdropFilter: 'blur(6px)',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 1000,
+              padding: '20px'
+            }}
+            onClick={() => setShowHistoryModal(false)}
+          >
+            <div
+              className="struct-modal"
+              style={{
+                margin: 0,
+                maxWidth: '1080px',
+                width: '95%',
+                maxHeight: '90vh',
+                display: 'flex',
+                flexDirection: 'column',
+                borderRadius: '16px',
+                boxShadow: '0 30px 60px -12px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.15)',
+                background: '#ffffff'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Sticky Header */}
+              <div className="struct-modal-sticky-head" style={{ padding: '20px 32px', borderBottom: '1px solid #f1f5f9', background: '#ffffff' }}>
+                <div className="struct-modal-hd" style={{ alignItems: 'center' }}>
+                  <div
+                    style={{
+                      width: '46px',
+                      height: '46px',
+                      borderRadius: '12px',
+                      background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                      border: '1px solid #a7f3d0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#059669',
+                      flexShrink: 0,
+                      boxShadow: '0 2px 6px rgba(16, 185, 129, 0.15)'
+                    }}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <polyline points="12 6 12 12 14 14"></polyline>
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <div className="struct-modal-title" style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', margin: 0 }}>
+                        Payroll Record History
+                      </div>
+                      <span style={{ fontSize: '11.5px', fontWeight: 700, padding: '2px 10px', borderRadius: '999px', background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>
+                        {months.find(m => m.value === (payrollHistoryData?.payPeriod?.month || selectedMonth))?.label || ''} {payrollHistoryData?.payPeriod?.year || selectedYear}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', fontSize: '13px', color: '#64748b', flexWrap: 'wrap' }}>
+                      {payrollHistoryData?.employee ? (
+                        <>
+                          <span style={{ fontWeight: 700, color: '#1e293b' }}>
+                            {`${payrollHistoryData.employee.firstName || ''} ${payrollHistoryData.employee.lastName || ''}`.trim() || 'Employee'}
+                          </span>
+                          <span style={{ background: '#f1f5f9', color: '#475569', padding: '1px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }}>
+                            {payrollHistoryData.employee.employeeId || 'N/A'}
+                          </span>
+                          {payrollHistoryData.employee.designation && (
+                            <>
+                              <span style={{ color: '#cbd5e1' }}>•</span>
+                              <span>{payrollHistoryData.employee.designation}</span>
+                            </>
+                          )}
+                          {payrollHistoryData.employee.department && (
+                            <>
+                              <span style={{ color: '#cbd5e1' }}>•</span>
+                              <span>{typeof payrollHistoryData.employee.department === 'object' ? payrollHistoryData.employee.department?.name : payrollHistoryData.employee.department}</span>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <span>Loading employee audit trail...</span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    className="struct-close-btn"
+                    onClick={() => setShowHistoryModal(false)}
+                    style={{ width: '34px', height: '34px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', cursor: 'pointer' }}
+                  >
+                    &times;
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="struct-modal-body" style={{ overflowY: 'auto', padding: '24px 32px' }}>
+                {historyLoading ? (
+                  <div style={{ padding: '60px 20px', textAlign: 'center', color: '#64748b' }}>
+                    <div style={{ width: '36px', height: '36px', border: '3px solid #e2e8f0', borderTopColor: '#10b981', borderRadius: '50%', margin: '0 auto 14px', animation: 'spin 0.8s linear infinite' }}></div>
+                    <div style={{ fontSize: '14px', fontWeight: 600 }}>Loading history records...</div>
+                  </div>
+                ) : (
+                  <div>
+                    {/* Top KPI Snapshot Cards (4 columns, wider and more spacious) */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '28px' }}>
+                      
+                      {/* Card 1: Current Status */}
+                      <div style={{ padding: '16px 20px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Current Status</div>
+                        <div style={{ marginTop: '8px', marginBottom: '6px' }}>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '4px 12px',
+                            borderRadius: '999px',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            textTransform: 'capitalize',
+                            ...getStatusBadgeConfig(payrollHistoryData?.status)
+                          }}>
+                            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'currentColor' }}></span>
+                            {payrollHistoryData?.status || 'Draft'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                          Processed by {resolveProcessedByName(payrollHistoryData?.processedBy) || 'Admin'}
+                        </div>
+                      </div>
+
+                      {/* Card 2: Base Monthly Gross */}
+                      <div style={{ padding: '16px 20px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Base Monthly Gross</div>
+                        <div style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', marginTop: '6px', letterSpacing: '-0.02em' }}>
+                          {formatCurrency(payrollHistoryData?.baseGross || 0)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+                          Salary structure contract base
+                        </div>
+                      </div>
+
+                      {/* Card 3: Total Monthly Gross (with additions) */}
+                      <div style={{ padding: '16px 20px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Calculated Gross</span>
+                          {((payrollHistoryData?.currentGross || 0) > (payrollHistoryData?.baseGross || 0)) && (
+                            <span style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', background: '#dcfce7', padding: '1px 6px', borderRadius: '4px' }}>
+                              +Additions
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', marginTop: '6px', letterSpacing: '-0.02em' }}>
+                          {formatCurrency(payrollHistoryData?.currentGross || 0)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                          Includes additions for the month
+                        </div>
+                      </div>
+
+                      {/* Card 4: Final Net Pay (Disbursement) */}
+                      <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)', borderRadius: '12px', border: '1.5px solid #86efac', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 2px 8px rgba(16, 185, 129, 0.08)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Final Net Pay</span>
+                          <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', background: '#bbf7d0', color: '#14532d' }}>
+                            In-Hand
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '22px', fontWeight: 800, color: '#15803d', marginTop: '6px', letterSpacing: '-0.02em' }}>
+                          {formatCurrency(payrollHistoryData?.currentNet || 0)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#166534', marginTop: '4px' }}>
+                          Net payable after all adjustments
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Section Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Audit Trail & Change History
+                        </span>
+                        <span style={{ fontSize: '11.5px', fontWeight: 700, padding: '2px 9px', borderRadius: '999px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0' }}>
+                          {payrollHistoryData?.history?.length || 0} event{(payrollHistoryData?.history?.length || 0) === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                        Ordered chronologically from latest to oldest
+                      </span>
+                    </div>
+
+                    {/* Timeline / History Entries */}
+                    {(!payrollHistoryData?.history || payrollHistoryData.history.length === 0) ? (
+                      <div style={{ padding: '42px 24px', background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '14px', textAlign: 'center' }}>
+                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: '#94a3b8' }}>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                            <polyline points="10 9 9 9 8 9"></polyline>
+                          </svg>
+                        </div>
+                        <div style={{ fontSize: '14px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                          Original Generated Record
+                        </div>
+                        <div style={{ fontSize: '12.5px', color: '#64748b', maxWidth: '520px', margin: '0 auto' }}>
+                          No manual edits have been made to this payroll record yet. It reflects the standard calculated figures from attendance records and the active salary structure.
+                        </div>
+                        {payrollHistoryData?.createdAt && (
+                          <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '12px' }}>
+                            Generated on {new Date(payrollHistoryData.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        {payrollHistoryData.history.map((entry, idx) => {
+                          const dateStr = entry.editedAt ? new Date(entry.editedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown Date';
+                          const prevGross = entry.previousState?.grossSalary;
+                          const newGross = entry.newState?.grossSalary;
+                          const prevNet = entry.previousState?.netSalary;
+                          const newNet = entry.newState?.netSalary;
+                          const prevBonus = entry.previousState?.bonus || 0;
+                          const newBonus = entry.newState?.bonus || 0;
+                          const prevPenalty = entry.previousState?.penalty || 0;
+                          const newPenalty = entry.newState?.penalty || 0;
+                          const newComps = Array.isArray(entry.newState?.customComponents) ? entry.newState.customComponents : [];
+
+                          return (
+                            <div
+                              key={idx}
+                              style={{
+                                background: '#ffffff',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '14px',
+                                padding: '18px 22px',
+                                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.03)',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              {/* Entry Header: Action pill, Editor details, and formatted Timestamp */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  <span style={{
+                                    fontSize: '11.5px',
+                                    fontWeight: 700,
+                                    padding: '3px 10px',
+                                    borderRadius: '6px',
+                                    background: '#ecfdf5',
+                                    color: '#059669',
+                                    border: '1px solid #a7f3d0'
+                                  }}>
+                                    {entry.action || 'Updated Payroll Record'}
+                                  </span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700, color: '#475569' }}>
+                                      {(entry.editedByName || 'A').charAt(0).toUpperCase()}
+                                    </div>
+                                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b' }}>
+                                      {entry.editedByName || 'Admin'}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#64748b' }}>
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                                  </svg>
+                                  <span>{dateStr}</span>
+                                </div>
+                              </div>
+
+                              {/* Changes Summary Banner */}
+                              {entry.changesSummary && (
+                                <div style={{
+                                  fontSize: '12.5px',
+                                  color: '#1e293b',
+                                  fontWeight: 600,
+                                  marginBottom: '14px',
+                                  padding: '10px 14px',
+                                  background: '#f8fafc',
+                                  borderRadius: '8px',
+                                  borderLeft: '4px solid #10b981',
+                                  borderTop: '1px solid #f1f5f9',
+                                  borderRight: '1px solid #f1f5f9',
+                                  borderBottom: '1px solid #f1f5f9',
+                                  lineHeight: '1.5'
+                                }}>
+                                  {entry.changesSummary}
+                                </div>
+                              )}
+
+                              {/* Comparison Grid (Side by side comparison tiles) */}
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px', marginBottom: newComps.length > 0 ? '14px' : '0' }}>
+                                
+                                {/* Gross Salary Tile */}
+                                {prevGross !== undefined && (
+                                  <div style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Gross Salary</div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                                      <span style={{ textDecoration: 'line-through', color: '#94a3b8' }}>{formatCurrency(prevGross)}</span>
+                                      <span style={{ color: '#64748b' }}>→</span>
+                                      <span style={{ fontWeight: 800, color: '#0f172a' }}>{formatCurrency(newGross || prevGross)}</span>
+                                      {newGross > prevGross && (
+                                        <span style={{ fontSize: '10px', fontWeight: 700, color: '#16a34a', background: '#dcfce7', padding: '1px 5px', borderRadius: '4px' }}>
+                                          +{formatCurrency(newGross - prevGross)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Final Net Pay Tile */}
+                                {prevNet !== undefined && (
+                                  <div style={{ padding: '10px 14px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#166534', textTransform: 'uppercase', marginBottom: '4px' }}>Final Net Pay</div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                                      <span style={{ textDecoration: 'line-through', color: '#86efac' }}>{formatCurrency(prevNet)}</span>
+                                      <span style={{ color: '#16a34a' }}>→</span>
+                                      <span style={{ fontWeight: 800, color: '#15803d' }}>{formatCurrency(newNet || prevNet)}</span>
+                                      {newNet > prevNet && (
+                                        <span style={{ fontSize: '10px', fontWeight: 700, color: '#15803d', background: '#bbf7d0', padding: '1px 5px', borderRadius: '4px' }}>
+                                          +{formatCurrency(newNet - prevNet)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Bonus Tile (if relevant) */}
+                                {(prevBonus > 0 || newBonus > 0) && (
+                                  <div style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Bonus</div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                                      <span style={{ textDecoration: 'line-through', color: '#94a3b8' }}>{formatCurrency(prevBonus)}</span>
+                                      <span style={{ color: '#64748b' }}>→</span>
+                                      <span style={{ fontWeight: 800, color: '#0f172a' }}>{formatCurrency(newBonus)}</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Penalty Tile (if relevant) */}
+                                {(prevPenalty > 0 || newPenalty > 0) && (
+                                  <div style={{ padding: '10px 14px', background: '#fff5f5', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#b91c1c', textTransform: 'uppercase', marginBottom: '4px' }}>Penalty (Deduction)</div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                                      <span style={{ textDecoration: 'line-through', color: '#fca5a5' }}>{formatCurrency(prevPenalty)}</span>
+                                      <span style={{ color: '#dc2626' }}>→</span>
+                                      <span style={{ fontWeight: 800, color: '#b91c1c' }}>{formatCurrency(newPenalty)}</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                              </div>
+
+                              {/* Itemized Custom Components saved in this version */}
+                              {newComps.length > 0 && (
+                                <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px', marginTop: '6px' }}>
+                                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '8px' }}>
+                                    Itemized Components Saved ({newComps.length})
+                                  </div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '8px' }}>
+                                    {newComps.map((c, cIdx) => {
+                                      const isAdd = (c.type || '').toLowerCase() === 'addition';
+                                      return (
+                                        <div
+                                          key={cIdx}
+                                          style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            padding: '8px 12px',
+                                            borderRadius: '8px',
+                                            background: isAdd ? '#f0fdf4' : '#fef2f2',
+                                            border: isAdd ? '1px solid #bbf7d0' : '1px solid #fecaca'
+                                          }}
+                                        >
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                                            <span style={{
+                                              fontSize: '10px',
+                                              fontWeight: 700,
+                                              padding: '2px 6px',
+                                              borderRadius: '999px',
+                                              background: isAdd ? '#dcfce7' : '#fee2e2',
+                                              color: isAdd ? '#15803d' : '#b91c1c'
+                                            }}>
+                                              {isAdd ? '+ Addition' : '- Deduction'}
+                                            </span>
+                                            <div style={{ minWidth: 0 }}>
+                                              <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                {c.title}
+                                              </div>
+                                              {c.remarks && (
+                                                <div style={{ fontSize: '10.5px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                  {c.remarks}
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <span style={{ fontSize: '13px', fontWeight: 800, color: isAdd ? '#15803d' : '#b91c1c', marginLeft: '10px', flexShrink: 0 }}>
+                                            {isAdd ? '+' : '-'}{formatCurrency(c.amount)}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Remarks note */}
+                              {entry.remarks && (
+                                <div style={{ marginTop: '12px', padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', fontSize: '11.5px', color: '#475569', fontStyle: 'italic', borderLeft: '3px solid #cbd5e1' }}>
+                                  Remark / Note: "{entry.remarks}"
+                                </div>
+                              )}
+
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Sticky Footer */}
+              <div className="struct-footer" style={{ borderTop: '1px solid #f1f5f9', padding: '16px 32px', display: 'flex', justifyContent: 'flex-end', background: '#ffffff', borderRadius: '0 0 16px 16px' }}>
+                <button
+                  type="button"
+                  className="struct-btn-primary"
+                  onClick={() => setShowHistoryModal(false)}
+                  style={{ minWidth: '120px', padding: '10px 24px', fontSize: '13px', fontWeight: 700, borderRadius: '8px', cursor: 'pointer' }}
+                >
+                  <span>Close</span>
+                </button>
               </div>
 
             </div>
           </div>
         )}
-
-        {/* Structure Modal */}
         {showStructureModal && (() => {
           let selectedEmpData = (structureFormData.employee ? allEmployees.find(e => e._id === structureFormData.employee) : null) || selectedStructure?.employee;
           // Do not show employee details card in edit mode

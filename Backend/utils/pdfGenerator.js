@@ -36,11 +36,20 @@ function numberToWords(num) {
         if (n < 10000000) return convert(Math.floor(n / 100000)) + ' LAKH' + (n % 100000 ? ' ' + convert(n % 100000) : '');
         return convert(Math.floor(n / 10000000)) + ' CRORE' + (n % 10000000 ? ' ' + convert(n % 10000000) : '');
     };
-    return convert(Math.floor(num)) + ' RUPEES ONLY';
+    const rounded = Number(num).toFixed(2);
+    const parts = rounded.split('.');
+    const wholePart = parseInt(parts[0], 10);
+    const paisePart = parseInt(parts[1], 10) || 0;
+
+    let res = convert(wholePart) + ' RUPEES';
+    if (paisePart > 0) {
+        res += ' AND ' + convert(paisePart) + ' PAISE';
+    }
+    return res + ' ONLY';
 }
 
 const generateSalaryReceiptPDF = async (payroll) => {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         try {
             // A4 Landscape is ideal to match Payslip BHOOMI.pdf template
             const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 28 });
@@ -158,9 +167,14 @@ const generateSalaryReceiptPDF = async (payroll) => {
             const dept = typeof employee.department === 'object' ? (employee.department?.name || 'N/A') : (employee.department || 'N/A');
             const desig = typeof employee.designation === 'object' ? (employee.designation?.name || 'N/A') : (employee.designation || 'N/A');
             const email = employee.email || 'N/A';
-            const lopDays = payroll.workingDays?.absent || 0;
-            const paidDays = (payroll.workingDays?.present || 0) + (payroll.workingDays?.weekoff || 0) + (payroll.workingDays?.holiday || 0) + (payroll.workingDays?.leave || 0);
+            const absentDays = Number(payroll.workingDays?.absent) || 0;
+            const halfDays = Number(payroll.workingDays?.halfDay ?? payroll.workingDays?.halfDays) || 0;
+            const lopDays = absentDays + (halfDays * 0.5);
+            const paidDays = Math.max(0, 30 - lopDays);
             const bankAcc = employee.accountNumber || '—';
+
+            const lopDaysDisplay = Number.isInteger(lopDays) ? `${lopDays} Days` : `${lopDays.toFixed(1)} Days`;
+            const paidDaysDisplay = Number.isInteger(paidDays) ? `${paidDays} Days` : `${paidDays.toFixed(1)} Days`;
 
             const drawEmpCell = (x, cy, label, val) => {
                 doc.rect(x, cy, colW, empRowH).fillAndStroke(WHITE, BORDER_CLR);
@@ -179,8 +193,8 @@ const generateSalaryReceiptPDF = async (payroll) => {
 
             // Row 2
             drawEmpCell(mg, y, 'Email ID', email);
-            drawEmpCell(mg + colW, y, 'LOP Days', `${lopDays} Days`);
-            drawEmpCell(mg + colW * 2, y, 'Paid Days', `${paidDays} Days`);
+            drawEmpCell(mg + colW, y, 'LOP Days', lopDaysDisplay);
+            drawEmpCell(mg + colW * 2, y, 'Paid Days', paidDaysDisplay);
             drawEmpCell(mg + colW * 3, y, 'Bank A/C No', bankAcc);
             y += empRowH + 10;
 
@@ -203,15 +217,60 @@ const generateSalaryReceiptPDF = async (payroll) => {
 
             y += subH;
 
+            // Resolve employee's salary structure for accurate detailed contributions
+            let structure = payroll.salaryStructure;
+            if (!structure || typeof structure !== 'object' || !structure.basicSalary) {
+                try {
+                    const SalaryStructure = require('../models/SalaryStructure');
+                    const empId = employee._id || employee || payroll.employee;
+                    if (empId) {
+                        structure = await SalaryStructure.findOne({
+                            $or: [{ employee: empId }, { employee: empId.toString() }],
+                            isActive: true
+                        });
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+
             // Earnings Rows: Basic, HRA, Conveyance, Food + other allowances & bonus
-            const basicSal = Number(sd.basicSalary) || 0;
-            const hra = Number(allowances.hra) || 0;
-            const conveyance = Number(allowances.conveyance || allowances.transport) || 0;
-            const food = Number(allowances.food) || 0;
-            const da = Number(allowances.da) || 0;
-            const medical = Number(allowances.medical) || 0;
-            const otherAllowance = Number(allowances.other) || 0;
+            let basicSal = Number(sd.basicSalary) || 0;
+            let hra = Number(allowances.hra) || 0;
+            let conveyance = Number(allowances.conveyance || allowances.transport) || 0;
+            let food = Number(allowances.food) || 0;
+            let da = Number(allowances.da) || 0;
+            let medical = Number(allowances.medical) || 0;
+            let otherAllowance = Number(allowances.other) || 0;
             const bonus = Number(sd.bonus) || 0;
+
+            if (structure && structure.basicSalary) {
+                const sAllow = structure.allowances || {};
+                const sHra = Number(sAllow.hra) || 0;
+                const sConv = Number(sAllow.conveyance || sAllow.transport) || 0;
+                const sFood = Number(sAllow.food) || 0;
+                const sDa = Number(sAllow.da) || 0;
+                const sMed = Number(sAllow.medical) || 0;
+                const sOther = Number(sAllow.other) || 0;
+                const structTotAllowances = sHra + sConv + sFood + sDa + sMed + sOther;
+
+                const currentTotAllowances = hra + conveyance + food + da + medical + otherAllowance;
+
+                // If payroll allowances are not broken down or if structure has detailed contributions:
+                if (structTotAllowances > 0 && (currentTotAllowances === 0 || basicSal > Number(structure.basicSalary))) {
+                    basicSal = Number(structure.basicSalary);
+                    hra = sHra;
+                    conveyance = sConv;
+                    food = sFood;
+                    da = sDa;
+                    medical = sMed;
+                    otherAllowance = sOther;
+                }
+            }
+
+            const customComponents = Array.isArray(payroll.customComponents) ? payroll.customComponents : [];
+            const customAdditions = customComponents.filter(c => (c.type || '').toLowerCase() === 'addition' && Number(c.amount) > 0);
+            const customDeductions = customComponents.filter(c => (c.type || '').toLowerCase() === 'deduction' && Number(c.amount) > 0);
 
             const earningsItems = [
                 ['Basic Salary', basicSal],
@@ -223,29 +282,54 @@ const generateSalaryReceiptPDF = async (payroll) => {
             if (medical > 0) earningsItems.push(['Medical Allowance', medical]);
             if (otherAllowance > 0) earningsItems.push(['Other Allowance', otherAllowance]);
             earningsItems.push(['Additional Bonus', bonus]);
+            customAdditions.forEach(c => {
+                const label = `${c.title}${c.remarks ? ' (' + c.remarks + ')' : ''}`;
+                earningsItems.push([label, Number(c.amount)]);
+            });
 
             // Deductions Rows: Penalty, LOP, PF, ESI, Tax, Loan/Advance, Other
+            const fullGrossAmt = basicSal + hra + conveyance + food + da + medical + otherAllowance;
+            const perDayRate = fullGrossAmt > 0 ? (fullGrossAmt / 30) : 0;
+            // Accurate LOP: strictly calculated on actual unpaid days (0.5 for half day = half day salary)
+            const calculatedLopAmt = lopDays > 0 ? Number((lopDays * perDayRate).toFixed(2)) : 0;
+            const lopDeduction = (lopDays !== undefined && lopDays !== null) ? calculatedLopAmt : (Number(deductions.lossOfPay) || 0);
+
+            // Penalty only includes actual late deductions, goal deductions, or manual penalty (NOT half-days, which are LOP)
             const manualPenalty = Number(deductions.penalty) || 0;
             const lateDed = Number(deductions.lateDeduction) || 0;
-            const halfDayDed = Number(deductions.halfDayDeduction) || 0;
-            const totalPenalty = manualPenalty + lateDed + halfDayDed;
-            const lopDeduction = Number(deductions.lossOfPay) || 0;
-            const pf = Number(deductions.pf) || 0;
-            const esi = Number(deductions.esi) || 0;
-            const tax = Number(deductions.tax) || 0;
-            const loan = Number(deductions.loan) || 0;
-            const advance = Number(deductions.advance) || 0;
-            const otherDed = Number(deductions.other) || 0;
+            const goalDed = Number(deductions.goalDeduction) || 0;
+            const totalPenalty = manualPenalty + lateDed + goalDed;
+
+            let pf = Number(deductions.pf) || 0;
+            let esi = Number(deductions.esi) || 0;
+            let tax = Number(deductions.tax) || 0;
+            let loan = Number(deductions.loan) || 0;
+            let advance = Number(deductions.advance) || 0;
+            let otherDed = Number(deductions.other) || 0;
+
+            if (structure && structure.deductions) {
+                const sDed = structure.deductions;
+                if (!pf && sDed.pf) pf = Number(sDed.pf) || 0;
+                if (!esi && sDed.esi) esi = Number(sDed.esi) || 0;
+                if (!tax && sDed.tax) tax = Number(sDed.tax) || 0;
+                if (!loan && sDed.loan) loan = Number(sDed.loan) || 0;
+                if (!advance && sDed.advance) advance = Number(sDed.advance) || 0;
+                if (!otherDed && sDed.other) otherDed = Number(sDed.other) || 0;
+            }
 
             const deductionItems = [
                 ['Penalty', totalPenalty, totalPenalty > 0],
-                ['Loss of Pay (LOP)', lopDeduction, false]
+                ['Loss of Pay (LOP)', lopDeduction, lopDeduction > 0]
             ];
             if (pf > 0) deductionItems.push(['Provident Fund (PF)', pf, false]);
             if (esi > 0) deductionItems.push(['Employee State Insurance (ESI)', esi, false]);
             if (tax > 0) deductionItems.push(['Tax / TDS', tax, false]);
             if (loan > 0 || advance > 0) deductionItems.push(['Loan / Advance', loan + advance, false]);
             if (otherDed > 0) deductionItems.push(['Other Deductions', otherDed, false]);
+            customDeductions.forEach(c => {
+                const label = `${c.title}${c.remarks ? ' (' + c.remarks + ')' : ''}`;
+                deductionItems.push([label, Number(c.amount), true]);
+            });
 
             const rowHeight = 22;
             const numRows = Math.max(earningsItems.length, deductionItems.length);
@@ -280,9 +364,11 @@ const generateSalaryReceiptPDF = async (payroll) => {
             y += contentBoxH;
 
             // Total Earnings & Total Deductions Summary Row
-            const totalEarnings = basicSal + hra + conveyance + food + da + medical + otherAllowance + bonus;
-            const totalDeductions = totalPenalty + lopDeduction + pf + esi + tax + loan + advance + otherDed;
-            const netPayable = Math.max(0, totalEarnings - totalDeductions);
+            const customAdditionsTotal = customAdditions.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+            const customDeductionsTotal = customDeductions.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+            const totalEarnings = fullGrossAmt + bonus + customAdditionsTotal;
+            const totalDeductions = totalPenalty + lopDeduction + pf + esi + tax + loan + advance + otherDed + customDeductionsTotal;
+            const netPayable = Math.max(0, Number((totalEarnings - totalDeductions).toFixed(2)));
 
             const totH = 24;
             // Total Earnings Box

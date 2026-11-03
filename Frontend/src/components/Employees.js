@@ -307,6 +307,7 @@ function Employees() {
     phone: "",
     gender: "",
     assignedManager: "",
+    isManager: false,
     // Additional Info
     joiningDate: "",
     dateOfBirth: "",
@@ -758,6 +759,7 @@ function Employees() {
         designation: "",
         phone: "",
         gender: "",
+        isManager: false,
         // Additional Info
         joiningDate: "",
         dateOfBirth: "",
@@ -913,6 +915,7 @@ function Employees() {
       phone: employee.phone || "",
       gender: employee.gender || "",
       assignedManager: employee.assignedManager?._id || employee.assignedManager || "",
+      isManager: !!employee.isManager,
       // Additional Info
       joiningDate: employee.joiningDate || "",
       dateOfBirth: employee.dateOfBirth || "",
@@ -1026,7 +1029,11 @@ function Employees() {
       }
       if (payload.joiningDate === "") payload.joiningDate = null;
       if (payload.dateOfBirth === "") payload.dateOfBirth = null;
-      if (payload.assignedManager === "") payload.assignedManager = null;
+      if (payload.isManager) {
+        payload.assignedManager = null;
+      } else if (payload.assignedManager === "") {
+        payload.assignedManager = null;
+      }
 
       console.log('Sending payload:', JSON.stringify(payload, null, 2));
       console.log('Shift timing being sent:');
@@ -1545,8 +1552,8 @@ function Employees() {
         }
 
         // Manager name resolution
-        let managerName = 'Not Assigned';
-        if (emp.assignedManager) {
+        let managerName = emp.isManager ? 'Self (Manager)' : 'Not Assigned';
+        if (!emp.isManager && emp.assignedManager) {
           if (typeof emp.assignedManager === 'object') {
             managerName = `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim();
           } else if (typeof emp.assignedManager === 'string') {
@@ -1804,8 +1811,8 @@ function Employees() {
           }
         }
 
-        let managerName = 'Not Assigned';
-        if (emp.assignedManager) {
+        let managerName = emp.isManager ? 'Self (Manager)' : 'Not Assigned';
+        if (!emp.isManager && emp.assignedManager) {
           if (typeof emp.assignedManager === 'object') {
             managerName = `${emp.assignedManager.firstName || ''} ${emp.assignedManager.lastName || ''} (${emp.assignedManager.employeeId || ''})`.trim();
           } else if (typeof emp.assignedManager === 'string') {
@@ -1977,6 +1984,7 @@ function Employees() {
   );
 
   const managerList = employees.filter(emp =>
+    emp.isManager ||
     emp.role?.name?.toLowerCase().includes('manager') ||
     emp.role?.name?.toLowerCase().includes('team leader') ||
     emp.role?.name?.toLowerCase() === 'team leader' ||
@@ -4451,86 +4459,127 @@ function Employees() {
                     </div>
                     <div className="emp-field-row">
                       <div className="emp-field">
-                        <label className="emp-lbl">Assign Manager</label>
-                        <div style={{ position: 'relative' }}>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); setShowAddManagerDd(!showAddManagerDd); }}
-                            style={{
-                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                              width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '8px',
-                              fontSize: '13px', fontWeight: '400', cursor: 'pointer',
-                              background: showAddManagerDd ? '#f8fafc' : '#ffffff',
-                              color: formData.assignedManager ? '#0f172a' : '#9ca3af', outline: 'none',
-                              fontFamily: "'Inter', sans-serif",
-                              transition: 'all 0.2s'
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.borderColor = '#cbd5e1'}
-                            onMouseLeave={(e) => e.currentTarget.style.borderColor = showAddManagerDd ? '#3b82f6' : '#e2e8f0'}
-                          >
-                            <span>{formData.assignedManager ? (() => {
-                              const mgr = managerList.find(m => m._id === formData.assignedManager);
-                              return mgr ? `${mgr.firstName} ${mgr.lastName} (${mgr.employeeId})` : "Select Manager";
-                            })() : "Select Manager"}</span>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s', transform: showAddManagerDd ? 'rotate(180deg)' : 'none' }}>
-                              <polyline points="6 9 12 15 18 9" />
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                          <label className="emp-lbl">{formData.isManager ? "Manager Status" : "Assign Manager"}</label>
+                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', color: formData.isManager ? '#15803d' : '#4b5563', userSelect: 'none' }}>
+                            <input
+                              type="checkbox"
+                              checked={!!formData.isManager}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setFormData({
+                                  ...formData,
+                                  isManager: checked,
+                                  assignedManager: checked ? "" : formData.assignedManager
+                                });
+                                if (checked) setShowAddManagerDd(false);
+                              }}
+                              style={{ accentColor: '#15803d', width: '15px', height: '15px', cursor: 'pointer' }}
+                            />
+                            Is Manager
+                          </label>
+                        </div>
+                        {formData.isManager ? (
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '10px 12px',
+                            background: '#f0fdf4',
+                            border: '1.5px solid #86efac',
+                            borderRadius: '8px',
+                            fontSize: '13px',
+                            fontWeight: '600',
+                            color: '#166534',
+                            minHeight: '41px',
+                            boxSizing: 'border-box'
+                          }}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
                             </svg>
-                          </button>
-                          {showAddManagerDd && (
-                            <div onClick={e => e.stopPropagation()} style={{
-                              position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0,
-                              background: '#ffffff', borderRadius: '12px',
-                              boxShadow: '0 10px 30px rgba(0,0,0,0.12)', zIndex: 300,
-                              maxHeight: '200px', padding: '8px', overflow: 'hidden',
-                              animation: 'empDdIn 0.2s ease', border: '1px solid #e2e8f0'
-                            }}>
-                              <div style={{ marginBottom: '8px' }}>
-                                <input
-                                  type="text"
-                                  placeholder="Search manager..."
-                                  value={managerSearch}
-                                  onChange={(e) => setManagerSearch(e.target.value)}
-                                  style={{
-                                    width: '100%', padding: '6px 10px', border: '1px solid #f1f5f9',
-                                    borderRadius: '6px', fontSize: '12px', background: '#f8fafc',
-                                    outline: 'none', fontFamily: "'Inter', sans-serif"
-                                  }}
-                                />
-                              </div>
-                              <div style={{ maxHeight: '150px', overflowY: 'auto' }} className="emp-modal-scroll">
-                                <div
-                                  className="proj-dd-option"
-                                  onClick={() => { setFormData({ ...formData, assignedManager: "" }); setShowAddManagerDd(false); setManagerSearch(""); }}
-                                  style={{
-                                    padding: '6px 10px', borderRadius: '6px', fontSize: '12px',
-                                    fontWeight: formData.assignedManager === "" ? '600' : '400',
-                                    cursor: 'pointer', color: formData.assignedManager === "" ? '#15803d' : '#1e293b',
-                                    background: formData.assignedManager === "" ? '#dcfce7' : 'transparent',
-                                    marginBottom: '2px', fontFamily: "'Inter', sans-serif",
-                                    transition: 'all 0.15s'
-                                  }}
-                                >No Manager</div>
-                                {managerList.filter(m => `${m.firstName} ${m.lastName} ${m.employeeId}`.toLowerCase().includes(managerSearch.toLowerCase())).map(mgr => (
+                            <span>He is manager</span>
+                          </div>
+                        ) : (
+                          <div style={{ position: 'relative' }}>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setShowAddManagerDd(!showAddManagerDd); }}
+                              style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '8px',
+                                fontSize: '13px', fontWeight: '400', cursor: 'pointer',
+                                background: showAddManagerDd ? '#f8fafc' : '#ffffff',
+                                color: formData.assignedManager ? '#0f172a' : '#9ca3af', outline: 'none',
+                                fontFamily: "'Inter', sans-serif",
+                                transition: 'all 0.2s'
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.borderColor = '#cbd5e1'}
+                              onMouseLeave={(e) => e.currentTarget.style.borderColor = showAddManagerDd ? '#3b82f6' : '#e2e8f0'}
+                            >
+                              <span>{formData.assignedManager ? (() => {
+                                const mgr = managerList.find(m => m._id === formData.assignedManager);
+                                return mgr ? `${mgr.firstName} ${mgr.lastName} (${mgr.employeeId})` : "Select Manager";
+                              })() : "Select Manager"}</span>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s', transform: showAddManagerDd ? 'rotate(180deg)' : 'none' }}>
+                                <polyline points="6 9 12 15 18 9" />
+                              </svg>
+                            </button>
+                            {showAddManagerDd && (
+                              <div onClick={e => e.stopPropagation()} style={{
+                                position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0,
+                                background: '#ffffff', borderRadius: '12px',
+                                boxShadow: '0 10px 30px rgba(0,0,0,0.12)', zIndex: 300,
+                                maxHeight: '200px', padding: '8px', overflow: 'hidden',
+                                animation: 'empDdIn 0.2s ease', border: '1px solid #e2e8f0'
+                              }}>
+                                <div style={{ marginBottom: '8px' }}>
+                                  <input
+                                    type="text"
+                                    placeholder="Search manager..."
+                                    value={managerSearch}
+                                    onChange={(e) => setManagerSearch(e.target.value)}
+                                    style={{
+                                      width: '100%', padding: '6px 10px', border: '1px solid #f1f5f9',
+                                      borderRadius: '6px', fontSize: '12px', background: '#f8fafc',
+                                      outline: 'none', fontFamily: "'Inter', sans-serif"
+                                    }}
+                                  />
+                                </div>
+                                <div style={{ maxHeight: '150px', overflowY: 'auto' }} className="emp-modal-scroll">
                                   <div
-                                    key={mgr._id}
                                     className="proj-dd-option"
-                                    onClick={() => { setFormData({ ...formData, assignedManager: mgr._id }); setShowAddManagerDd(false); setManagerSearch(""); }}
+                                    onClick={() => { setFormData({ ...formData, assignedManager: "" }); setShowAddManagerDd(false); setManagerSearch(""); }}
                                     style={{
                                       padding: '6px 10px', borderRadius: '6px', fontSize: '12px',
-                                      fontWeight: formData.assignedManager === mgr._id ? '600' : '400',
-                                      cursor: 'pointer', color: formData.assignedManager === mgr._id ? '#15803d' : '#1e293b',
-                                      background: formData.assignedManager === mgr._id ? '#dcfce7' : 'transparent',
+                                      fontWeight: formData.assignedManager === "" ? '600' : '400',
+                                      cursor: 'pointer', color: formData.assignedManager === "" ? '#15803d' : '#1e293b',
+                                      background: formData.assignedManager === "" ? '#dcfce7' : 'transparent',
                                       marginBottom: '2px', fontFamily: "'Inter', sans-serif",
                                       transition: 'all 0.15s'
                                     }}
-                                  >
-                                    {mgr.firstName} {mgr.lastName} ({mgr.employeeId}) - {mgr.designation} - {mgr.role?.name}
-                                  </div>
-                                ))}
+                                  >No Manager</div>
+                                  {managerList.filter(m => `${m.firstName} ${m.lastName} ${m.employeeId}`.toLowerCase().includes(managerSearch.toLowerCase())).map(mgr => (
+                                    <div
+                                      key={mgr._id}
+                                      className="proj-dd-option"
+                                      onClick={() => { setFormData({ ...formData, assignedManager: mgr._id }); setShowAddManagerDd(false); setManagerSearch(""); }}
+                                      style={{
+                                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px',
+                                        fontWeight: formData.assignedManager === mgr._id ? '600' : '400',
+                                        cursor: 'pointer', color: formData.assignedManager === mgr._id ? '#15803d' : '#1e293b',
+                                        background: formData.assignedManager === mgr._id ? '#dcfce7' : 'transparent',
+                                        marginBottom: '2px', fontFamily: "'Inter', sans-serif",
+                                        transition: 'all 0.15s'
+                                      }}
+                                    >
+                                      {mgr.firstName} {mgr.lastName} ({mgr.employeeId}) - {mgr.designation} - {mgr.role?.name}
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          )}
-                        </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="emp-field"></div>
                     </div>
@@ -5150,6 +5199,11 @@ function Employees() {
                               ["Role", selectedEmployee.role?.name || "—"],
                               ["Department", selectedEmployee.department || "—"],
                               ["Designation", selectedEmployee.designation || "—"],
+                              ["Manager", selectedEmployee.isManager ? "He is manager" : (
+                                selectedEmployee.assignedManager
+                                  ? `${selectedEmployee.assignedManager.firstName || ''} ${selectedEmployee.assignedManager.lastName || ''} (${selectedEmployee.assignedManager.employeeId || ''})`.trim()
+                                  : "Not Assigned"
+                              )],
                               ["Employee ID", selectedEmployee.employeeId],
                               ["Shift Type", selectedEmployee.shiftType ?
                                 (shiftConfigs.find(c => c.type === selectedEmployee.shiftType)?.name ||
@@ -5569,86 +5623,127 @@ function Employees() {
                     </datalist>
                   </div>
                   <div className="emp-field">
-                    <label className="emp-lbl">Assign Manager</label>
-                    <div style={{ position: 'relative' }}>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setShowEditManagerDd(!showEditManagerDd); }}
-                        style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '8px',
-                          fontSize: '13px', fontWeight: '400', cursor: 'pointer',
-                          background: showEditManagerDd ? '#f8fafc' : '#ffffff',
-                          color: editFormData.assignedManager ? '#0f172a' : '#9ca3af', outline: 'none',
-                          fontFamily: "'Inter', sans-serif",
-                          transition: 'all 0.2s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.borderColor = '#cbd5e1'}
-                        onMouseLeave={(e) => e.currentTarget.style.borderColor = showEditManagerDd ? '#3b82f6' : '#e2e8f0'}
-                      >
-                        <span>{editFormData.assignedManager ? (() => {
-                          const mgr = managerList.find(m => m._id === editFormData.assignedManager);
-                          return mgr ? `${mgr.firstName} ${mgr.lastName} (${mgr.employeeId})` : "Select Manager";
-                        })() : "Select Manager"}</span>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s', transform: showEditManagerDd ? 'rotate(180deg)' : 'none' }}>
-                          <polyline points="6 9 12 15 18 9" />
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                      <label className="emp-lbl">{editFormData.isManager ? "Manager Status" : "Assign Manager"}</label>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', color: editFormData.isManager ? '#15803d' : '#4b5563', userSelect: 'none' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!editFormData.isManager}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setEditFormData({
+                              ...editFormData,
+                              isManager: checked,
+                              assignedManager: checked ? "" : editFormData.assignedManager
+                            });
+                            if (checked) setShowEditManagerDd(false);
+                          }}
+                          style={{ accentColor: '#15803d', width: '15px', height: '15px', cursor: 'pointer' }}
+                        />
+                        Is Manager
+                      </label>
+                    </div>
+                    {editFormData.isManager ? (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        background: '#f0fdf4',
+                        border: '1.5px solid #86efac',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        color: '#166534',
+                        minHeight: '41px',
+                        boxSizing: 'border-box'
+                      }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
                         </svg>
-                      </button>
-                      {showEditManagerDd && (
-                        <div onClick={e => e.stopPropagation()} style={{
-                          position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0,
-                          background: '#ffffff', borderRadius: '12px',
-                          boxShadow: '0 10px 30px rgba(0,0,0,0.12)', zIndex: 300,
-                          maxHeight: '200px', padding: '8px', overflow: 'hidden',
-                          animation: 'empDdIn 0.2s ease', border: '1px solid #e2e8f0'
-                        }}>
-                          <div style={{ marginBottom: '8px' }}>
-                            <input
-                              type="text"
-                              placeholder="Search manager..."
-                              value={editManagerSearch}
-                              onChange={(e) => setEditManagerSearch(e.target.value)}
-                              style={{
-                                width: '100%', padding: '6px 10px', border: '1px solid #f1f5f9',
-                                borderRadius: '6px', fontSize: '12px', background: '#f8fafc',
-                                outline: 'none', fontFamily: "'Inter', sans-serif"
-                              }}
-                            />
-                          </div>
-                          <div style={{ maxHeight: '150px', overflowY: 'auto' }} className="emp-modal-scroll">
-                            <div
-                              className="proj-dd-option"
-                              onClick={() => { setEditFormData({ ...editFormData, assignedManager: "" }); setShowEditManagerDd(false); setEditManagerSearch(""); }}
-                              style={{
-                                padding: '6px 10px', borderRadius: '6px', fontSize: '12px',
-                                fontWeight: editFormData.assignedManager === "" ? '600' : '400',
-                                cursor: 'pointer', color: editFormData.assignedManager === "" ? '#15803d' : '#1e293b',
-                                background: editFormData.assignedManager === "" ? '#dcfce7' : 'transparent',
-                                marginBottom: '2px', fontFamily: "'Inter', sans-serif",
-                                transition: 'all 0.15s'
-                              }}
-                            >No Manager</div>
-                            {managerList.filter(m => `${m.firstName} ${m.lastName} ${m.employeeId}`.toLowerCase().includes(editManagerSearch.toLowerCase())).map(mgr => (
+                        <span>He is manager</span>
+                      </div>
+                    ) : (
+                      <div style={{ position: 'relative' }}>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setShowEditManagerDd(!showEditManagerDd); }}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '8px',
+                            fontSize: '13px', fontWeight: '400', cursor: 'pointer',
+                            background: showEditManagerDd ? '#f8fafc' : '#ffffff',
+                            color: editFormData.assignedManager ? '#0f172a' : '#9ca3af', outline: 'none',
+                            fontFamily: "'Inter', sans-serif",
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.borderColor = '#cbd5e1'}
+                          onMouseLeave={(e) => e.currentTarget.style.borderColor = showEditManagerDd ? '#3b82f6' : '#e2e8f0'}
+                        >
+                          <span>{editFormData.assignedManager ? (() => {
+                            const mgr = managerList.find(m => m._id === editFormData.assignedManager);
+                            return mgr ? `${mgr.firstName} ${mgr.lastName} (${mgr.employeeId})` : "Select Manager";
+                          })() : "Select Manager"}</span>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.2s', transform: showEditManagerDd ? 'rotate(180deg)' : 'none' }}>
+                            <polyline points="6 9 12 15 18 9" />
+                          </svg>
+                        </button>
+                        {showEditManagerDd && (
+                          <div onClick={e => e.stopPropagation()} style={{
+                            position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0,
+                            background: '#ffffff', borderRadius: '12px',
+                            boxShadow: '0 10px 30px rgba(0,0,0,0.12)', zIndex: 300,
+                            maxHeight: '200px', padding: '8px', overflow: 'hidden',
+                            animation: 'empDdIn 0.2s ease', border: '1px solid #e2e8f0'
+                          }}>
+                            <div style={{ marginBottom: '8px' }}>
+                              <input
+                                type="text"
+                                placeholder="Search manager..."
+                                value={editManagerSearch}
+                                onChange={(e) => setEditManagerSearch(e.target.value)}
+                                style={{
+                                  width: '100%', padding: '6px 10px', border: '1px solid #f1f5f9',
+                                  borderRadius: '6px', fontSize: '12px', background: '#f8fafc',
+                                  outline: 'none', fontFamily: "'Inter', sans-serif"
+                                }}
+                              />
+                            </div>
+                            <div style={{ maxHeight: '150px', overflowY: 'auto' }} className="emp-modal-scroll">
                               <div
-                                key={mgr._id}
                                 className="proj-dd-option"
-                                onClick={() => { setEditFormData({ ...editFormData, assignedManager: mgr._id }); setShowEditManagerDd(false); setEditManagerSearch(""); }}
+                                onClick={() => { setEditFormData({ ...editFormData, assignedManager: "" }); setShowEditManagerDd(false); setEditManagerSearch(""); }}
                                 style={{
                                   padding: '6px 10px', borderRadius: '6px', fontSize: '12px',
-                                  fontWeight: editFormData.assignedManager === mgr._id ? '600' : '400',
-                                  cursor: 'pointer', color: editFormData.assignedManager === mgr._id ? '#15803d' : '#1e293b',
-                                  background: editFormData.assignedManager === mgr._id ? '#dcfce7' : 'transparent',
+                                  fontWeight: editFormData.assignedManager === "" ? '600' : '400',
+                                  cursor: 'pointer', color: editFormData.assignedManager === "" ? '#15803d' : '#1e293b',
+                                  background: editFormData.assignedManager === "" ? '#dcfce7' : 'transparent',
                                   marginBottom: '2px', fontFamily: "'Inter', sans-serif",
                                   transition: 'all 0.15s'
                                 }}
-                              >
-                                {mgr.firstName} {mgr.lastName} ({mgr.employeeId}) - {mgr.designation} - {mgr.role?.name}
-                              </div>
-                            ))}
+                              >No Manager</div>
+                              {managerList.filter(m => m._id !== selectedEmployee?._id && `${m.firstName} ${m.lastName} ${m.employeeId}`.toLowerCase().includes(editManagerSearch.toLowerCase())).map(mgr => (
+                                <div
+                                  key={mgr._id}
+                                  className="proj-dd-option"
+                                  onClick={() => { setEditFormData({ ...editFormData, assignedManager: mgr._id }); setShowEditManagerDd(false); setEditManagerSearch(""); }}
+                                  style={{
+                                    padding: '6px 10px', borderRadius: '6px', fontSize: '12px',
+                                    fontWeight: editFormData.assignedManager === mgr._id ? '600' : '400',
+                                    cursor: 'pointer', color: editFormData.assignedManager === mgr._id ? '#15803d' : '#1e293b',
+                                    background: editFormData.assignedManager === mgr._id ? '#dcfce7' : 'transparent',
+                                    marginBottom: '2px', fontFamily: "'Inter', sans-serif",
+                                    transition: 'all 0.15s'
+                                  }}
+                                >
+                                  {mgr.firstName} {mgr.lastName} ({mgr.employeeId}) - {mgr.designation} - {mgr.role?.name}
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="emp-field-row">

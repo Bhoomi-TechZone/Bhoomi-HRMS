@@ -25,13 +25,93 @@ router.get('/my-payslip', auth, async (req, res) => {
     const payslip = await Payroll.findOne({
       employee: req.user._id.toString(),
       'payPeriod.month': parseInt(month),
-      'payPeriod.year': parseInt(year)
+      'payPeriod.year': parseInt(year),
+      status: 'paid'
     })
-      .populate('employee', 'firstName lastName employeeId department designation')
+      .populate('employee', 'firstName lastName employeeId department designation email bankName accountNumber ifscCode panNumber')
+      .populate('salaryStructure')
       .sort({ createdAt: -1 });
 
     if (!payslip) {
       return res.status(404).json({ message: 'Payslip not found' });
+    }
+
+    // Auto-sync detailed allowances from SalaryStructure if missing or zero
+    try {
+      const structure = payslip.salaryStructure || await SalaryStructure.findOne({
+        $or: [{ employee: req.user._id }, { employee: req.user._id.toString() }],
+        isActive: true
+      });
+
+      if (structure && structure.basicSalary) {
+        const sAllow = structure.allowances || {};
+        const sHra = Number(sAllow.hra) || 0;
+        const sConv = Number(sAllow.conveyance || sAllow.transport) || 0;
+        const sFood = Number(sAllow.food) || 0;
+        const sDa = Number(sAllow.da) || 0;
+        const sMed = Number(sAllow.medical) || 0;
+        const sOther = Number(sAllow.other) || 0;
+        const structTot = sHra + sConv + sFood + sDa + sMed + sOther;
+
+        const curAllow = payslip.salaryDetails?.allowances || {};
+        const curTot = (Number(curAllow.hra) || 0) + (Number(curAllow.conveyance || curAllow.transport) || 0) + (Number(curAllow.food) || 0) + (Number(curAllow.da) || 0) + (Number(curAllow.medical) || 0) + (Number(curAllow.other) || 0);
+
+        if (structTot > 0 && (curTot === 0 || Number(payslip.salaryDetails?.basicSalary) > Number(structure.basicSalary))) {
+          if (!payslip.salaryDetails) payslip.salaryDetails = {};
+          payslip.salaryDetails.basicSalary = Number(structure.basicSalary);
+          payslip.salaryDetails.allowances = {
+            hra: sHra,
+            conveyance: sConv,
+            food: sFood,
+            da: sDa,
+            medical: sMed,
+            transport: Number(sAllow.transport) || 0,
+            other: sOther
+          };
+          payslip.salaryStructure = structure._id;
+        }
+      }
+
+      // Calculate accurate LOP including half-days
+      const absentDays = Number(payslip.workingDays?.absent) || 0;
+      const halfDays = Number(payslip.workingDays?.halfDay ?? payslip.workingDays?.halfDays) || 0;
+      const unpaidDays = absentDays + (halfDays * 0.5);
+
+      const bSal = Number(payslip.salaryDetails?.basicSalary) || 0;
+      const al = payslip.salaryDetails?.allowances || {};
+      const totAl = (Number(al.hra) || 0) + (Number(al.conveyance || al.transport) || 0) + (Number(al.food) || 0) + (Number(al.da) || 0) + (Number(al.medical) || 0) + (Number(al.other) || 0);
+      const fullGross = bSal + totAl;
+      const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+      const calculatedLop = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : 0;
+
+      const d = payslip.salaryDetails?.deductions || {};
+      const manualPenalty = Number(d.penalty) || 0;
+      const latePenalty = Number(d.lateDeduction) || 0;
+      const goalPenalty = Number(d.goalDeduction) || 0;
+      const totalPenalties = manualPenalty + latePenalty + goalPenalty;
+      const stdDed = (Number(d.pf) || 0) + (Number(d.esi) || 0) + (Number(d.tax) || 0) + (Number(d.loan) || 0) + (Number(d.advance) || 0) + (Number(d.other) || 0);
+
+      const effectiveLop = calculatedLop;
+      const netSalary = Number((fullGross + (payslip.salaryDetails?.bonus || 0) - effectiveLop - stdDed - totalPenalties).toFixed(2));
+
+      if (!payslip.salaryDetails) payslip.salaryDetails = {};
+      if (!payslip.salaryDetails.deductions) payslip.salaryDetails.deductions = {};
+      payslip.salaryDetails.deductions.lossOfPay = effectiveLop;
+      payslip.salaryDetails.deductions.halfDayDeduction = 0;
+      payslip.salaryDetails.netSalary = netSalary;
+      payslip.salaryDetails.totalDeductions = effectiveLop + stdDed + totalPenalties;
+
+      await Payroll.findByIdAndUpdate(payslip._id, {
+        'salaryDetails.basicSalary': payslip.salaryDetails.basicSalary,
+        'salaryDetails.allowances': payslip.salaryDetails.allowances,
+        'salaryDetails.deductions.lossOfPay': effectiveLop,
+        'salaryDetails.deductions.halfDayDeduction': 0,
+        'salaryDetails.netSalary': netSalary,
+        'salaryDetails.totalDeductions': payslip.salaryDetails.totalDeductions,
+        salaryStructure: structure?._id || payslip.salaryStructure
+      });
+    } catch (syncErr) {
+      console.warn('Warning syncing structure for my-payslip:', syncErr.message);
     }
 
     res.json(payslip);
@@ -59,6 +139,7 @@ router.get('/', auth, checkPermission('payroll', 'read'), async (req, res) => {
     const payrolls = await Payroll.find(query)
       .populate('employee', 'firstName lastName employeeId department designation email bankName accountNumber ifscCode panNumber')
       .populate('processedBy', 'firstName lastName')
+      .populate('salaryStructure')
       .sort({ createdAt: -1 });
 
     res.json(payrolls);
@@ -155,11 +236,33 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
     endDate.setHours(23, 59, 59, 999);
     const totalDaysInMonth = endDate.getDate();
 
+    const todayNow = new Date();
+    const today = new Date(todayNow.getFullYear(), todayNow.getMonth(), todayNow.getDate());
+
     const allShiftConfigs = await ShiftConfig.find({});
     const holidays = await Holiday.find({ date: { $gte: startDate, $lte: endDate } });
     const holidayDays = new Set(holidays.map(h => new Date(h.date).getDate()));
 
-    // 2. Clear existing draft payrolls for this period to avoid duplicates
+    // 2. Clear existing draft payrolls for this period to avoid duplicates,
+    // but preserve any user customized additions, deductions, penalties, and audit history
+    const existingDrafts = await Payroll.find({
+      'payPeriod.month': parseInt(month, 10),
+      'payPeriod.year': parseInt(year, 10),
+      status: 'draft'
+    });
+    const preservedDraftData = new Map();
+    existingDrafts.forEach(p => {
+      const empId = p.employee ? p.employee.toString() : '';
+      if (empId) {
+        preservedDraftData.set(empId, {
+          customComponents: p.customComponents || [],
+          bonus: p.salaryDetails?.bonus || 0,
+          penalty: p.salaryDetails?.deductions?.penalty || 0,
+          editHistory: p.editHistory || []
+        });
+      }
+    });
+
     await Payroll.deleteMany({
       'payPeriod.month': parseInt(month, 10),
       'payPeriod.year': parseInt(year, 10),
@@ -169,12 +272,12 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
     const employees = await User.find({ isActive: true });
     const generatedPayrolls = [];
 
-    const todayNow = new Date();
-    const today = new Date(todayNow.getFullYear(), todayNow.getMonth(), todayNow.getDate());
-
     for (const employee of employees) {
       // Get salary structure
-      const structure = await SalaryStructure.findOne({ employee: employee._id.toString(), isActive: true });
+      const structure = await SalaryStructure.findOne({
+        $or: [{ employee: employee._id }, { employee: employee._id.toString() }],
+        isActive: true
+      });
       if (!structure) continue;
 
       // Check for existing processed/paid payroll to avoid duplicates
@@ -363,7 +466,8 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
 
       const lateDeduction = 0;
       const halfDayDeduction = Number((halfDayCount * (perDaySalary * 0.5)).toFixed(2));
-      const lossOfPay = Number((absentCount * perDaySalary).toFixed(2));
+      const absentLossOfPay = Number((absentCount * perDaySalary).toFixed(2));
+      const totalLossOfPay = Number((absentLossOfPay + halfDayDeduction).toFixed(2));
 
       const stdDeductions = structure.deductions || {};
       const totalStdDeductions =
@@ -374,13 +478,35 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
         (stdDeductions.advance || 0) +
         (stdDeductions.other || 0);
 
-      // Option A: Net Salary is strictly calculated on Paid Days Earned so far (Elapsed Present + Elapsed Week Offs + Elapsed Holidays + Elapsed Leaves)
-      // Cap paid days to 30 for calculations if per day salary is /30, or just use elapsed.
-      const paidDaysForCalc = elapsedPaidDaysCount;
+      // 30-day standard payroll calculation: base days = 30 for all months
+      const TOTAL_PAYROLL_DAYS = 30;
+      const isMonthCompleted = endDate <= today;
+      let paidDaysForCalc;
+      if (isMonthCompleted) {
+        paidDaysForCalc = Math.min(TOTAL_PAYROLL_DAYS, Math.max(0, TOTAL_PAYROLL_DAYS - absentCount - (halfDayCount * 0.5)));
+      } else {
+        const elapsedDays = Math.min(TOTAL_PAYROLL_DAYS, today.getDate());
+        paidDaysForCalc = Math.min(elapsedDays, Math.max(0, elapsedDays - absentCount - (halfDayCount * 0.5)));
+      }
+
+      const preserved = preservedDraftData.get(employee._id.toString());
+      const customComponentsToApply = preserved?.customComponents || [];
+      const bonusToApply = preserved?.bonus || 0;
+      const penaltyToApply = preserved?.penalty || 0;
+      const editHistoryToApply = preserved?.editHistory || [];
+
+      const customAdditions = customComponentsToApply
+        .filter(c => (c.type || '').toLowerCase() === 'addition')
+        .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+      const customDeductions = customComponentsToApply
+        .filter(c => (c.type || '').toLowerCase() === 'deduction')
+        .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 
       const earnedGross = Number((paidDaysForCalc * perDaySalary).toFixed(2));
-      const penaltyDeductions = Number((lateDeduction + halfDayDeduction).toFixed(2));
-      const currentNet = Number((earnedGross + 0 - totalStdDeductions - penaltyDeductions).toFixed(2));
+      const penaltyDeductions = Number((lateDeduction + penaltyToApply).toFixed(2));
+      const totalDeductionsCalc = Number((totalLossOfPay + totalStdDeductions + penaltyDeductions + customDeductions).toFixed(2));
+      const calculatedGross = Number((grossSalaryAmt + customAdditions).toFixed(2));
+      const currentNet = Number(Math.max(0, earnedGross + bonusToApply + customAdditions - totalStdDeductions - penaltyDeductions - customDeductions).toFixed(2));
 
       const payroll = new Payroll({
         employee: employee._id.toString(),
@@ -388,7 +514,7 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
         salaryStructure: structure._id,
         payPeriod: { month: parseInt(month, 10), year: parseInt(year, 10) },
         workingDays: {
-          total: totalDaysInMonth,
+          total: TOTAL_PAYROLL_DAYS,
           present: presentCount,
           halfDay: halfDayCount,
           leave: elapsedLeaveCount,
@@ -399,7 +525,7 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
         attendance: {
           lateCheckIns: lateCount,
           present: presentCount,
-          total: totalDaysInMonth
+          total: TOTAL_PAYROLL_DAYS
         },
         performance: {
           incompleteGoals: 0,
@@ -407,7 +533,7 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
         },
         salaryDetails: {
           basicSalary: structure.basicSalary,
-          bonus: 0,
+          bonus: bonusToApply,
           gratuity: structure.gratuity || 0,
           allowances: {
             hra: structure.allowances?.hra || 0,
@@ -425,15 +551,18 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
             loan: stdDeductions.loan || 0,
             advance: stdDeductions.advance || 0,
             other: stdDeductions.other || 0,
-            lossOfPay: lossOfPay,
-            halfDayDeduction: halfDayDeduction,
+            lossOfPay: totalLossOfPay,
+            halfDayDeduction: 0,
             lateDeduction: lateDeduction,
+            penalty: penaltyToApply,
             goalDeduction: 0
           },
-          grossSalary: earnedGross,
-          totalDeductions: totalStdDeductions + penaltyDeductions,
+          grossSalary: calculatedGross,
+          totalDeductions: totalDeductionsCalc,
           netSalary: currentNet
         },
+        customComponents: customComponentsToApply,
+        editHistory: editHistoryToApply,
         processedBy: req.user._id,
         processedAt: new Date(),
         status: 'draft'
@@ -484,7 +613,8 @@ router.get('/preview/:employeeId', auth, checkPermission('payroll', 'read'), asy
 
     let lateCount = 0;
     let presentCount = attendances.filter(a => a.status === 'present').length;
-    let totalDays = endDate.getDate();
+    const TOTAL_PAYROLL_DAYS = 30;
+    let totalDays = TOTAL_PAYROLL_DAYS;
 
     attendances.forEach(att => {
       // Late Check-in logic
@@ -511,6 +641,54 @@ router.get('/preview/:employeeId', auth, checkPermission('payroll', 'read'), asy
   }
 });
 
+// Update payroll status (draft, approved, paid)
+router.patch('/:id/status', auth, checkPermission('payroll', 'update'), async (req, res) => {
+  try {
+    const { status } = req.body;
+    const allowed = ['draft', 'approved', 'processed', 'paid'];
+    if (!status || !allowed.includes(status)) {
+      return res.status(400).json({ message: 'Invalid status. Must be draft, approved, or paid' });
+    }
+
+    const updateData = { status };
+    if (status === 'paid') {
+      updateData.paidAt = new Date();
+    } else if (status === 'approved' || status === 'processed') {
+      updateData.processedBy = req.user._id;
+      updateData.processedAt = new Date();
+    }
+
+    const payroll = await Payroll.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    )
+      .populate('employee', 'firstName lastName email employeeId designation department bankName accountNumber')
+      .populate('processedBy', 'firstName lastName');
+
+    if (!payroll) {
+      return res.status(404).json({ message: 'Payroll record not found' });
+    }
+
+    if (status === 'paid' && payroll.employee && payroll.employee.email) {
+      const months = ['January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'];
+      const monthName = months[payroll.payPeriod.month - 1];
+
+      sendSalaryPaidEmail(payroll.employee, payroll, monthName, payroll.payPeriod.year)
+        .then(result => {
+          if (result.success) console.log(`✅ Salary notification sent to ${payroll.employee.email}`);
+        })
+        .catch(err => console.error('Email error:', err));
+    }
+
+    res.json(payroll);
+  } catch (error) {
+    console.error('Error updating payroll status:', error);
+    res.status(500).json({ message: 'Error updating payroll status' });
+  }
+});
+
 // Finalize payroll
 router.patch('/:id/finalize', auth, checkPermission('payroll', 'update'), async (req, res) => {
   try {
@@ -518,7 +696,9 @@ router.patch('/:id/finalize', auth, checkPermission('payroll', 'update'), async 
       req.params.id,
       { status: 'processed', processedBy: req.user._id, processedAt: new Date() },
       { new: true }
-    );
+    )
+      .populate('employee', 'firstName lastName email employeeId designation department bankName accountNumber')
+      .populate('processedBy', 'firstName lastName');
     res.json(payroll);
   } catch (error) {
     res.status(500).json({ message: 'Error finalizing payroll' });
@@ -532,7 +712,9 @@ router.patch('/:id/mark-paid', auth, checkPermission('payroll', 'update'), async
       req.params.id,
       { status: 'paid', paidAt: new Date() },
       { new: true }
-    ).populate('employee', 'firstName lastName email employeeId designation department bankName accountNumber');
+    )
+      .populate('employee', 'firstName lastName email employeeId designation department bankName accountNumber')
+      .populate('processedBy', 'firstName lastName');
 
     if (!payroll) {
       return res.status(404).json({ message: 'Payroll record not found' });
@@ -631,10 +813,10 @@ router.delete('/clear-period', auth, checkPermission('payroll', 'delete'), async
   }
 });
 
-// Edit payroll record (bonus and penalty)
+// Edit payroll record (bonus, penalty, and custom additions/deductions)
 router.put('/:id', auth, checkPermission('payroll', 'update'), async (req, res) => {
   try {
-    const { bonus, penalty } = req.body;
+    const { bonus, penalty, customComponents, remarks } = req.body;
     
     const payroll = await Payroll.findById(req.params.id);
     if (!payroll) {
@@ -645,22 +827,185 @@ router.put('/:id', auth, checkPermission('payroll', 'update'), async (req, res) 
       return res.status(400).json({ message: 'Cannot edit an already paid payroll' });
     }
 
+    // Capture previous state for history tracking
+    const prevBonus = payroll.salaryDetails?.bonus || 0;
+    const prevPenalty = payroll.salaryDetails?.deductions?.penalty || 0;
+    const prevGross = payroll.salaryDetails?.grossSalary || 0;
+    const prevNet = payroll.salaryDetails?.netSalary || 0;
+    const prevComponents = Array.isArray(payroll.customComponents) ? JSON.parse(JSON.stringify(payroll.customComponents)) : [];
+
     // Update fields
-    payroll.salaryDetails.bonus = Number(bonus) || 0;
+    if (bonus !== undefined) {
+      payroll.salaryDetails.bonus = Number(bonus) || 0;
+    }
     if (!payroll.salaryDetails.deductions) {
       payroll.salaryDetails.deductions = {};
     }
-    payroll.salaryDetails.deductions.penalty = Number(penalty) || 0;
+    if (penalty !== undefined) {
+      payroll.salaryDetails.deductions.penalty = Number(penalty) || 0;
+    }
 
-    // Force recalculation by unsetting netSalary
-    payroll.salaryDetails.netSalary = undefined;
+    // Ensure LOP and paid-days earned gross are accurately preserved
+    const absentDays = payroll.workingDays?.absent || 0;
+    const halfDays = payroll.workingDays?.halfDay || 0;
+    const unpaidDays = absentDays + (halfDays * 0.5);
+    const paidDays = Math.max(0, 30 - unpaidDays);
+
+    const allowances = payroll.salaryDetails?.allowances || {};
+    const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
+    const fullMonthlyGross = (payroll.salaryDetails?.basicSalary || 0) + totalAllowances;
+    const perDaySalary = fullMonthlyGross > 0 ? (fullMonthlyGross / 30) : 0;
+    const earnedGross = fullMonthlyGross > 0 ? Number((paidDays * perDaySalary).toFixed(2)) : (payroll.salaryDetails?.grossSalary || 0);
+    const calculatedLop = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : 0;
+
+    // Loss of Pay is strictly calculated on unpaidDays (e.g. 0.5 for half-day = 0.5 * per-day salary)
+    payroll.salaryDetails.deductions.lossOfPay = calculatedLop;
+    payroll.salaryDetails.deductions.halfDayDeduction = 0;
+
+    // Process custom additions and deductions
+    if (Array.isArray(customComponents)) {
+      payroll.customComponents = customComponents
+        .filter(c => c && c.title && c.title.trim() && Number(c.amount) > 0)
+        .map(c => ({
+          title: c.title.trim(),
+          type: (c.type || 'addition').toString().trim().toLowerCase() === 'deduction' ? 'deduction' : 'addition',
+          amount: Number(c.amount) || 0,
+          remarks: (c.remarks || '').trim()
+        }));
+    }
+
+    const customAdditions = (payroll.customComponents || [])
+      .filter(c => (c.type || '').toLowerCase() === 'addition')
+      .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+
+    const customDeductions = (payroll.customComponents || [])
+      .filter(c => (c.type || '').toLowerCase() === 'deduction')
+      .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+
+    const newGross = Number((fullMonthlyGross + customAdditions).toFixed(2));
+    payroll.salaryDetails.grossSalary = newGross;
+
+    const totalStdDeductions =
+      (payroll.salaryDetails.deductions?.pf || 0) +
+      (payroll.salaryDetails.deductions?.esi || 0) +
+      (payroll.salaryDetails.deductions?.tax || 0) +
+      (payroll.salaryDetails.deductions?.loan || 0) +
+      (payroll.salaryDetails.deductions?.advance || 0) +
+      (payroll.salaryDetails.deductions?.other || 0) +
+      (payroll.salaryDetails.deductions?.penalty || 0) +
+      (payroll.salaryDetails.deductions?.lateDeduction || 0);
+
+    const totalDeductions = Number((calculatedLop + totalStdDeductions + customDeductions).toFixed(2));
+    payroll.salaryDetails.totalDeductions = totalDeductions;
+
+    // Final Net salary = earnedGross + bonus + customAdditions - totalStdDeductions - customDeductions
+    const finalNet = Number(Math.max(0, earnedGross + (payroll.salaryDetails.bonus || 0) + customAdditions - totalStdDeductions - customDeductions).toFixed(2));
+    payroll.salaryDetails.netSalary = finalNet;
+
+    // Build changes summary for audit history
+    const changes = [];
+    const newBonus = Number(payroll.salaryDetails.bonus) || 0;
+    const newPenalty = Number(payroll.salaryDetails.deductions.penalty) || 0;
+    if (newBonus !== prevBonus) {
+      changes.push(`Bonus: ₹${prevBonus.toFixed(2)} → ₹${newBonus.toFixed(2)}`);
+    }
+    if (newPenalty !== prevPenalty) {
+      changes.push(`Penalty: ₹${prevPenalty.toFixed(2)} → ₹${newPenalty.toFixed(2)}`);
+    }
+    const currentComponents = payroll.customComponents || [];
+    if (JSON.stringify(currentComponents) !== JSON.stringify(prevComponents)) {
+      const compDesc = currentComponents.map(c => `${c.type === 'deduction' ? '-' : '+'}${c.title} (₹${Number(c.amount).toFixed(2)})`).join(', ');
+      changes.push(`Components (${currentComponents.length}): ${compDesc || 'None'}`);
+    }
+    if (newGross !== prevGross) {
+      changes.push(`Gross: ₹${prevGross.toFixed(2)} → ₹${newGross.toFixed(2)}`);
+    }
+    if (finalNet !== prevNet) {
+      changes.push(`Net Pay: ₹${prevNet.toFixed(2)} → ₹${finalNet.toFixed(2)}`);
+    }
+
+    const editorName = req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || req.user.email || 'Admin' : 'Admin';
+
+    if (!Array.isArray(payroll.editHistory)) {
+      payroll.editHistory = [];
+    }
+
+    payroll.editHistory.push({
+      editedBy: req.user?._id,
+      editedByName: editorName,
+      editedAt: new Date(),
+      action: 'Updated Payroll Record',
+      changesSummary: changes.length > 0 ? changes.join(' | ') : 'Saved adjustments',
+      previousState: {
+        grossSalary: prevGross,
+        netSalary: prevNet,
+        bonus: prevBonus,
+        penalty: prevPenalty,
+        customComponents: prevComponents
+      },
+      newState: {
+        grossSalary: newGross,
+        netSalary: finalNet,
+        bonus: newBonus,
+        penalty: newPenalty,
+        customComponents: currentComponents
+      },
+      remarks: (remarks || '').trim()
+    });
+
+    payroll.markModified('salaryDetails');
+    payroll.markModified('customComponents');
+    payroll.markModified('editHistory');
 
     await payroll.save();
 
-    res.json({ message: 'Payroll updated successfully', payroll });
+    const populatedPayroll = await Payroll.findById(payroll._id)
+      .populate('employee', 'firstName lastName employeeId department designation email bankName accountNumber ifscCode panNumber')
+      .populate('processedBy', 'firstName lastName')
+      .populate('editHistory.editedBy', 'firstName lastName email');
+
+    res.json({ message: 'Payroll updated successfully', payroll: populatedPayroll });
   } catch (error) {
     console.error('Error updating payroll:', error);
     res.status(500).json({ message: 'Error updating payroll record' });
+  }
+});
+
+// Get audit/edit history of a payroll record
+router.get('/:id/history', auth, checkPermission('payroll', 'read'), async (req, res) => {
+  try {
+    const payroll = await Payroll.findById(req.params.id)
+      .populate('employee', 'firstName lastName employeeId designation department email')
+      .populate('processedBy', 'firstName lastName email')
+      .populate('editHistory.editedBy', 'firstName lastName email role');
+
+    if (!payroll) {
+      return res.status(404).json({ message: 'Payroll record not found' });
+    }
+
+    const allowances = payroll.salaryDetails?.allowances || {};
+    const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
+    const basicSalary = payroll.salaryDetails?.basicSalary || 0;
+    const baseGross = (basicSalary + totalAllowances) > 0 ? (basicSalary + totalAllowances) : (payroll.salaryDetails?.grossSalary || 0);
+
+    res.json({
+      payrollId: payroll._id,
+      employee: payroll.employee,
+      payPeriod: payroll.payPeriod,
+      status: payroll.status,
+      baseGross: baseGross,
+      currentGross: payroll.salaryDetails?.grossSalary || baseGross,
+      currentNet: payroll.salaryDetails?.netSalary || 0,
+      currentBonus: payroll.salaryDetails?.bonus || 0,
+      currentPenalty: payroll.salaryDetails?.deductions?.penalty || 0,
+      currentComponents: payroll.customComponents || [],
+      createdAt: payroll.createdAt,
+      processedBy: payroll.processedBy,
+      history: (payroll.editHistory || []).slice().reverse()
+    });
+  } catch (error) {
+    console.error('Error fetching payroll history:', error);
+    res.status(500).json({ message: 'Error fetching payroll history' });
   }
 });
 
@@ -724,6 +1069,9 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
     endDate.setHours(23, 59, 59, 999);
     const totalDaysInMonth = endDate.getDate();
 
+    const todayNow = new Date();
+    const today = new Date(todayNow.getFullYear(), todayNow.getMonth(), todayNow.getDate());
+
     const allShiftConfigs = await ShiftConfig.find({});
     const holidays = await Holiday.find({ date: { $gte: startDate, $lte: endDate } });
     const holidayDays = new Set(holidays.map(h => new Date(h.date).getDate()));
@@ -734,11 +1082,11 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
     const employees = await User.find({ _id: { $in: employeeIdsToRegenerate } });
     const regeneratedPayrolls = [];
 
-    const todayNow = new Date();
-    const today = new Date(todayNow.getFullYear(), todayNow.getMonth(), todayNow.getDate());
-
     for (const employee of employees) {
-      const structure = await SalaryStructure.findOne({ employee: employee._id.toString(), isActive: true });
+      const structure = await SalaryStructure.findOne({
+        $or: [{ employee: employee._id }, { employee: employee._id.toString() }],
+        isActive: true
+      });
       if (!structure) continue;
 
       const shiftConfig = allShiftConfigs.find(sc => sc.type === (employee.shiftType || 'morning'));
@@ -913,7 +1261,8 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
 
       const lateDeduction = 0;
       const halfDayDeduction = Number((halfDayCount * (perDaySalary * 0.5)).toFixed(2));
-      const lossOfPay = Number((absentCount * perDaySalary).toFixed(2));
+      const absentLossOfPay = Number((absentCount * perDaySalary).toFixed(2));
+      const totalLossOfPay = Number((absentLossOfPay + halfDayDeduction).toFixed(2));
 
       const stdDeductions = structure.deductions || {};
       const totalStdDeductions =
@@ -924,10 +1273,35 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
         (stdDeductions.advance || 0) +
         (stdDeductions.other || 0);
 
-      const paidDaysForCalc = elapsedPaidDaysCount;
+      // 30-day standard payroll calculation: base days = 30 for all months
+      const TOTAL_PAYROLL_DAYS = 30;
+      const isMonthCompleted = endDate <= today;
+      let paidDaysForCalc;
+      if (isMonthCompleted) {
+        paidDaysForCalc = Math.min(TOTAL_PAYROLL_DAYS, Math.max(0, TOTAL_PAYROLL_DAYS - absentCount - (halfDayCount * 0.5)));
+      } else {
+        const elapsedDays = Math.min(TOTAL_PAYROLL_DAYS, today.getDate());
+        paidDaysForCalc = Math.min(elapsedDays, Math.max(0, elapsedDays - absentCount - (halfDayCount * 0.5)));
+      }
+
+      const preserved = preservedDraftData.get(employee._id.toString());
+      const customComponentsToApply = preserved?.customComponents || [];
+      const bonusToApply = preserved?.bonus || 0;
+      const penaltyToApply = preserved?.penalty || 0;
+      const editHistoryToApply = preserved?.editHistory || [];
+
+      const customAdditions = customComponentsToApply
+        .filter(c => (c.type || '').toLowerCase() === 'addition')
+        .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+      const customDeductions = customComponentsToApply
+        .filter(c => (c.type || '').toLowerCase() === 'deduction')
+        .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+
       const earnedGross = Number((paidDaysForCalc * perDaySalary).toFixed(2));
-      const penaltyDeductions = Number((lateDeduction + halfDayDeduction).toFixed(2));
-      const currentNet = Number((earnedGross + 0 - totalStdDeductions - penaltyDeductions).toFixed(2));
+      const penaltyDeductions = Number((lateDeduction + penaltyToApply).toFixed(2));
+      const totalDeductionsCalc = Number((totalLossOfPay + totalStdDeductions + penaltyDeductions + customDeductions).toFixed(2));
+      const calculatedGross = Number((grossSalaryAmt + customAdditions).toFixed(2));
+      const currentNet = Number(Math.max(0, earnedGross + bonusToApply + customAdditions - totalStdDeductions - penaltyDeductions - customDeductions).toFixed(2));
 
       const payroll = new Payroll({
         employee: employee._id.toString(),
@@ -935,7 +1309,7 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
         salaryStructure: structure._id,
         payPeriod: { month: parseInt(month, 10), year: parseInt(year, 10) },
         workingDays: {
-          total: totalDaysInMonth,
+          total: TOTAL_PAYROLL_DAYS,
           present: presentCount,
           halfDay: halfDayCount,
           leave: elapsedLeaveCount,
@@ -946,7 +1320,7 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
         attendance: {
           lateCheckIns: lateCount,
           present: presentCount,
-          total: totalDaysInMonth
+          total: TOTAL_PAYROLL_DAYS
         },
         performance: {
           incompleteGoals: 0,
@@ -954,7 +1328,7 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
         },
         salaryDetails: {
           basicSalary: structure.basicSalary,
-          bonus: 0,
+          bonus: bonusToApply,
           gratuity: structure.gratuity || 0,
           allowances: {
             hra: structure.allowances?.hra || 0,
@@ -972,15 +1346,18 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
             loan: stdDeductions.loan || 0,
             advance: stdDeductions.advance || 0,
             other: stdDeductions.other || 0,
-            lossOfPay: lossOfPay,
-            halfDayDeduction: halfDayDeduction,
+            lossOfPay: totalLossOfPay,
+            halfDayDeduction: 0,
             lateDeduction: lateDeduction,
+            penalty: penaltyToApply,
             goalDeduction: 0
           },
-          grossSalary: earnedGross,
-          totalDeductions: totalStdDeductions + penaltyDeductions,
+          grossSalary: calculatedGross,
+          totalDeductions: totalDeductionsCalc,
           netSalary: currentNet
         },
+        customComponents: customComponentsToApply,
+        editHistory: editHistoryToApply,
         processedBy: req.user._id,
         processedAt: new Date(),
         status: 'draft'
@@ -1064,6 +1441,9 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
     endDate.setHours(23, 59, 59, 999);
     const totalDaysInMonth = endDate.getDate();
 
+    const todayNow = new Date();
+    const today = new Date(todayNow.getFullYear(), todayNow.getMonth(), todayNow.getDate());
+
     // Get shift configs, holidays and leaves
     const ShiftConfig = require('../models/ShiftConfig');
     const Holiday = require('../models/Holiday');
@@ -1110,7 +1490,10 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
     });
 
     // Get salary structure
-    const structure = await SalaryStructure.findOne({ employee: employeeId, isActive: true });
+    const structure = await SalaryStructure.findOne({
+      $or: [{ employee: employeeId }, { employee: employeeId.toString() }],
+      isActive: true
+    });
 
     const attendances = await Attendance.find({
       employee: employeeId,
@@ -1162,8 +1545,6 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
 
       const attendance = attendances.find(att => new Date(att.date).getDate() === day);
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
       const isFutureDate = currentDate > today;
       const isToday = currentDate.getTime() === today.getTime();
 
@@ -1225,10 +1606,18 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
       (structure.allowances?.other || 0);
 
     const grossSalaryAmt = basicSalary + totalAllowances;
-    const perDaySalary = grossSalaryAmt / 30;
+    const TOTAL_PAYROLL_DAYS = 30;
+    const perDaySalary = grossSalaryAmt / TOTAL_PAYROLL_DAYS;
     const safeAbsent = Math.max(0, absentCount);
 
-    const paidDaysCount = presentCount + (halfDayCount * 0.5) + weekOffCount + holidayCount + leaveCount;
+    const isMonthCompleted = endDate <= today;
+    let paidDaysCount;
+    if (isMonthCompleted) {
+      paidDaysCount = Math.min(TOTAL_PAYROLL_DAYS, Math.max(0, TOTAL_PAYROLL_DAYS - safeAbsent - (halfDayCount * 0.5)));
+    } else {
+      const elapsedDays = Math.min(TOTAL_PAYROLL_DAYS, today.getDate());
+      paidDaysCount = Math.min(elapsedDays, Math.max(0, elapsedDays - safeAbsent - (halfDayCount * 0.5)));
+    }
     const presentEarnings = Number((paidDaysCount * perDaySalary).toFixed(2));
     const halfDayDeduction = Number((halfDayCount * (perDaySalary * 0.5)).toFixed(2));
     const absentLossOfPay = Number((safeAbsent * perDaySalary).toFixed(2));
@@ -1291,7 +1680,7 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
       month: parseInt(month),
       year: parseInt(year),
       summary: {
-        totalDays: totalDaysInMonth,
+        totalDays: TOTAL_PAYROLL_DAYS,
         presentDays: presentCount,
         halfDays: halfDayCount,
         absentDays: Math.max(0, absentCount),
@@ -1460,7 +1849,8 @@ router.get('/export/word', auth, checkPermission('payroll', 'read'), async (req,
 router.get('/:id/payslip-pdf', auth, async (req, res) => {
   try {
     const payroll = await Payroll.findById(req.params.id)
-      .populate('employee', 'firstName lastName employeeId department designation email joiningDate bankName accountNumber ifscCode panNumber');
+      .populate('employee', 'firstName lastName employeeId department designation email joiningDate bankName accountNumber ifscCode panNumber')
+      .populate('salaryStructure');
 
     if (!payroll) {
       return res.status(404).json({ message: 'Payroll record not found' });
@@ -1470,10 +1860,99 @@ router.get('/:id/payslip-pdf', auth, async (req, res) => {
     const hasAdminAccess = req.user.role?.permissions?.find(
       p => p.module === 'payroll' && p.actions.includes('read')
     );
-    const isOwnData = req.user._id.toString() === payroll.employee._id.toString();
+    const empId = payroll.employee?._id || payroll.employee;
+    const isOwnData = req.user._id.toString() === empId.toString();
 
     if (!isOwnData && !hasAdminAccess) {
       return res.status(403).json({ message: 'Access denied' });
+    }
+
+    if (isOwnData && !hasAdminAccess && payroll.status !== 'paid') {
+      return res.status(403).json({ message: 'Salary slip is not available until status is marked as Paid' });
+    }
+
+    // Auto-sync structure allowances to payroll if missing or zero
+    try {
+      const structure = payroll.salaryStructure || await SalaryStructure.findOne({
+        $or: [{ employee: empId }, { employee: empId.toString() }],
+        isActive: true
+      });
+
+      if (structure && structure.basicSalary) {
+        const sAllow = structure.allowances || {};
+        const sHra = Number(sAllow.hra) || 0;
+        const sConv = Number(sAllow.conveyance || sAllow.transport) || 0;
+        const sFood = Number(sAllow.food) || 0;
+        const sDa = Number(sAllow.da) || 0;
+        const sMed = Number(sAllow.medical) || 0;
+        const sOther = Number(sAllow.other) || 0;
+        const structTot = sHra + sConv + sFood + sDa + sMed + sOther;
+
+        const curAllow = payroll.salaryDetails?.allowances || {};
+        const curTot = (Number(curAllow.hra) || 0) + (Number(curAllow.conveyance || curAllow.transport) || 0) + (Number(curAllow.food) || 0) + (Number(curAllow.da) || 0) + (Number(curAllow.medical) || 0) + (Number(curAllow.other) || 0);
+
+        if (structTot > 0 && (curTot === 0 || Number(payroll.salaryDetails?.basicSalary) > Number(structure.basicSalary))) {
+          if (!payroll.salaryDetails) payroll.salaryDetails = {};
+          payroll.salaryDetails.basicSalary = Number(structure.basicSalary);
+          payroll.salaryDetails.allowances = {
+            ...curAllow,
+            hra: sHra,
+            conveyance: sConv,
+            food: sFood,
+            da: sDa,
+            medical: sMed,
+            transport: Number(sAllow.transport) || 0,
+            other: sOther
+          };
+          payroll.salaryStructure = structure._id;
+        }
+      }
+
+      // Calculate accurate LOP including half-days
+      const absentDays = Number(payroll.workingDays?.absent) || 0;
+      const halfDays = Number(payroll.workingDays?.halfDay ?? payroll.workingDays?.halfDays) || 0;
+      const unpaidDays = absentDays + (halfDays * 0.5);
+
+      const bSal = Number(payroll.salaryDetails?.basicSalary) || 0;
+      const al = payroll.salaryDetails?.allowances || {};
+      const totAl = (Number(al.hra) || 0) + (Number(al.conveyance || al.transport) || 0) + (Number(al.food) || 0) + (Number(al.da) || 0) + (Number(al.medical) || 0) + (Number(al.other) || 0);
+      const fullGross = bSal + totAl;
+      const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+      const calculatedLop = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : 0;
+
+      const d = payroll.salaryDetails?.deductions || {};
+      const manualPenalty = Number(d.penalty) || 0;
+      const latePenalty = Number(d.lateDeduction) || 0;
+      const goalPenalty = Number(d.goalDeduction) || 0;
+      const totalPenalties = manualPenalty + latePenalty + goalPenalty;
+      const stdDed = (Number(d.pf) || 0) + (Number(d.esi) || 0) + (Number(d.tax) || 0) + (Number(d.loan) || 0) + (Number(d.advance) || 0) + (Number(d.other) || 0);
+
+      const effectiveLop = calculatedLop;
+
+      const customComponents = Array.isArray(payroll.customComponents) ? payroll.customComponents : [];
+      const customAddTotal = customComponents.filter(c => (c.type || '').toLowerCase() === 'addition').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+      const customDedTotal = customComponents.filter(c => (c.type || '').toLowerCase() === 'deduction').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+
+      const netSalary = Number((fullGross + (payroll.salaryDetails?.bonus || 0) + customAddTotal - effectiveLop - stdDed - totalPenalties - customDedTotal).toFixed(2));
+
+      if (!payroll.salaryDetails) payroll.salaryDetails = {};
+      if (!payroll.salaryDetails.deductions) payroll.salaryDetails.deductions = {};
+      payroll.salaryDetails.deductions.lossOfPay = effectiveLop;
+      payroll.salaryDetails.deductions.halfDayDeduction = 0;
+      payroll.salaryDetails.netSalary = netSalary;
+      payroll.salaryDetails.totalDeductions = effectiveLop + stdDed + totalPenalties + customDedTotal;
+
+      await Payroll.findByIdAndUpdate(payroll._id, {
+        'salaryDetails.basicSalary': payroll.salaryDetails.basicSalary,
+        'salaryDetails.allowances': payroll.salaryDetails.allowances,
+        'salaryDetails.deductions.lossOfPay': effectiveLop,
+        'salaryDetails.deductions.halfDayDeduction': 0,
+        'salaryDetails.netSalary': netSalary,
+        'salaryDetails.totalDeductions': payroll.salaryDetails.totalDeductions,
+        salaryStructure: structure?._id || payroll.salaryStructure
+      });
+    } catch (syncErr) {
+      console.warn('Warning syncing structure for payslip PDF:', syncErr.message);
     }
 
     const { generateSalaryReceiptPDF } = require('../utils/pdfGenerator');

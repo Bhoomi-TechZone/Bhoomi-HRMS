@@ -16,7 +16,12 @@ const roleSchema = new mongoose.Schema({
     actions: [{
       type: String,
       enum: ['create', 'read', 'update', 'delete']
-    }]
+    }],
+    viewScope: {
+      type: String,
+      enum: ['public', 'private'],
+      default: 'public'
+    }
   }],
   isDefault: {
     type: Boolean,

@@ -41,7 +41,8 @@ router.get('/me', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
       .select('-password')
-      .populate('role');
+      .populate('role')
+      .populate('assignedManager', 'firstName lastName employeeId designation role isManager email phone');
     
     res.json(user);
   } catch (error) {
@@ -73,7 +74,7 @@ router.put('/me', auth, async (req, res) => {
 
     await user.save();
 
-    const updatedUser = await User.findById(user._id).select('-password').populate('role');
+    const updatedUser = await User.findById(user._id).select('-password').populate('role').populate('assignedManager', 'firstName lastName employeeId designation role isManager email phone');
 
     res.json(updatedUser);
   } catch (error) {

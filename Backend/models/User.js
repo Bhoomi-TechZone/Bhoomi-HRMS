@@ -208,6 +208,10 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  isManager: {
+    type: Boolean,
+    default: false
+  },
   assignedManager: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

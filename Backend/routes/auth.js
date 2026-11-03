@@ -123,7 +123,7 @@ router.post('/admin/login', async (req, res) => {
     }
 
     // Check if user exists
-    const user = await User.findOne({ email: email.toLowerCase() }).populate('role');
+    const user = await User.findOne({ email: email.toLowerCase() }).populate('role').populate('assignedManager', 'firstName lastName employeeId designation role isManager email phone');
     
     if (!user) {
       console.log('Admin not found:', email);
@@ -170,7 +170,9 @@ router.post('/admin/login', async (req, res) => {
         employeeId: user.employeeId,
         role: user.role,
         department: user.department,
-        designation: user.designation
+        designation: user.designation,
+        isManager: user.isManager,
+        assignedManager: user.assignedManager
       }
     });
   } catch (error) {
@@ -198,7 +200,7 @@ router.post('/login', async (req, res) => {
     }
 
     // Check if user exists
-    const user = await User.findOne({ email: email.toLowerCase() }).populate('role');
+    const user = await User.findOne({ email: email.toLowerCase() }).populate('role').populate('assignedManager', 'firstName lastName employeeId designation role isManager email phone');
     
     console.log('========== LOGIN ATTEMPT ==========');
     console.log('User query result:', user ? 'Found' : 'Not found');
@@ -253,7 +255,9 @@ router.post('/login', async (req, res) => {
         employeeId: user.employeeId,
         role: user.role,
         department: user.department,
-        designation: user.designation
+        designation: user.designation,
+        isManager: user.isManager,
+        assignedManager: user.assignedManager
       }
     });
   } catch (error) {
@@ -338,7 +342,7 @@ router.post('/init', async (req, res) => {
 // Verify Admin Token
 router.get('/admin/verify', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate('role');
+    const user = await User.findById(req.user.id).populate('role').populate('assignedManager', 'firstName lastName employeeId designation role isManager email phone');
     
     if (!user) {
       return res.status(404).json({ message: 'Admin not found' });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 
@@ -21,6 +21,25 @@ function Roles() {
   const [selectedRoleForUsers, setSelectedRoleForUsers] = useState(null);
   const [roleUsers, setRoleUsers] = useState([]);
   const [loadingRoleUsers, setLoadingRoleUsers] = useState(false);
+  const [openScopeDrop, setOpenScopeDrop] = useState(null); // `${roleId}_${module}`
+  const [scopeDropPos, setScopeDropPos] = useState({ top: 0, left: 0 });
+  const scopeDropRef = useRef(null);
+
+  // Close scope dropdown on outside click or scroll
+  useEffect(() => {
+    const outsideHandler = (e) => {
+      if (scopeDropRef.current && !scopeDropRef.current.contains(e.target)) {
+        setOpenScopeDrop(null);
+      }
+    };
+    const scrollHandler = () => setOpenScopeDrop(null);
+    document.addEventListener('mousedown', outsideHandler);
+    window.addEventListener('scroll', scrollHandler, true);
+    return () => {
+      document.removeEventListener('mousedown', outsideHandler);
+      window.removeEventListener('scroll', scrollHandler, true);
+    };
+  }, []);
 
   const handleShowRoleUsers = async (role) => {
     setSelectedRoleForUsers(role);
@@ -220,20 +239,58 @@ function Roles() {
     delete: '#a8e63d',
   };
 
+  const scopeConfig = {
+    public: {
+      label: 'Public',
+      color: '#15803d',
+      bg: '#f0fdf4',
+      border: '#bbf7d0',
+      dot: '#22c55e'
+    },
+    private: {
+      label: 'Private',
+      color: '#dc2626',
+      bg: '#fef2f2',
+      border: '#fecaca',
+      dot: '#ef4444'
+    }
+  };
+
+  const getViewScope = (role, module) => {
+    const permissions = pendingChanges[role._id]?.permissions || role.permissions;
+    const perm = permissions?.find(p => p.module === module);
+    return perm?.viewScope || 'public';
+  };
+
+  const handleScopeChange = (role, module, scope) => {
+    const currentPermissions = pendingChanges[role._id]?.permissions || role.permissions;
+    const permissions = currentPermissions.map(p => ({ ...p, actions: [...p.actions] }));
+    const modIdx = permissions.findIndex(p => p.module === module);
+    if (modIdx === -1) {
+      permissions.push({ module, actions: [], viewScope: scope });
+    } else {
+      permissions[modIdx] = { ...permissions[modIdx], viewScope: scope };
+    }
+    setPendingChanges(prev => ({
+      ...prev,
+      [role._id]: { permissions }
+    }));
+  };
+
   // Save inline permission changes for a role (batch mode)
   const handleInlineToggle = (role, module, action) => {
     const currentPermissions = pendingChanges[role._id]?.permissions || role.permissions;
     const permissions = currentPermissions.map(p => ({ ...p, actions: [...p.actions] }));
     const modIdx = permissions.findIndex(p => p.module === module);
     if (modIdx === -1) {
-      permissions.push({ module, actions: [action] });
+      permissions.push({ module, actions: [action], viewScope: 'public' });
     } else {
       const acts = [...permissions[modIdx].actions];
       const aIdx = acts.indexOf(action);
       if (aIdx === -1) { acts.push(action); }
       else { acts.splice(aIdx, 1); }
-      if (acts.length === 0) { permissions.splice(modIdx, 1); }
-      else { permissions[modIdx] = { ...permissions[modIdx], actions: acts }; }
+      const currentScope = permissions[modIdx].viewScope || 'public';
+      permissions[modIdx] = { ...permissions[modIdx], actions: acts, viewScope: currentScope };
     }
     
     // Store pending changes
@@ -330,19 +387,20 @@ function Roles() {
       {/* Main Table */}
       <div style={{ background: '#fff', borderRadius: '20px', overflowX: 'auto', boxShadow: '0 2px 16px rgba(0,0,0,0.06)' }}>
         {/* Header Row */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 90px 90px 90px 90px 85px 0.7fr 85px', padding: '0 12px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', minWidth: '720px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 80px 80px 80px 80px 135px 85px 0.6fr 80px', padding: '0 12px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', minWidth: '840px' }}>
           {[
             { label: 'Role Name' },
             { label: 'Create' },
             { label: 'Read' },
             { label: 'Update' },
             { label: 'Delete' },
+            { label: 'View Scope', center: true },
             { label: 'Status', center: true },
             { label: 'Type', center: true },
             { label: 'Actions', right: true },
           ].map((col, i) => (
             <div key={i} style={{
-              padding: '8px 0', paddingRight: i < 7 ? '8px' : '0',
+              padding: '8px 0', paddingRight: i < 8 ? '8px' : '0',
               display: 'flex', alignItems: 'center', gap: '4px',
               fontSize: '10px', fontWeight: '600', letterSpacing: '0.03em',
               textTransform: 'uppercase', color: '#94a3b8',
@@ -355,9 +413,10 @@ function Roles() {
 
         {/* Loading Skeleton */}
         {loading && [1,2,3,4,5].map(i => (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.8fr 90px 90px 90px 90px 85px 0.7fr 85px', padding: '10px 12px', borderBottom: '1px solid #f1f5f9', alignItems: 'center', gap: '0', minWidth: '720px' }}>
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.7fr 80px 80px 80px 80px 135px 85px 0.6fr 80px', padding: '10px 12px', borderBottom: '1px solid #f1f5f9', alignItems: 'center', gap: '0', minWidth: '840px' }}>
             <div style={{ height: '11px', background: '#f1f5f9', borderRadius: '4px', width: '45%' }}></div>
             {[1,2,3,4].map(j => <div key={j} style={{ height: '16px', width: '30px', background: '#f1f5f9', borderRadius: '8px' }}></div>)}
+            <div style={{ display: 'flex', justifyContent: 'center' }}><div style={{ height: '18px', width: '70px', background: '#f1f5f9', borderRadius: '6px' }}></div></div>
             <div style={{ display: 'flex', justifyContent: 'center' }}><div style={{ height: '18px', width: '54px', background: '#f1f5f9', borderRadius: '999px' }}></div></div>
             <div style={{ display: 'flex', justifyContent: 'center' }}><div style={{ height: '18px', width: '54px', background: '#f1f5f9', borderRadius: '999px' }}></div></div>
             <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
@@ -400,7 +459,7 @@ function Roles() {
               {/* Role Row */}
               <div
                 className="roles-row"
-                style={{ display: 'grid', gridTemplateColumns: '1.8fr 90px 90px 90px 90px 85px 0.7fr 85px', padding: '0 12px', borderBottom: (!isExpanded && index < filteredRoles.length - 1) ? '1px solid #f8fafc' : isExpanded ? '1px solid #e5e7eb' : 'none', alignItems: 'center', transition: 'background 0.15s', background: isExpanded ? '#fafffe' : 'transparent', minWidth: '720px' }}
+                style={{ display: 'grid', gridTemplateColumns: '1.7fr 80px 80px 80px 80px 135px 85px 0.6fr 80px', padding: '0 12px', borderBottom: (!isExpanded && index < filteredRoles.length - 1) ? '1px solid #f8fafc' : isExpanded ? '1px solid #e5e7eb' : 'none', alignItems: 'center', transition: 'background 0.15s', background: isExpanded ? '#fafffe' : 'transparent', minWidth: '840px' }}
               >
                 {/* Name + expand toggle */}
                 <div 
@@ -456,7 +515,7 @@ function Roles() {
                         // If all are on, turn all off; otherwise turn all on
                         if (allCreate) { const i = acts.indexOf('create'); if (i > -1) acts.splice(i,1); }
                         else { if (!acts.includes('create')) acts.push('create'); }
-                        return { module: m, actions: acts };
+                        return { module: m, actions: acts, viewScope: existing?.viewScope || 'public' };
                       }).filter(p => p.actions.length > 0);
                       setPendingChanges(prev => ({ ...prev, [role._id]: { permissions: newPerms } }));
                     }}
@@ -475,7 +534,7 @@ function Roles() {
                         // If all are on, turn all off; otherwise turn all on
                         if (allRead) { const i = acts.indexOf('read'); if (i > -1) acts.splice(i,1); }
                         else { if (!acts.includes('read')) acts.push('read'); }
-                        return { module: m, actions: acts };
+                        return { module: m, actions: acts, viewScope: existing?.viewScope || 'public' };
                       }).filter(p => p.actions.length > 0);
                       setPendingChanges(prev => ({ ...prev, [role._id]: { permissions: newPerms } }));
                     }}
@@ -494,7 +553,7 @@ function Roles() {
                         // If all are on, turn all off; otherwise turn all on
                         if (allUpdate) { const i = acts.indexOf('update'); if (i > -1) acts.splice(i,1); }
                         else { if (!acts.includes('update')) acts.push('update'); }
-                        return { module: m, actions: acts };
+                        return { module: m, actions: acts, viewScope: existing?.viewScope || 'public' };
                       }).filter(p => p.actions.length > 0);
                       setPendingChanges(prev => ({ ...prev, [role._id]: { permissions: newPerms } }));
                     }}
@@ -513,12 +572,35 @@ function Roles() {
                         // If all are on, turn all off; otherwise turn all on
                         if (allDelete) { const i = acts.indexOf('delete'); if (i > -1) acts.splice(i,1); }
                         else { if (!acts.includes('delete')) acts.push('delete'); }
-                        return { module: m, actions: acts };
+                        return { module: m, actions: acts, viewScope: existing?.viewScope || 'public' };
                       }).filter(p => p.actions.length > 0);
                       setPendingChanges(prev => ({ ...prev, [role._id]: { permissions: newPerms } }));
                     }}
                   />
                   <span style={{ fontSize: '9px', color: '#94a3b8', fontWeight: '500' }}>{countDelete}/{modules.length}</span>
+                </div>
+
+                {/* View Scope (summary) */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {(() => {
+                    const currentPermissions = pendingChanges[role._id]?.permissions || role.permissions;
+                    const privCount = modules.filter(m => {
+                      const p = currentPermissions?.find(x => x.module === m);
+                      return p?.viewScope === 'private';
+                    }).length;
+                    return (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '4px',
+                        padding: '2px 8px', borderRadius: '6px',
+                        fontSize: '10px', fontWeight: '500',
+                        background: privCount > 0 ? '#fef2f2' : '#f0fdf4',
+                        color: privCount > 0 ? '#b91c1c' : '#15803d',
+                        border: `1px solid ${privCount > 0 ? '#fecaca' : '#bbf7d0'}`
+                      }}>
+                        {privCount > 0 ? `${privCount} Private` : 'All Public'}
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 {/* Status - Save button */}
@@ -589,38 +671,168 @@ function Roles() {
               {isExpanded && (
                 <div className="roles-expand-row" style={{ borderBottom: index < filteredRoles.length - 1 ? '1px solid #e5e7eb' : 'none', background: '#fafcff' }}>
                   {/* Sub-header */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 90px 90px 90px 90px 85px 0.7fr 85px', padding: '6px 12px', background: '#f1f5f9', borderBottom: '1px solid #e5e7eb', minWidth: '720px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 80px 80px 80px 80px 135px 85px 0.6fr 80px', padding: '6px 12px', background: '#f1f5f9', borderBottom: '1px solid #e5e7eb', minWidth: '840px' }}>
                     <div style={{ fontSize: '11px', fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.04em', paddingLeft: '27px' }}>Module</div>
                     {['Create','Read','Update','Delete'].map((a) => (
                       <div key={a} style={{ fontSize: '11px', fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{a}</div>
                     ))}
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center' }}>View Scope</div>
                     <div></div><div></div><div></div>
                   </div>
 
                   {/* Module rows */}
                   <div className="custom-scrollbar" style={{ maxHeight: '45vh', overflowY: 'auto' }}>
-                    {modules.map((module, mIdx) => (
-                      <div
-                        key={module}
-                        className="perm-module-row"
-                        style={{ display: 'grid', gridTemplateColumns: '1.8fr 90px 90px 90px 90px 85px 0.7fr 85px', padding: '7px 12px', borderBottom: mIdx < modules.length - 1 ? '1px solid #f1f5f9' : 'none', alignItems: 'center', transition: 'background 0.12s', minWidth: '720px' }}
-                      >
-                        <div style={{ fontSize: '13px', fontWeight: '600', color: '#111827', paddingLeft: '27px' }}>
-                          {getModuleLabel(module)}
-                        </div>
-                        {actions.map(action => (
-                          <div key={action} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
-                            <Toggle
-                              disabled={!canUpdate}
-                              checked={hasAction(role, module, action)}
-                              color={toggleColors[action]}
-                              onChange={canUpdate ? () => handleInlineToggle(role, module, action) : undefined}
-                            />
+                    {modules.map((module, mIdx) => {
+                      const scope = getViewScope(role, module);
+                      return (
+                        <div
+                          key={module}
+                          className="perm-module-row"
+                          style={{ display: 'grid', gridTemplateColumns: '1.7fr 80px 80px 80px 80px 135px 85px 0.6fr 80px', padding: '7px 12px', borderBottom: mIdx < modules.length - 1 ? '1px solid #f1f5f9' : 'none', alignItems: 'center', transition: 'background 0.12s', minWidth: '840px' }}
+                        >
+                          <div style={{ fontSize: '13px', fontWeight: '600', color: '#111827', paddingLeft: '27px' }}>
+                            {getModuleLabel(module)}
                           </div>
-                        ))}
-                        <div></div><div></div><div></div>
-                      </div>
-                    ))}
+                          {actions.map(action => (
+                            <div key={action} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+                              <Toggle
+                                disabled={!canUpdate}
+                                checked={hasAction(role, module, action)}
+                                color={toggleColors[action]}
+                                onChange={canUpdate ? () => handleInlineToggle(role, module, action) : undefined}
+                              />
+                            </div>
+                          ))}
+
+                          {/* View Scope: Professional Dropdown Card */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {(() => {
+                              const dropKey = `${role._id}_${module}`;
+                              const currentScope = scope === 'private' ? 'private' : 'public';
+                              const cfg = scopeConfig[currentScope];
+                              const isOpen = openScopeDrop === dropKey;
+
+                              return (
+                                <div style={{ display: 'inline-block' }}>
+                                  <button
+                                    type="button"
+                                    disabled={!canUpdate}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!canUpdate) return;
+                                      const rect = e.currentTarget.getBoundingClientRect();
+                                      setScopeDropPos({ top: rect.bottom + 4, left: rect.left });
+                                      setOpenScopeDrop(prev => (prev === dropKey ? null : dropKey));
+                                    }}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      padding: '3px 9px',
+                                      border: `1px solid ${cfg.border}`,
+                                      borderRadius: '999px',
+                                      fontSize: '11px',
+                                      color: cfg.color,
+                                      background: cfg.bg,
+                                      cursor: canUpdate ? 'pointer' : 'default',
+                                      fontFamily: "'Inter', sans-serif",
+                                      fontWeight: 700,
+                                      whiteSpace: 'nowrap',
+                                      outline: 'none',
+                                      transition: 'all 0.15s'
+                                    }}
+                                  >
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
+                                    <span>{cfg.label}</span>
+                                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform 0.15s', transform: isOpen ? 'rotate(180deg)' : 'none' }}>
+                                      <polyline points="6 9 12 15 18 9" />
+                                    </svg>
+                                  </button>
+
+                                  {isOpen && (
+                                    <div
+                                      ref={scopeDropRef}
+                                      onClick={(e) => e.stopPropagation()}
+                                      style={{
+                                        position: 'fixed',
+                                        top: scopeDropPos.top,
+                                        left: scopeDropPos.left,
+                                        zIndex: 9999,
+                                        background: '#ffffff',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '12px',
+                                        boxShadow: '0 8px 32px rgba(15,23,42,0.13)',
+                                        padding: '6px',
+                                        minWidth: '125px'
+                                      }}
+                                    >
+                                      {[
+                                        { value: 'public', ...scopeConfig.public },
+                                        { value: 'private', ...scopeConfig.private }
+                                      ].map(opt => {
+                                        const isSelected = currentScope === opt.value;
+                                        return (
+                                          <button
+                                            key={opt.value}
+                                            type="button"
+                                            onClick={() => {
+                                              setOpenScopeDrop(null);
+                                              handleScopeChange(role, module, opt.value);
+                                            }}
+                                            style={{
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              gap: '8px',
+                                              width: '100%',
+                                              textAlign: 'left',
+                                              padding: '6px 10px',
+                                              borderRadius: '8px',
+                                              border: 'none',
+                                              background: isSelected ? opt.bg : 'transparent',
+                                              color: isSelected ? opt.color : '#475569',
+                                              fontSize: '11.5px',
+                                              fontWeight: isSelected ? 700 : 500,
+                                              cursor: 'pointer',
+                                              fontFamily: "'Inter', sans-serif",
+                                              transition: 'background 0.15s, color 0.15s',
+                                              marginBottom: '2px',
+                                              outline: 'none'
+                                            }}
+                                            onMouseEnter={e => {
+                                              if (!isSelected) {
+                                                e.currentTarget.style.background = opt.bg || '#f1f5f9';
+                                                e.currentTarget.style.color = opt.color || '#0f172a';
+                                              }
+                                            }}
+                                            onMouseLeave={e => {
+                                              if (!isSelected) {
+                                                e.currentTarget.style.background = 'transparent';
+                                                e.currentTarget.style.color = '#475569';
+                                              }
+                                            }}
+                                          >
+                                            <span style={{
+                                              width: '8px',
+                                              height: '8px',
+                                              borderRadius: '50%',
+                                              background: opt.dot,
+                                              flexShrink: 0
+                                            }} />
+                                            {opt.label}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
+
+                          <div></div><div></div><div></div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
