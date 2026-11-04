@@ -19,7 +19,7 @@ const roleSchema = new mongoose.Schema({
     }],
     viewScope: {
       type: String,
-      enum: ['public', 'private'],
+      enum: ['public', 'private', 'team'],
       default: 'public'
     }
   }],

@@ -6532,7 +6532,8 @@ function Payroll() {
                         { label: 'Present', value: detailedAttendanceData.summary.presentDays, bg: '#dcfce7', color: '#166534', dot: '#22c55e' },
                         { label: 'Absent', value: detailedAttendanceData.summary.absentDays, bg: '#fee2e2', color: '#991b1b', dot: '#ef4444' },
                         { label: 'Half-day', value: detailedAttendanceData.summary.halfDays, bg: '#fef3c7', color: '#92400e', dot: '#f59e0b' },
-                        { label: 'Leave', value: detailedAttendanceData.summary.leaveDays || 0, bg: '#e0f2fe', color: '#0369a1', dot: '#0284c7' },
+                        { label: 'Casual Leave', value: detailedAttendanceData.summary.casualLeaveDays ?? detailedAttendanceData.summary.paidLeaveDays ?? 0, bg: '#e0f2fe', color: '#0369a1', dot: '#0284c7' },
+                        ...(detailedAttendanceData.summary.unpaidLeaveDays > 0 ? [{ label: 'Unpaid Leave', value: detailedAttendanceData.summary.unpaidLeaveDays, bg: '#fef2f2', color: '#dc2626', dot: '#ef4444' }] : []),
                         { label: 'Holiday', value: detailedAttendanceData.summary.holidayDays || 0, bg: '#fce7f3', color: '#9d174d', dot: '#ec4899' },
                         { label: 'Week Off', value: detailedAttendanceData.summary.weekOffDays || 0, bg: '#e0e7ff', color: '#3730a3', dot: '#6366f1' },
                         { label: 'Working Days', value: detailedAttendanceData.summary.totalDays, bg: '#f0f9ff', color: '#0369a1', dot: '#38bdf8' },
@@ -6610,22 +6611,29 @@ function Payroll() {
                           <tr>
                             <td style={{ padding: '7px 12px', fontWeight: 700, color: '#0f172a', background: '#f1f5f9', fontSize: '10.5px', position: 'sticky', left: 0, zIndex: 2, border: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>Status</td>
                             {detailedAttendanceData.dailyBreakdown.map(day => {
-                              const isLeave = day.status === 'Leave' || day.leaveInfo;
-                              const isHoliday = day.status === 'Holiday' || day.isHoliday;
-                              const isWeekoff = day.status === 'Week Off' || day.isWeekend;
+                              const isUnpaidLeave = day.status === 'Unpaid Leave' || (!day.status && day.leaveInfo && ((day.leaveInfo.leaveCategory || '').toLowerCase().includes('unpaid') || (day.leaveInfo.leaveCategory || '').toLowerCase().includes('lop') || (day.leaveInfo.leaveType || '').toLowerCase().includes('unpaid') || (day.leaveInfo.leaveType || '').toLowerCase().includes('lop')));
+                              const isLeave = day.status === 'Leave' || (!day.status && day.leaveInfo);
+                              const isHoliday = day.status === 'Holiday';
+                              const isWeekoff = day.status === 'Week Off';
                               const cfg = day.status === 'Present'
                                 ? { bg: '#dcfce7', color: '#166534', label: 'P' }
                                 : day.status === 'Half-day'
                                   ? { bg: '#fef3c7', color: '#92400e', label: 'H' }
-                                  : isLeave
-                                    ? { bg: '#e0f2fe', color: '#0369a1', label: 'L' }
-                                    : isHoliday
-                                      ? { bg: '#fce7f3', color: '#9d174d', label: 'HOL' }
-                                      : isWeekoff
-                                        ? { bg: '#e0e7ff', color: '#3730a3', label: 'WO' }
-                                        : day.status === 'Absent'
-                                          ? { bg: '#fee2e2', color: '#991b1b', label: 'A' }
-                                          : { bg: '#f1f5f9', color: '#64748b', label: '—' };
+                                  : day.status === 'Absent'
+                                    ? { bg: '#fee2e2', color: '#991b1b', label: 'A' }
+                                    : isUnpaidLeave
+                                      ? { bg: '#fee2e2', color: '#991b1b', label: 'UL' }
+                                      : isLeave
+                                        ? { bg: '#e0f2fe', color: '#0369a1', label: 'L' }
+                                        : isHoliday
+                                          ? { bg: '#fce7f3', color: '#9d174d', label: 'HOL' }
+                                          : isWeekoff
+                                            ? { bg: '#e0e7ff', color: '#3730a3', label: 'WO' }
+                                            : day.isWeekend
+                                              ? { bg: '#e0e7ff', color: '#3730a3', label: 'WO' }
+                                              : day.isHoliday
+                                                ? { bg: '#fce7f3', color: '#9d174d', label: 'HOL' }
+                                                : { bg: '#f1f5f9', color: '#64748b', label: '—' };
                               return (
                                 <td key={`st-${day.day}`} title={day.holidayName || (day.leaveInfo ? `${day.leaveInfo.leaveType} (${day.leaveInfo.reason})` : '')} style={{ padding: '7px 4px', textAlign: 'center', background: cfg.bg, color: cfg.color, fontWeight: 700, border: '1px solid #e5e7eb', fontSize: '10.5px' }}>
                                   {cfg.label}

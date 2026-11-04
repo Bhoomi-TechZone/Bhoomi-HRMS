@@ -253,6 +253,13 @@ function Roles() {
       bg: '#fef2f2',
       border: '#fecaca',
       dot: '#ef4444'
+    },
+    team: {
+      label: 'Team',
+      color: '#2563eb',
+      bg: '#eff6ff',
+      border: '#bfdbfe',
+      dot: '#3b82f6'
     }
   };
 
@@ -588,16 +595,38 @@ function Roles() {
                       const p = currentPermissions?.find(x => x.module === m);
                       return p?.viewScope === 'private';
                     }).length;
+                    const teamCount = modules.filter(m => {
+                      const p = currentPermissions?.find(x => x.module === m);
+                      return p?.viewScope === 'team';
+                    }).length;
+
+                    if (privCount === 0 && teamCount === 0) {
+                      return (
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: '4px',
+                          padding: '2px 8px', borderRadius: '6px',
+                          fontSize: '10px', fontWeight: '500',
+                          background: '#f0fdf4',
+                          color: '#15803d',
+                          border: '1px solid #bbf7d0'
+                        }}>
+                          All Public
+                        </span>
+                      );
+                    }
+                    const parts = [];
+                    if (privCount > 0) parts.push(`${privCount} Private`);
+                    if (teamCount > 0) parts.push(`${teamCount} Team`);
                     return (
                       <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: '4px',
                         padding: '2px 8px', borderRadius: '6px',
                         fontSize: '10px', fontWeight: '500',
-                        background: privCount > 0 ? '#fef2f2' : '#f0fdf4',
-                        color: privCount > 0 ? '#b91c1c' : '#15803d',
-                        border: `1px solid ${privCount > 0 ? '#fecaca' : '#bbf7d0'}`
+                        background: '#f8fafc',
+                        color: '#334155',
+                        border: '1px solid #cbd5e1'
                       }}>
-                        {privCount > 0 ? `${privCount} Private` : 'All Public'}
+                        {parts.join(' • ')}
                       </span>
                     );
                   })()}
@@ -708,9 +737,20 @@ function Roles() {
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             {(() => {
                               const dropKey = `${role._id}_${module}`;
-                              const currentScope = scope === 'private' ? 'private' : 'public';
-                              const cfg = scopeConfig[currentScope];
+                              const isTeamAllowed = module === 'leads' || module === 'pipeline';
+                              const currentScope = (scope === 'private')
+                                ? 'private'
+                                : ((scope === 'team' && isTeamAllowed) ? 'team' : 'public');
+                              const cfg = scopeConfig[currentScope] || scopeConfig.public;
                               const isOpen = openScopeDrop === dropKey;
+
+                              const availableOptions = [
+                                { value: 'public', ...scopeConfig.public },
+                                { value: 'private', ...scopeConfig.private }
+                              ];
+                              if (isTeamAllowed) {
+                                availableOptions.push({ value: 'team', ...scopeConfig.team });
+                              }
 
                               return (
                                 <div style={{ display: 'inline-block' }}>
@@ -766,10 +806,7 @@ function Roles() {
                                         minWidth: '125px'
                                       }}
                                     >
-                                      {[
-                                        { value: 'public', ...scopeConfig.public },
-                                        { value: 'private', ...scopeConfig.private }
-                                      ].map(opt => {
+                                      {availableOptions.map(opt => {
                                         const isSelected = currentScope === opt.value;
                                         return (
                                           <button

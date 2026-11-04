@@ -9,7 +9,7 @@ function UserProfile() {
   const [loading, setLoading] = useState(false);
   const [shiftName, setShiftName] = useState('');
   const [managerName, setManagerName] = useState('');
-  
+
   // Toggle visibility states for sensitive fields
   const [showAadhar, setShowAadhar] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
@@ -34,7 +34,7 @@ function UserProfile() {
       setUser(response.data);
       // Update the context with latest data
       updateUser(response.data);
-      
+
       // Fetch shift config if shift type exists
       if (response.data.shiftType) {
         fetchShiftConfig(response.data.shiftType);
@@ -98,7 +98,7 @@ function UserProfile() {
 
   const FieldDisplay = ({ label, value }) => (
     <div className="form-group">
-      <label style={{ 
+      <label style={{
         fontSize: '14px',
         fontWeight: '600',
         color: '#374151',
@@ -123,7 +123,7 @@ function UserProfile() {
 
   const SensitiveFieldDisplay = ({ label, value, isVisible, onToggle }) => (
     <div className="form-group">
-      <label style={{ 
+      <label style={{
         fontSize: '14px',
         fontWeight: '600',
         color: '#374151',
@@ -171,17 +171,17 @@ function UserProfile() {
       {/* Header Section */}
       <div style={{ marginBottom: '40px' }}>
         <div>
-          <h1 style={{ 
-            fontSize: '28px', 
-            fontWeight: '600', 
+          <h1 style={{
+            fontSize: '28px',
+            fontWeight: '600',
             color: '#1a1b1eff',
             marginBottom: '8px',
             letterSpacing: '-0.5px'
           }}>
             Employee Profile
           </h1>
-          <p style={{ 
-            fontSize: '16px', 
+          <p style={{
+            fontSize: '16px',
             color: '#6b7280',
             margin: '0',
             fontWeight: '400'
@@ -190,17 +190,17 @@ function UserProfile() {
           </p>
         </div>
       </div>
-      
+
       {/* Profile Content */}
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: '300px 1fr', 
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '300px 1fr',
         gap: '40px',
         alignItems: 'flex-start',
         maxHeight: 'calc(100vh - 180px)'
       }}>
         {/* Left Section - Profile Avatar (Fixed) */}
-        <div style={{ 
+        <div style={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -225,17 +225,17 @@ function UserProfile() {
               <User size={70} color="#166534" strokeWidth={2} />
             </div>
           </div>
-          
+
           <div style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             gap: '4px'
           }}>
-            <h2 style={{ 
-              color: '#1f2937', 
-              fontSize: '32px', 
-              fontWeight: '700', 
+            <h2 style={{
+              color: '#1f2937',
+              fontSize: '32px',
+              fontWeight: '700',
               margin: '0',
               letterSpacing: '-0.5px',
               textAlign: 'center',
@@ -256,9 +256,9 @@ function UserProfile() {
 
           {/* Personal Information Section */}
           <div style={{ marginBottom: '48px' }}>
-            <h2 style={{ 
-              fontSize: '22px', 
-              fontWeight: '600', 
+            <h2 style={{
+              fontSize: '22px',
+              fontWeight: '600',
               color: '#1f2937',
               marginBottom: '20px',
               borderBottom: '2px solid #e5e7eb',
@@ -266,7 +266,7 @@ function UserProfile() {
             }}>
               Personal Information
             </h2>
-            
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
               <FieldDisplay label="First Name" value={user?.firstName} />
               <FieldDisplay label="Last Name" value={user?.lastName} />
@@ -275,9 +275,9 @@ function UserProfile() {
               <FieldDisplay label="Date of Birth" value={user?.dateOfBirth ? new Date(user.dateOfBirth).toLocaleDateString('en-GB') : ''} />
               <FieldDisplay label="Father's Name" value={user?.fatherName} />
               <FieldDisplay label="Highest Qualification" value={user?.highestQualification} />
-              <SensitiveFieldDisplay 
-                label="Aadhar Number" 
-                value={user?.aadharNumber ? (showAadhar ? user.aadharNumber : `••••••••${user.aadharNumber.slice(-4)}`) : ''} 
+              <SensitiveFieldDisplay
+                label="Aadhar Number"
+                value={user?.aadharNumber ? (showAadhar ? user.aadharNumber : `••••••••${user.aadharNumber.slice(-4)}`) : ''}
                 isVisible={showAadhar}
                 onToggle={() => setShowAadhar(!showAadhar)}
               />
@@ -286,9 +286,9 @@ function UserProfile() {
 
           {/* Contact Information Section */}
           <div style={{ marginBottom: '48px' }}>
-            <h2 style={{ 
-              fontSize: '22px', 
-              fontWeight: '600', 
+            <h2 style={{
+              fontSize: '22px',
+              fontWeight: '600',
               color: '#1f2937',
               marginBottom: '20px',
               borderBottom: '2px solid #e5e7eb',
@@ -296,15 +296,15 @@ function UserProfile() {
             }}>
               Contact Information
             </h2>
-            
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
               <FieldDisplay label="Personal Email" value={user?.email} />
               <FieldDisplay label="Official Email" value={user?.officialEmail} />
               <FieldDisplay label="Phone Number" value={user?.phone} />
               <FieldDisplay label="Alternate Phone" value={user?.alternatePhone} />
-              
+
               <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                <label style={{ 
+                <label style={{
                   fontSize: '14px',
                   fontWeight: '600',
                   color: '#374151',
@@ -325,9 +325,9 @@ function UserProfile() {
                   {user?.currentAddress || 'Not provided'}
                 </div>
               </div>
-              
+
               <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                <label style={{ 
+                <label style={{
                   fontSize: '14px',
                   fontWeight: '600',
                   color: '#374151',
@@ -354,9 +354,9 @@ function UserProfile() {
 
           {/* Employment Details Section */}
           <div style={{ marginBottom: '48px' }}>
-            <h2 style={{ 
-              fontSize: '22px', 
-              fontWeight: '600', 
+            <h2 style={{
+              fontSize: '22px',
+              fontWeight: '600',
               color: '#1f2937',
               marginBottom: '20px',
               borderBottom: '2px solid #e5e7eb',
@@ -364,15 +364,15 @@ function UserProfile() {
             }}>
               Employment Details
             </h2>
-            
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
               <FieldDisplay label="Department" value={user?.department} />
               <FieldDisplay label="Designation" value={user?.designation} />
               <FieldDisplay label="Role" value={user?.role?.name} />
               <FieldDisplay label="Date of Joining" value={user?.joiningDate ? new Date(user.joiningDate).toLocaleDateString('en-GB') : ''} />
-              
+
               <div className="form-group">
-                <label style={{ 
+                <label style={{
                   fontSize: '14px',
                   fontWeight: '600',
                   color: '#374151',
@@ -402,21 +402,21 @@ function UserProfile() {
                   {user?.isActive ? 'Active' : 'Inactive'}
                 </div>
               </div>
-              
+
               <FieldDisplay label="Assigned Manager" value={managerName} />
               <FieldDisplay label="Shift Type" value={shiftName} />
-              <FieldDisplay 
-                label="Shift Timing" 
-                value={user?.shiftStartTime && user?.shiftEndTime ? `${user.shiftStartTime} - ${user.shiftEndTime}` : ''} 
+              <FieldDisplay
+                label="Shift Timing"
+                value={user?.shiftStartTime && user?.shiftEndTime ? `${user.shiftStartTime} - ${user.shiftEndTime}` : ''}
               />
             </div>
           </div>
 
           {/* Banking Details Section */}
           <div>
-            <h2 style={{ 
-              fontSize: '22px', 
-              fontWeight: '600', 
+            <h2 style={{
+              fontSize: '22px',
+              fontWeight: '600',
               color: '#1f2937',
               marginBottom: '20px',
               borderBottom: '2px solid #e5e7eb',
@@ -424,20 +424,20 @@ function UserProfile() {
             }}>
               Banking & Financial Details
             </h2>
-            
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
               <FieldDisplay label="Bank Name" value={user?.bankName} />
-              <SensitiveFieldDisplay 
-                label="Account Number" 
-                value={user?.accountNumber ? (showAccount ? user.accountNumber : `••••••••${user.accountNumber.slice(-4)}`) : ''} 
+              <SensitiveFieldDisplay
+                label="Account Number"
+                value={user?.accountNumber ? (showAccount ? user.accountNumber : `••••••••${user.accountNumber.slice(-4)}`) : ''}
                 isVisible={showAccount}
                 onToggle={() => setShowAccount(!showAccount)}
               />
               <FieldDisplay label="IFSC Code" value={user?.ifscCode} />
               <FieldDisplay label="Account Holder Name" value={user?.accountHolderName} />
-              <SensitiveFieldDisplay 
-                label="PAN Number" 
-                value={user?.panNumber ? (showPAN ? user.panNumber : `••••••${user.panNumber.slice(-4)}`) : ''} 
+              <SensitiveFieldDisplay
+                label="PAN Number"
+                value={user?.panNumber ? (showPAN ? user.panNumber : `••••••${user.panNumber.slice(-4)}`) : ''}
                 isVisible={showPAN}
                 onToggle={() => setShowPAN(!showPAN)}
               />

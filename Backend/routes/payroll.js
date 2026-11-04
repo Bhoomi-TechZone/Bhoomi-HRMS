@@ -12,6 +12,287 @@ const xlsx = require('xlsx');
 const { Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType, AlignmentType } = require('docx');
 const { sendSalaryPaidEmail, sendBulkSalaryPaidEmails } = require('../utils/emailService');
 const { generateSalaryReceiptPDF } = require('../utils/pdfGenerator');
+const ShiftConfig = require('../models/ShiftConfig');
+const Holiday = require('../models/Holiday');
+const Leave = require('../models/Leave');
+
+// Helper to calculate employee monthly attendance, leaves (paid/unpaid) and payroll metrics
+function calculateMonthlyAttendanceMetrics({
+  employee,
+  totalDaysInMonth,
+  year,
+  month,
+  today,
+  endDate,
+  defaultWeekoffDays,
+  allShiftConfigs,
+  holidayDays,
+  leaveMap,
+  attendances,
+  lateCheckInRule,
+  lateThreshold,
+  perDaySalary
+}) {
+  let presentCount = 0;
+  let halfDayCount = 0;
+  let absentCount = 0;
+  let weekOffCount = 0;
+  let holidayCount = 0;
+  let lateCount = 0;
+  let paidLeaveDays = 0;
+  let unpaidLeaveDays = 0;
+  let totalWorkingHours = 0;
+  const dailyBreakdown = [];
+
+  for (let day = 1; day <= totalDaysInMonth; day++) {
+    const currentDate = new Date(year, month - 1, day);
+    const dayOfWeek = currentDate.getDay();
+
+    let applicableWeekoffDays = defaultWeekoffDays;
+    if (employee.shiftHistory && employee.shiftHistory.length > 0) {
+      const historyEntry = employee.shiftHistory.find(h => {
+        const s = new Date(h.startDate); s.setHours(0, 0, 0, 0);
+        const e = h.endDate ? new Date(h.endDate) : new Date('2099-12-31');
+        if (h.endDate) e.setHours(23, 59, 59, 999);
+        return currentDate >= s && currentDate <= e;
+      });
+      if (historyEntry) {
+        const matchingConfig = allShiftConfigs.find(sc => sc.type === historyEntry.shiftType);
+        if (matchingConfig) applicableWeekoffDays = matchingConfig.weekoff || 1;
+      }
+    }
+
+    const isWeekOff = (
+      (applicableWeekoffDays >= 1 && dayOfWeek === 0) ||
+      (applicableWeekoffDays >= 2 && dayOfWeek === 6) ||
+      (applicableWeekoffDays >= 3 && dayOfWeek === 5)
+    );
+    const isHoliday = holidayDays.has(day);
+    const leaveInfo = leaveMap.get(day);
+    const isFutureDate = currentDate > today;
+    const isToday = currentDate.getTime() === today.getTime();
+
+    const att = attendances.find(a => new Date(a.date).getDate() === day);
+
+    const leaveCat = (leaveInfo?.leaveCategory || '').toLowerCase().trim();
+    const leaveTyp = (leaveInfo?.leaveType || '').toLowerCase().trim();
+    const isUnpaidLeave = !!leaveInfo && (
+      leaveCat.includes('unpaid') || leaveCat.includes('lop') ||
+      leaveTyp.includes('unpaid') || leaveTyp.includes('lop')
+    );
+    const isHalfDayLeave = !!leaveInfo && (leaveInfo.durationType || '').toLowerCase().includes('half');
+
+    let dayStatus;
+    let dayLoginTime = null;
+    let dayLogoutTime = null;
+    let dayWorkingHours = 0;
+    let dayIsLate = false;
+
+    if (att) {
+      const st = (att.status || '').toLowerCase().trim();
+      dayLoginTime = att.loginTime || null;
+      dayLogoutTime = att.logoutTime || null;
+      dayWorkingHours = att.workingHours || 0;
+      totalWorkingHours += dayWorkingHours;
+
+      if (att.loginTime && lateCheckInRule) {
+        const login = new Date(att.loginTime);
+        const [hour, minute] = lateThreshold.split(':');
+        const thresholdDate = new Date(login);
+        thresholdDate.setHours(parseInt(hour, 10), parseInt(minute, 10), 0);
+        if (login > thresholdDate) {
+          dayIsLate = true;
+          lateCount++;
+        }
+      }
+
+      if (st === 'present' || st === 'late-checkin' || st === 'early-checkin') {
+        presentCount++;
+        dayStatus = 'Present';
+      } else if (st === 'half-day') {
+        dayStatus = 'Half-day';
+        if (leaveInfo && !isUnpaidLeave) {
+          // Half day present + half day paid leave = full day paid
+          presentCount += 0.5;
+          paidLeaveDays += 0.5;
+        } else {
+          // Half day worked, other half day is deducted via halfDayCount
+          halfDayCount++;
+        }
+      } else if (st === 'absent') {
+        absentCount++;
+        dayStatus = 'Absent';
+      } else if (st === 'week off' || st === 'week-off') {
+        weekOffCount++;
+        dayStatus = 'Week Off';
+      } else if (st === 'not-checkout') {
+        halfDayCount++;
+        dayStatus = 'Half-day';
+      } else if (st === 'checked-in') {
+        if (isToday) {
+          presentCount++;
+          dayStatus = 'Present';
+        } else if (!isFutureDate) {
+          halfDayCount++;
+          dayStatus = 'Half-day';
+        } else {
+          dayStatus = '—';
+        }
+      } else {
+        absentCount++;
+        dayStatus = 'Absent';
+      }
+    } else {
+      // No attendance record for this day
+      if (leaveInfo) {
+        if (isUnpaidLeave) {
+          unpaidLeaveDays += isHalfDayLeave ? 0.5 : 1;
+          dayStatus = 'Unpaid Leave';
+          if (isHalfDayLeave && !isFutureDate && !isToday) absentCount += 0.5;
+        } else {
+          paidLeaveDays += isHalfDayLeave ? 0.5 : 1;
+          dayStatus = 'Leave';
+          if (isHalfDayLeave && !isFutureDate && !isToday) absentCount += 0.5;
+        }
+      } else if (isWeekOff) {
+        weekOffCount++;
+        dayStatus = 'Week Off';
+      } else if (isHoliday) {
+        holidayCount++;
+        dayStatus = 'Holiday';
+      } else if (!isFutureDate && !isToday) {
+        absentCount++;
+        dayStatus = 'Absent';
+      } else {
+        dayStatus = '—';
+      }
+    }
+
+    dailyBreakdown.push({
+      day: day,
+      date: currentDate.toISOString().split('T')[0],
+      status: dayStatus,
+      isWeekend: isWeekOff,
+      isHoliday: isHoliday,
+      leaveInfo: leaveInfo ? {
+        leaveType: leaveInfo.leaveType,
+        leaveCategory: leaveInfo.leaveCategory,
+        durationType: leaveInfo.durationType,
+        reason: leaveInfo.reason,
+        status: leaveInfo.status
+      } : null,
+      loginTime: dayLoginTime,
+      logoutTime: dayLogoutTime,
+      workingHours: dayWorkingHours,
+      isLate: dayIsLate,
+      shift: 'General'
+    });
+  }
+
+  // Count elapsed weekoffs/holidays/paid leaves up to today
+  let elapsedWeekOffCount = 0;
+  let elapsedHolidayCount = 0;
+  let elapsedPaidLeaveCount = 0;
+
+  for (let d = 1; d <= totalDaysInMonth; d++) {
+    const cDate = new Date(year, month - 1, d);
+    if (cDate > today) break;
+
+    const dOfWeek = cDate.getDay();
+    let appWeekoff = defaultWeekoffDays;
+    if (employee.shiftHistory && employee.shiftHistory.length > 0) {
+      const hEntry = employee.shiftHistory.find(h => {
+        const s = new Date(h.startDate); s.setHours(0, 0, 0, 0);
+        const e = h.endDate ? new Date(h.endDate) : new Date('2099-12-31');
+        if (h.endDate) e.setHours(23, 59, 59, 999);
+        return cDate >= s && cDate <= e;
+      });
+      if (hEntry) {
+        const mConfig = allShiftConfigs.find(sc => sc.type === hEntry.shiftType);
+        if (mConfig) appWeekoff = mConfig.weekoff || 1;
+      }
+    }
+
+    const isWo = (
+      (appWeekoff >= 1 && dOfWeek === 0) ||
+      (appWeekoff >= 2 && dOfWeek === 6) ||
+      (appWeekoff >= 3 && dOfWeek === 5)
+    );
+    const isHol = holidayDays.has(d);
+    const lInfo = leaveMap.get(d);
+    const att = attendances.find(a => new Date(a.date).getDate() === d);
+
+    const lCat = (lInfo?.leaveCategory || '').toLowerCase().trim();
+    const lTyp = (lInfo?.leaveType || '').toLowerCase().trim();
+    const isUnp = lCat.includes('unpaid') || lCat.includes('lop') || lTyp.includes('unpaid') || lTyp.includes('lop');
+
+    if (att) {
+      const st = (att.status || '').toLowerCase().trim();
+      if (st === 'present' || st === 'late-checkin' || st === 'early-checkin') {
+        // present
+      } else if (st === 'half-day' || st === 'not-checkout' || st === 'checked-in') {
+        // half day / checked in
+      } else if (st === 'absent') {
+        // Explicitly absent! Do NOT count towards elapsed week off or elapsed holiday!
+      } else if (st === 'week off' || st === 'week-off') {
+        elapsedWeekOffCount++;
+      } else if (lInfo && !isUnp) {
+        elapsedPaidLeaveCount++;
+      } else if (isWo) {
+        elapsedWeekOffCount++;
+      } else if (isHol) {
+        elapsedHolidayCount++;
+      }
+    } else {
+      if (lInfo && !isUnp) {
+        elapsedPaidLeaveCount++;
+      } else if (isWo) {
+        elapsedWeekOffCount++;
+      } else if (isHol) {
+        elapsedHolidayCount++;
+      }
+    }
+  }
+
+  const TOTAL_PAYROLL_DAYS = 30;
+  const totalUnpaidDays = Number((absentCount + unpaidLeaveDays + (halfDayCount * 0.5)).toFixed(1));
+  const isMonthCompleted = endDate <= today;
+  let paidDaysForCalc;
+  if (isMonthCompleted) {
+    paidDaysForCalc = Math.min(TOTAL_PAYROLL_DAYS, Math.max(0, TOTAL_PAYROLL_DAYS - totalUnpaidDays));
+  } else {
+    const elapsedDays = Math.min(TOTAL_PAYROLL_DAYS, today.getDate());
+    paidDaysForCalc = Math.min(elapsedDays, Math.max(0, elapsedDays - totalUnpaidDays));
+  }
+
+  const earnedGross = Number((paidDaysForCalc * perDaySalary).toFixed(2));
+  const totalLossOfPay = Number((totalUnpaidDays * perDaySalary).toFixed(2));
+  const halfDayDeduction = Number((halfDayCount * (perDaySalary * 0.5)).toFixed(2));
+  const absentLossOfPay = Number(((absentCount + unpaidLeaveDays) * perDaySalary).toFixed(2));
+
+  return {
+    presentCount,
+    halfDayCount,
+    absentCount,
+    weekOffCount,
+    holidayCount,
+    lateCount,
+    paidLeaveDays,
+    unpaidLeaveDays,
+    totalWorkingHours,
+    dailyBreakdown,
+    elapsedWeekOffCount,
+    elapsedHolidayCount,
+    elapsedPaidLeaveCount,
+    TOTAL_PAYROLL_DAYS,
+    totalUnpaidDays,
+    paidDaysForCalc,
+    earnedGross,
+    totalLossOfPay,
+    halfDayDeduction,
+    absentLossOfPay
+  };
+}
 
 // Get employee's own payslip
 router.get('/my-payslip', auth, async (req, res) => {
@@ -296,7 +577,7 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
       // Fetch leaves for employee in this month
       const leaves = await Leave.find({
         employee: employee._id,
-        status: { $in: ['approved', 'pending'] },
+        status: { $nin: ['rejected', 'Rejected'] },
         startDate: { $lte: endDate },
         endDate: { $gte: startDate }
       });
@@ -319,138 +600,6 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
         date: { $gte: startDate, $lte: endDate }
       });
 
-      let presentCount = 0;
-      let halfDayCount = 0;
-      let absentCount = 0;
-      let weekOffCount = 0;
-      let holidayCount = 0;
-      let leaveCount = 0;
-      let lateCount = 0;
-
-      for (let day = 1; day <= totalDaysInMonth; day++) {
-        const currentDate = new Date(year, month - 1, day);
-        const dayOfWeek = currentDate.getDay();
-
-        let applicableWeekoffDays = defaultWeekoffDays;
-        if (employee.shiftHistory && employee.shiftHistory.length > 0) {
-          const historyEntry = employee.shiftHistory.find(h => {
-            const s = new Date(h.startDate); s.setHours(0, 0, 0, 0);
-            const e = h.endDate ? new Date(h.endDate) : new Date('2099-12-31');
-            if (h.endDate) e.setHours(23, 59, 59, 999);
-            return currentDate >= s && currentDate <= e;
-          });
-          if (historyEntry) {
-            const matchingConfig = allShiftConfigs.find(sc => sc.type === historyEntry.shiftType);
-            if (matchingConfig) applicableWeekoffDays = matchingConfig.weekoff || 1;
-          }
-        }
-
-        const isWeekOff = (
-          (applicableWeekoffDays >= 1 && dayOfWeek === 0) ||
-          (applicableWeekoffDays >= 2 && dayOfWeek === 6) ||
-          (applicableWeekoffDays >= 3 && dayOfWeek === 5)
-        );
-        const isHoliday = holidayDays.has(day);
-        const leaveInfo = leaveMap.get(day);
-        const isFutureDate = currentDate > today;
-        const isToday = currentDate.getTime() === today.getTime();
-
-        const att = attendances.find(a => new Date(a.date).getDate() === day);
-
-        if (att) {
-          // 'present', 'late-checkin', 'early-checkin' → present
-          if (att.status === 'present' || att.status === 'late-checkin' || att.status === 'early-checkin') {
-            presentCount++;
-          // 'half-day' → half day
-          } else if (att.status === 'half-day') {
-            halfDayCount++;
-          // 'absent' → absent
-          } else if (att.status === 'absent') {
-            absentCount++;
-          // 'not-checkout' → half day (user checked in but never checked out)
-          } else if (att.status === 'not-checkout') {
-            halfDayCount++;
-          // 'checked-in' → still active (today), count as present; old checked-in without logout = half day
-          } else if (att.status === 'checked-in') {
-            if (isToday) {
-              presentCount++;
-            } else if (!isFutureDate) {
-              // Checked in but no checkout on a past day → half day
-              halfDayCount++;
-            }
-          } else if (leaveInfo) {
-            leaveCount++;
-          } else if (isWeekOff) {
-            weekOffCount++;
-          } else if (isHoliday) {
-            holidayCount++;
-          } else if (!isFutureDate && !isToday) {
-            absentCount++;
-          }
-
-          if (att.loginTime && lateCheckInRule) {
-            const login = new Date(att.loginTime);
-            const [hour, minute] = lateThreshold.split(':');
-            const thresholdDate = new Date(login);
-            thresholdDate.setHours(parseInt(hour), parseInt(minute), 0);
-            if (login > thresholdDate) lateCount++;
-          }
-        } else {
-          if (leaveInfo) leaveCount++;
-          else if (isWeekOff) weekOffCount++;
-          else if (isHoliday) holidayCount++;
-          else if (!isFutureDate && !isToday) absentCount++;
-        }
-      }
-
-      // Count elapsed weekoffs/holidays for ongoing month pro-rata calculation
-      let elapsedWeekOffCount = 0;
-      let elapsedHolidayCount = 0;
-      let elapsedLeaveCount = 0;
-
-      for (let d = 1; d <= totalDaysInMonth; d++) {
-        const cDate = new Date(year, month - 1, d);
-        if (cDate > today) break;
-
-        const dOfWeek = cDate.getDay();
-        let appWeekoff = defaultWeekoffDays;
-        if (employee.shiftHistory && employee.shiftHistory.length > 0) {
-          const hEntry = employee.shiftHistory.find(h => {
-            const s = new Date(h.startDate); s.setHours(0, 0, 0, 0);
-            const e = h.endDate ? new Date(h.endDate) : new Date('2099-12-31');
-            if (h.endDate) e.setHours(23, 59, 59, 999);
-            return cDate >= s && cDate <= e;
-          });
-          if (hEntry) {
-            const mConfig = allShiftConfigs.find(sc => sc.type === hEntry.shiftType);
-            if (mConfig) appWeekoff = mConfig.weekoff || 1;
-          }
-        }
-
-        const isWo = (
-          (appWeekoff >= 1 && dOfWeek === 0) ||
-          (appWeekoff >= 2 && dOfWeek === 6) ||
-          (appWeekoff >= 3 && dOfWeek === 5)
-        );
-        const isHol = holidayDays.has(d);
-        const lInfo = leaveMap.get(d);
-        const att = attendances.find(a => new Date(a.date).getDate() === d);
-
-        if (att) {
-          if (att.status === 'present') {
-            // counted in presentCount
-          } else if (att.status === 'half-day') {
-            // counted in halfDayCount
-          } else if (lInfo) elapsedLeaveCount++;
-          else if (isWo) elapsedWeekOffCount++;
-          else if (isHol) elapsedHolidayCount++;
-        } else {
-          if (lInfo) elapsedLeaveCount++;
-          else if (isWo) elapsedWeekOffCount++;
-          else if (isHol) elapsedHolidayCount++;
-        }
-      }
-
       const totalAllowances = 
         (structure.allowances?.hra || 0) + 
         (structure.allowances?.da || 0) + 
@@ -462,12 +611,23 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
 
       const grossSalaryAmt = structure.basicSalary + totalAllowances;
       const perDaySalary = grossSalaryAmt / 30;
-      const elapsedPaidDaysCount = presentCount + (halfDayCount * 0.5) + elapsedWeekOffCount + elapsedHolidayCount + elapsedLeaveCount;
 
-      const lateDeduction = 0;
-      const halfDayDeduction = Number((halfDayCount * (perDaySalary * 0.5)).toFixed(2));
-      const absentLossOfPay = Number((absentCount * perDaySalary).toFixed(2));
-      const totalLossOfPay = Number((absentLossOfPay + halfDayDeduction).toFixed(2));
+      const metrics = calculateMonthlyAttendanceMetrics({
+        employee,
+        totalDaysInMonth,
+        year: parseInt(year, 10),
+        month: parseInt(month, 10),
+        today,
+        endDate,
+        defaultWeekoffDays,
+        allShiftConfigs,
+        holidayDays,
+        leaveMap,
+        attendances,
+        lateCheckInRule,
+        lateThreshold,
+        perDaySalary
+      });
 
       const stdDeductions = structure.deductions || {};
       const totalStdDeductions =
@@ -477,17 +637,6 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
         (stdDeductions.loan || 0) +
         (stdDeductions.advance || 0) +
         (stdDeductions.other || 0);
-
-      // 30-day standard payroll calculation: base days = 30 for all months
-      const TOTAL_PAYROLL_DAYS = 30;
-      const isMonthCompleted = endDate <= today;
-      let paidDaysForCalc;
-      if (isMonthCompleted) {
-        paidDaysForCalc = Math.min(TOTAL_PAYROLL_DAYS, Math.max(0, TOTAL_PAYROLL_DAYS - absentCount - (halfDayCount * 0.5)));
-      } else {
-        const elapsedDays = Math.min(TOTAL_PAYROLL_DAYS, today.getDate());
-        paidDaysForCalc = Math.min(elapsedDays, Math.max(0, elapsedDays - absentCount - (halfDayCount * 0.5)));
-      }
 
       const preserved = preservedDraftData.get(employee._id.toString());
       const customComponentsToApply = preserved?.customComponents || [];
@@ -502,11 +651,11 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
         .filter(c => (c.type || '').toLowerCase() === 'deduction')
         .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 
-      const earnedGross = Number((paidDaysForCalc * perDaySalary).toFixed(2));
+      const lateDeduction = 0;
       const penaltyDeductions = Number((lateDeduction + penaltyToApply).toFixed(2));
-      const totalDeductionsCalc = Number((totalLossOfPay + totalStdDeductions + penaltyDeductions + customDeductions).toFixed(2));
+      const totalDeductionsCalc = Number((metrics.totalLossOfPay + totalStdDeductions + penaltyDeductions + customDeductions).toFixed(2));
       const calculatedGross = Number((grossSalaryAmt + customAdditions).toFixed(2));
-      const currentNet = Number(Math.max(0, earnedGross + bonusToApply + customAdditions - totalStdDeductions - penaltyDeductions - customDeductions).toFixed(2));
+      const currentNet = Number(Math.max(0, metrics.earnedGross + bonusToApply + customAdditions - totalStdDeductions - penaltyDeductions - customDeductions).toFixed(2));
 
       const payroll = new Payroll({
         employee: employee._id.toString(),
@@ -514,18 +663,22 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
         salaryStructure: structure._id,
         payPeriod: { month: parseInt(month, 10), year: parseInt(year, 10) },
         workingDays: {
-          total: TOTAL_PAYROLL_DAYS,
-          present: presentCount,
-          halfDay: halfDayCount,
-          leave: elapsedLeaveCount,
-          weekoff: elapsedWeekOffCount,
-          holiday: elapsedHolidayCount,
-          absent: absentCount
+          total: metrics.TOTAL_PAYROLL_DAYS,
+          present: metrics.presentCount,
+          halfDay: metrics.halfDayCount,
+          leave: Number((metrics.paidLeaveDays + metrics.unpaidLeaveDays).toFixed(1)),
+          weekoff: metrics.elapsedWeekOffCount,
+          holiday: metrics.elapsedHolidayCount,
+          absent: Number((metrics.absentCount + metrics.unpaidLeaveDays).toFixed(1))
+        },
+        leaves: {
+          paid: Number(metrics.paidLeaveDays.toFixed(1)),
+          unpaid: Number(metrics.unpaidLeaveDays.toFixed(1))
         },
         attendance: {
-          lateCheckIns: lateCount,
-          present: presentCount,
-          total: TOTAL_PAYROLL_DAYS
+          lateCheckIns: metrics.lateCount,
+          present: metrics.presentCount,
+          total: metrics.TOTAL_PAYROLL_DAYS
         },
         performance: {
           incompleteGoals: 0,
@@ -551,7 +704,7 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
             loan: stdDeductions.loan || 0,
             advance: stdDeductions.advance || 0,
             other: stdDeductions.other || 0,
-            lossOfPay: totalLossOfPay,
+            lossOfPay: metrics.totalLossOfPay,
             halfDayDeduction: 0,
             lateDeduction: lateDeduction,
             penalty: penaltyToApply,
@@ -1076,6 +1229,20 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
     const holidays = await Holiday.find({ date: { $gte: startDate, $lte: endDate } });
     const holidayDays = new Set(holidays.map(h => new Date(h.date).getDate()));
 
+    // Preserve existing draft data (components, bonus, penalty, history)
+    const preservedDraftData = new Map();
+    targetPayrolls.forEach(p => {
+      const empId = p.employee ? p.employee.toString() : '';
+      if (empId) {
+        preservedDraftData.set(empId, {
+          customComponents: p.customComponents || [],
+          bonus: p.salaryDetails?.bonus || 0,
+          penalty: p.salaryDetails?.deductions?.penalty || 0,
+          editHistory: p.editHistory || []
+        });
+      }
+    });
+
     // Delete existing target payrolls
     await Payroll.deleteMany({ _id: { $in: ids } });
 
@@ -1094,7 +1261,7 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
 
       const leaves = await Leave.find({
         employee: employee._id,
-        status: { $in: ['approved', 'pending'] },
+        status: { $nin: ['rejected', 'Rejected'] },
         startDate: { $lte: endDate },
         endDate: { $gte: startDate }
       });
@@ -1117,135 +1284,6 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
         date: { $gte: startDate, $lte: endDate }
       });
 
-      let presentCount = 0;
-      let halfDayCount = 0;
-      let absentCount = 0;
-      let weekOffCount = 0;
-      let holidayCount = 0;
-      let leaveCount = 0;
-      let lateCount = 0;
-
-      for (let day = 1; day <= totalDaysInMonth; day++) {
-        const currentDate = new Date(year, month - 1, day);
-        const dayOfWeek = currentDate.getDay();
-
-        let applicableWeekoffDays = defaultWeekoffDays;
-        if (employee.shiftHistory && employee.shiftHistory.length > 0) {
-          const historyEntry = employee.shiftHistory.find(h => {
-            const s = new Date(h.startDate); s.setHours(0, 0, 0, 0);
-            const e = h.endDate ? new Date(h.endDate) : new Date('2099-12-31');
-            if (h.endDate) e.setHours(23, 59, 59, 999);
-            return currentDate >= s && currentDate <= e;
-          });
-          if (historyEntry) {
-            const matchingConfig = allShiftConfigs.find(sc => sc.type === historyEntry.shiftType);
-            if (matchingConfig) applicableWeekoffDays = matchingConfig.weekoff || 1;
-          }
-        }
-
-        const isWeekOff = (
-          (applicableWeekoffDays >= 1 && dayOfWeek === 0) ||
-          (applicableWeekoffDays >= 2 && dayOfWeek === 6) ||
-          (applicableWeekoffDays >= 3 && dayOfWeek === 5)
-        );
-        const isHoliday = holidayDays.has(day);
-        const leaveInfo = leaveMap.get(day);
-        const isFutureDate = currentDate > today;
-        const isToday = currentDate.getTime() === today.getTime();
-
-        const att = attendances.find(a => new Date(a.date).getDate() === day);
-
-        if (att) {
-          // 'present', 'late-checkin', 'early-checkin' → present
-          if (att.status === 'present' || att.status === 'late-checkin' || att.status === 'early-checkin') {
-            presentCount++;
-          // 'half-day' → half day
-          } else if (att.status === 'half-day') {
-            halfDayCount++;
-          // 'absent' → absent
-          } else if (att.status === 'absent') {
-            absentCount++;
-          // 'not-checkout' → half day (user checked in but never checked out)
-          } else if (att.status === 'not-checkout') {
-            halfDayCount++;
-          // 'checked-in' → still active (today), count as present; old checked-in without logout = half day
-          } else if (att.status === 'checked-in') {
-            if (isToday) {
-              presentCount++;
-            } else if (!isFutureDate) {
-              // Checked in but no checkout on a past day → half day
-              halfDayCount++;
-            }
-          } else if (leaveInfo) {
-            leaveCount++;
-          } else if (isWeekOff) {
-            weekOffCount++;
-          } else if (isHoliday) {
-            holidayCount++;
-          } else if (!isFutureDate && !isToday) {
-            absentCount++;
-          }
-
-          if (att.loginTime && lateCheckInRule) {
-            const login = new Date(att.loginTime);
-            const [hour, minute] = lateThreshold.split(':');
-            const thresholdDate = new Date(login);
-            thresholdDate.setHours(parseInt(hour), parseInt(minute), 0);
-            if (login > thresholdDate) lateCount++;
-          }
-        } else {
-          if (leaveInfo) leaveCount++;
-          else if (isWeekOff) weekOffCount++;
-          else if (isHoliday) holidayCount++;
-          else if (!isFutureDate && !isToday) absentCount++;
-        }
-      }
-
-      let elapsedWeekOffCount = 0;
-      let elapsedHolidayCount = 0;
-      let elapsedLeaveCount = 0;
-
-      for (let d = 1; d <= totalDaysInMonth; d++) {
-        const cDate = new Date(year, month - 1, d);
-        if (cDate > today) break;
-
-        const dOfWeek = cDate.getDay();
-        let appWeekoff = defaultWeekoffDays;
-        if (employee.shiftHistory && employee.shiftHistory.length > 0) {
-          const hEntry = employee.shiftHistory.find(h => {
-            const s = new Date(h.startDate); s.setHours(0, 0, 0, 0);
-            const e = h.endDate ? new Date(h.endDate) : new Date('2099-12-31');
-            if (h.endDate) e.setHours(23, 59, 59, 999);
-            return cDate >= s && cDate <= e;
-          });
-          if (hEntry) {
-            const mConfig = allShiftConfigs.find(sc => sc.type === hEntry.shiftType);
-            if (mConfig) appWeekoff = mConfig.weekoff || 1;
-          }
-        }
-
-        const isWo = (
-          (appWeekoff >= 1 && dOfWeek === 0) ||
-          (appWeekoff >= 2 && dOfWeek === 6) ||
-          (appWeekoff >= 3 && dOfWeek === 5)
-        );
-        const isHol = holidayDays.has(d);
-        const lInfo = leaveMap.get(d);
-        const att = attendances.find(a => new Date(a.date).getDate() === d);
-
-        if (att) {
-          if (att.status === 'present') {
-          } else if (att.status === 'half-day') {
-          } else if (lInfo) elapsedLeaveCount++;
-          else if (isWo) elapsedWeekOffCount++;
-          else if (isHol) elapsedHolidayCount++;
-        } else {
-          if (lInfo) elapsedLeaveCount++;
-          else if (isWo) elapsedWeekOffCount++;
-          else if (isHol) elapsedHolidayCount++;
-        }
-      }
-
       const totalAllowances = 
         (structure.allowances?.hra || 0) + 
         (structure.allowances?.da || 0) + 
@@ -1257,12 +1295,23 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
 
       const grossSalaryAmt = structure.basicSalary + totalAllowances;
       const perDaySalary = grossSalaryAmt / 30;
-      const elapsedPaidDaysCount = presentCount + (halfDayCount * 0.5) + elapsedWeekOffCount + elapsedHolidayCount + elapsedLeaveCount;
 
-      const lateDeduction = 0;
-      const halfDayDeduction = Number((halfDayCount * (perDaySalary * 0.5)).toFixed(2));
-      const absentLossOfPay = Number((absentCount * perDaySalary).toFixed(2));
-      const totalLossOfPay = Number((absentLossOfPay + halfDayDeduction).toFixed(2));
+      const metrics = calculateMonthlyAttendanceMetrics({
+        employee,
+        totalDaysInMonth,
+        year: parseInt(year, 10),
+        month: parseInt(month, 10),
+        today,
+        endDate,
+        defaultWeekoffDays,
+        allShiftConfigs,
+        holidayDays,
+        leaveMap,
+        attendances,
+        lateCheckInRule,
+        lateThreshold,
+        perDaySalary
+      });
 
       const stdDeductions = structure.deductions || {};
       const totalStdDeductions =
@@ -1272,17 +1321,6 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
         (stdDeductions.loan || 0) +
         (stdDeductions.advance || 0) +
         (stdDeductions.other || 0);
-
-      // 30-day standard payroll calculation: base days = 30 for all months
-      const TOTAL_PAYROLL_DAYS = 30;
-      const isMonthCompleted = endDate <= today;
-      let paidDaysForCalc;
-      if (isMonthCompleted) {
-        paidDaysForCalc = Math.min(TOTAL_PAYROLL_DAYS, Math.max(0, TOTAL_PAYROLL_DAYS - absentCount - (halfDayCount * 0.5)));
-      } else {
-        const elapsedDays = Math.min(TOTAL_PAYROLL_DAYS, today.getDate());
-        paidDaysForCalc = Math.min(elapsedDays, Math.max(0, elapsedDays - absentCount - (halfDayCount * 0.5)));
-      }
 
       const preserved = preservedDraftData.get(employee._id.toString());
       const customComponentsToApply = preserved?.customComponents || [];
@@ -1297,11 +1335,11 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
         .filter(c => (c.type || '').toLowerCase() === 'deduction')
         .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 
-      const earnedGross = Number((paidDaysForCalc * perDaySalary).toFixed(2));
+      const lateDeduction = 0;
       const penaltyDeductions = Number((lateDeduction + penaltyToApply).toFixed(2));
-      const totalDeductionsCalc = Number((totalLossOfPay + totalStdDeductions + penaltyDeductions + customDeductions).toFixed(2));
+      const totalDeductionsCalc = Number((metrics.totalLossOfPay + totalStdDeductions + penaltyDeductions + customDeductions).toFixed(2));
       const calculatedGross = Number((grossSalaryAmt + customAdditions).toFixed(2));
-      const currentNet = Number(Math.max(0, earnedGross + bonusToApply + customAdditions - totalStdDeductions - penaltyDeductions - customDeductions).toFixed(2));
+      const currentNet = Number(Math.max(0, metrics.earnedGross + bonusToApply + customAdditions - totalStdDeductions - penaltyDeductions - customDeductions).toFixed(2));
 
       const payroll = new Payroll({
         employee: employee._id.toString(),
@@ -1309,18 +1347,22 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
         salaryStructure: structure._id,
         payPeriod: { month: parseInt(month, 10), year: parseInt(year, 10) },
         workingDays: {
-          total: TOTAL_PAYROLL_DAYS,
-          present: presentCount,
-          halfDay: halfDayCount,
-          leave: elapsedLeaveCount,
-          weekoff: elapsedWeekOffCount,
-          holiday: elapsedHolidayCount,
-          absent: absentCount
+          total: metrics.TOTAL_PAYROLL_DAYS,
+          present: metrics.presentCount,
+          halfDay: metrics.halfDayCount,
+          leave: Number((metrics.paidLeaveDays + metrics.unpaidLeaveDays).toFixed(1)),
+          weekoff: metrics.elapsedWeekOffCount,
+          holiday: metrics.elapsedHolidayCount,
+          absent: Number((metrics.absentCount + metrics.unpaidLeaveDays).toFixed(1))
+        },
+        leaves: {
+          paid: Number(metrics.paidLeaveDays.toFixed(1)),
+          unpaid: Number(metrics.unpaidLeaveDays.toFixed(1))
         },
         attendance: {
-          lateCheckIns: lateCount,
-          present: presentCount,
-          total: TOTAL_PAYROLL_DAYS
+          lateCheckIns: metrics.lateCount,
+          present: metrics.presentCount,
+          total: metrics.TOTAL_PAYROLL_DAYS
         },
         performance: {
           incompleteGoals: 0,
@@ -1346,7 +1388,7 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
             loan: stdDeductions.loan || 0,
             advance: stdDeductions.advance || 0,
             other: stdDeductions.other || 0,
-            lossOfPay: totalLossOfPay,
+            lossOfPay: metrics.totalLossOfPay,
             halfDayDeduction: 0,
             lateDeduction: lateDeduction,
             penalty: penaltyToApply,
@@ -1464,7 +1506,7 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
     // Get leaves for employee in this month
     const leaves = await Leave.find({
       employee: employeeId,
-      status: { $in: ['approved', 'pending'] },
+      status: { $nin: ['rejected', 'Rejected'] },
       startDate: { $lte: endDate },
       endDate: { $gte: startDate }
     });
@@ -1505,130 +1547,47 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
     const lateCheckInRule = rules.find(r => r.ruleType === 'Late Check-in');
     const lateThreshold = lateCheckInRule ? lateCheckInRule.threshold : "10:10 AM";
 
-    // Create daily breakdown
-    const dailyBreakdown = [];
-    let presentCount = 0;
-    let halfDayCount = 0;
-    let absentCount = 0;
-    let weekOffCount = 0;
-    let holidayCount = 0;
-    let leaveCount = 0;
-    let lateCount = 0;
-    let totalWorkingHours = 0;
-
-    for (let day = 1; day <= totalDaysInMonth; day++) {
-      const currentDate = new Date(year, month - 1, day);
-      const dayOfWeek = currentDate.getDay(); // 0=Sun, 6=Sat, 5=Fri
-
-      // Determine weekoff for this day
-      let applicableWeekoffDays = defaultWeekoffDays;
-      if (employee.shiftHistory && employee.shiftHistory.length > 0) {
-        const historyEntry = employee.shiftHistory.find(h => {
-          const s = new Date(h.startDate); s.setHours(0, 0, 0, 0);
-          const e = h.endDate ? new Date(h.endDate) : new Date('2099-12-31');
-          if (h.endDate) e.setHours(23, 59, 59, 999);
-          return currentDate >= s && currentDate <= e;
-        });
-        if (historyEntry) {
-          const matchingConfig = allShiftConfigs.find(sc => sc.type === historyEntry.shiftType);
-          if (matchingConfig) applicableWeekoffDays = matchingConfig.weekoff || 1;
-        }
-      }
-
-      const isWeekOff = (
-        (applicableWeekoffDays >= 1 && dayOfWeek === 0) ||
-        (applicableWeekoffDays >= 2 && dayOfWeek === 6) ||
-        (applicableWeekoffDays >= 3 && dayOfWeek === 5)
-      );
-      const isHoliday = holidayDays.has(day);
-      const leaveInfo = leaveMap.get(day);
-
-      const attendance = attendances.find(att => new Date(att.date).getDate() === day);
-
-      const isFutureDate = currentDate > today;
-      const isToday = currentDate.getTime() === today.getTime();
-
-      let dayData = {
-        day: day,
-        date: currentDate.toISOString().split('T')[0],
-        status: isFutureDate || isToday ? '—' : (leaveInfo ? 'Leave' : isWeekOff ? 'Week Off' : isHoliday ? 'Holiday' : 'Absent'),
-        isWeekend: isWeekOff,
-        isHoliday: isHoliday,
-        leaveInfo: leaveInfo || null,
-        loginTime: null,
-        logoutTime: null,
-        workingHours: 0,
-        isLate: false,
-        shift: 'General'
-      };
-
-      if (attendance) {
-        dayData.status = attendance.status === 'present' ? 'Present' : attendance.status === 'half-day' ? 'Half-day' : (isFutureDate || isToday ? '—' : (leaveInfo ? 'Leave' : isWeekOff ? 'Week Off' : isHoliday ? 'Holiday' : 'Absent'));
-        dayData.loginTime = attendance.loginTime;
-        dayData.logoutTime = attendance.logoutTime;
-        dayData.workingHours = attendance.workingHours || 0;
-
-        // Check if late
-        if (attendance.loginTime && lateCheckInRule) {
-          const login = new Date(attendance.loginTime);
-          const [hour, minute] = lateThreshold.split(':');
-          const thresholdDate = new Date(login);
-          thresholdDate.setHours(parseInt(hour), parseInt(minute), 0);
-          dayData.isLate = login > thresholdDate;
-          if (dayData.isLate) lateCount++;
-        }
-
-        if (attendance.status === 'present') presentCount++;
-        if (attendance.status === 'half-day') halfDayCount++;
-        totalWorkingHours += dayData.workingHours;
-      } else {
-        if (!isFutureDate && !isToday) {
-          if (leaveInfo) leaveCount++;
-          else if (isWeekOff) weekOffCount++;
-          else if (isHoliday) holidayCount++;
-          else absentCount++;
-        }
-      }
-
-      dailyBreakdown.push(dayData);
-    }
-
-    // Calculate payroll amounts
-    let payrollData = null;
-    const basicSalary = structure?.basicSalary || 0;
     const totalAllowances = 
-      (structure.allowances?.hra || 0) + 
-      (structure.allowances?.da || 0) + 
-      (structure.allowances?.conveyance || 0) + 
-      (structure.allowances?.food || 0) + 
-      (structure.allowances?.transport || 0) + 
-      (structure.allowances?.medical || 0) + 
-      (structure.allowances?.other || 0);
+      (structure?.allowances?.hra || 0) + 
+      (structure?.allowances?.da || 0) + 
+      (structure?.allowances?.conveyance || 0) + 
+      (structure?.allowances?.food || 0) + 
+      (structure?.allowances?.transport || 0) + 
+      (structure?.allowances?.medical || 0) + 
+      (structure?.allowances?.other || 0);
 
-    const grossSalaryAmt = basicSalary + totalAllowances;
+    const grossSalaryAmt = (structure?.basicSalary || 0) + totalAllowances;
+    const perDaySalary = grossSalaryAmt > 0 ? (grossSalaryAmt / 30) : 0;
+
+    const metrics = calculateMonthlyAttendanceMetrics({
+      employee,
+      totalDaysInMonth,
+      year: parseInt(year, 10),
+      month: parseInt(month, 10),
+      today,
+      endDate,
+      defaultWeekoffDays,
+      allShiftConfigs,
+      holidayDays,
+      leaveMap,
+      attendances,
+      lateCheckInRule,
+      lateThreshold,
+      perDaySalary
+    });
+
+    const basicSalary = structure?.basicSalary || 0;
     const TOTAL_PAYROLL_DAYS = 30;
-    const perDaySalary = grossSalaryAmt / TOTAL_PAYROLL_DAYS;
-    const safeAbsent = Math.max(0, absentCount);
-
-    const isMonthCompleted = endDate <= today;
-    let paidDaysCount;
-    if (isMonthCompleted) {
-      paidDaysCount = Math.min(TOTAL_PAYROLL_DAYS, Math.max(0, TOTAL_PAYROLL_DAYS - safeAbsent - (halfDayCount * 0.5)));
-    } else {
-      const elapsedDays = Math.min(TOTAL_PAYROLL_DAYS, today.getDate());
-      paidDaysCount = Math.min(elapsedDays, Math.max(0, elapsedDays - safeAbsent - (halfDayCount * 0.5)));
-    }
-    const presentEarnings = Number((paidDaysCount * perDaySalary).toFixed(2));
-    const halfDayDeduction = Number((halfDayCount * (perDaySalary * 0.5)).toFixed(2));
-    const absentLossOfPay = Number((safeAbsent * perDaySalary).toFixed(2));
+    const presentEarnings = Number((metrics.paidDaysForCalc * perDaySalary).toFixed(2));
     const lateDeduction = 0;
 
+    let payrollData = null;
     if (structure) {
       const goalDeduction = 0;
       const stdDeductions = structure.deductions || {};
       const totalStdDed = (stdDeductions.pf || 0) + (stdDeductions.esi || 0) + (stdDeductions.tax || 0) + (stdDeductions.loan || 0) + (stdDeductions.advance || 0) + (stdDeductions.other || 0);
 
-      let totalPenaltyDed = Number((lateDeduction + goalDeduction + halfDayDeduction).toFixed(2));
+      let totalPenaltyDed = Number((lateDeduction + goalDeduction + metrics.halfDayDeduction).toFixed(2));
       let netSalary = Number((presentEarnings + 0 - (totalStdDed + totalPenaltyDed)).toFixed(2));
 
       payrollData = {
@@ -1645,9 +1604,9 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
         netSalary: netSalary,
         deductionBreakdown: {
           lateDeduction: lateDeduction,
-          halfDayDeduction: halfDayDeduction,
+          halfDayDeduction: metrics.halfDayDeduction,
           goalDeduction: goalDeduction,
-          lossOfPay: absentLossOfPay
+          lossOfPay: metrics.totalLossOfPay
         }
       };
     }
@@ -1673,27 +1632,30 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
         basicSalary: basicSalary,
         perDaySalary: Number(perDaySalary.toFixed(2)),
         presentEarnings: presentEarnings,
-        halfDayDeduction: halfDayDeduction,
-        absentLossOfPay: absentLossOfPay,
+        halfDayDeduction: metrics.halfDayDeduction,
+        absentLossOfPay: metrics.absentLossOfPay,
         lateDeduction: lateDeduction
       },
-      month: parseInt(month),
-      year: parseInt(year),
+      month: parseInt(month, 10),
+      year: parseInt(year, 10),
       summary: {
         totalDays: TOTAL_PAYROLL_DAYS,
-        presentDays: presentCount,
-        halfDays: halfDayCount,
-        absentDays: Math.max(0, absentCount),
-        leaveDays: leaveCount,
-        weekOffDays: weekOffCount,
-        holidayDays: holidayCount,
-        lateDays: lateCount,
-        totalWorkingHours: Math.round(totalWorkingHours * 100) / 100
+        presentDays: metrics.presentCount,
+        halfDays: metrics.halfDayCount,
+        absentDays: metrics.absentCount,
+        leaveDays: Number((metrics.paidLeaveDays + metrics.unpaidLeaveDays).toFixed(1)),
+        paidLeaveDays: Number(metrics.paidLeaveDays.toFixed(1)),
+        casualLeaveDays: Number(metrics.paidLeaveDays.toFixed(1)),
+        unpaidLeaveDays: Number(metrics.unpaidLeaveDays.toFixed(1)),
+        weekOffDays: metrics.weekOffCount,
+        holidayDays: metrics.holidayCount,
+        lateDays: metrics.lateCount,
+        totalWorkingHours: Math.round(metrics.totalWorkingHours * 100) / 100
       },
-      dailyBreakdown: dailyBreakdown,
+      dailyBreakdown: metrics.dailyBreakdown,
       payroll: payrollData
     });
-
+    return;
   } catch (error) {
     console.error('Error fetching employee attendance breakdown:', error);
     res.status(500).json({ message: 'Error fetching attendance breakdown' });
