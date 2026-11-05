@@ -103,6 +103,34 @@ router.get('/webhook', (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * GET /api/ai-chats/webhook-config
+ * Fetch configured webhook URL and secret token dynamically from .env
+ */
+router.get('/webhook-config', auth, async (req, res) => {
+  try {
+    const webhookUrl =
+      process.env.WEBHOOK_URL ||
+      `${req.protocol}://${req.get('host')}/api/leads/webhook`;
+    const webhookSecret = process.env.WEBHOOK_SECRET || '';
+
+    res.json({
+      success: true,
+      data: {
+        webhookUrl,
+        webhookSecret
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching webhook config:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch webhook configuration',
+      error: error.message
+    });
+  }
+});
+
+/**
  * GET /api/ai-chats/leads
  * Fetch all leads captured from the Website AI chatbot
  */

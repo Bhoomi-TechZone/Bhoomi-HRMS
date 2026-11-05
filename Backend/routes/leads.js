@@ -1410,5 +1410,16 @@ router.get('/webhook', (req, res) => {
     description: 'Bhoomi HRMS Website AI Assistant Webhook Receiver'
   });
 });
+router.get('/webhook-config', auth, (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      webhookUrl:
+        process.env.WEBHOOK_URL ||
+        `${req.protocol}://${req.get('host')}/api/leads/webhook`,
+      webhookSecret: process.env.WEBHOOK_SECRET || ''
+    }
+  });
+});
 
 module.exports = router;

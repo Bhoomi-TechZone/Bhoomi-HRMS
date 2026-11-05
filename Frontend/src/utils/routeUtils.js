@@ -376,28 +376,32 @@ export function useContextualQueryState(defaultState = {}, options = {}) {
   const setQueryState = useCallback(
     (updater, navOptions = {}) => {
       const mode = navOptions.historyMode || historyMode;
-      const currentParams = new URLSearchParams(searchParams);
 
-      const nextValues = typeof updater === 'function' ? updater(queryState) : updater;
+      setSearchParams(
+        (prevSearchParams) => {
+          const currentParams = new URLSearchParams(prevSearchParams);
+          const nextValues = typeof updater === 'function' ? updater(queryState) : updater;
 
-      if (!nextValues || typeof nextValues !== 'object') return;
+          if (!nextValues || typeof nextValues !== 'object') return currentParams;
 
-      for (const [key, val] of Object.entries(nextValues)) {
-        if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
-          console.warn(`[Security Alert] Disallowed setting sensitive parameter '${key}' in URL query.`);
-          continue;
-        }
+          for (const [key, val] of Object.entries(nextValues)) {
+            if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
+              console.warn(`[Security Alert] Disallowed setting sensitive parameter '${key}' in URL query.`);
+              continue;
+            }
 
-        if (val === null || val === undefined || val === '') {
-          currentParams.delete(key);
-        } else {
-          currentParams.set(key, String(val));
-        }
-      }
-
-      setSearchParams(currentParams, { replace: mode === 'replace' });
+            if (val === null || val === undefined || val === '') {
+              currentParams.delete(key);
+            } else {
+              currentParams.set(key, String(val));
+            }
+          }
+          return currentParams;
+        },
+        { replace: mode === 'replace' }
+      );
     },
-    [historyMode, queryState, searchParams, setSearchParams]
+    [historyMode, queryState, setSearchParams]
   );
 
   return [queryState, setQueryState];

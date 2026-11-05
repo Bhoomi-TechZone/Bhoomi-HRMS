@@ -4,20 +4,18 @@ import {
   Bot,
   Sparkles,
   MessageSquare,
-  Phone,
   Mail,
   Calendar,
   DollarSign,
   Search,
-  Filter,
   X,
   ChevronDown,
   RotateCw,
   Eye,
+  EyeOff,
   Copy,
   Check,
   Trash2,
-  Send,
   User
 } from 'lucide-react';
 
@@ -101,7 +99,37 @@ function AIChats() {
   const [showWebhookModal, setShowWebhookModal] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
-  const [creatingSample, setCreatingSample] = useState(false);
+  const [webhookConfig, setWebhookConfig] = useState({
+    webhookUrl: '',
+    webhookSecret: ''
+  });
+  const [loadingConfig, setLoadingConfig] = useState(false);
+  const [showSecret, setShowSecret] = useState(false);
+
+  // Fetch webhook configuration from backend .env
+  const fetchWebhookConfig = useCallback(async () => {
+    try {
+      setLoadingConfig(true);
+      const res = await api.get('/ai-chats/webhook-config');
+      if (res.data?.success && res.data?.data) {
+        setWebhookConfig(res.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load webhook configuration:', err);
+    } finally {
+      setLoadingConfig(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWebhookConfig();
+  }, [fetchWebhookConfig]);
+
+  const openWebhookModal = () => {
+    fetchWebhookConfig();
+    setShowSecret(false);
+    setShowWebhookModal(true);
+  };
 
   // Fetch leads
   const fetchLeads = useCallback(async () => {
@@ -166,22 +194,6 @@ function AIChats() {
       alert('Failed to delete lead. Please try again.');
     } finally {
       setActionLoadingId(null);
-    }
-  };
-
-  // Create sample lead
-  const handleCreateSampleLead = async () => {
-    try {
-      setCreatingSample(true);
-      const res = await api.post('/ai-chats/test-lead', {});
-      if (res.data?.success) {
-        fetchLeads();
-      }
-    } catch (err) {
-      console.error('Failed to create sample lead:', err);
-      alert('Error creating sample lead.');
-    } finally {
-      setCreatingSample(false);
     }
   };
 
@@ -341,7 +353,7 @@ function AIChats() {
         {/* Action Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
-            onClick={() => setShowWebhookModal(true)}
+            onClick={openWebhookModal}
             style={{
               padding: '9px 16px',
               borderRadius: 10,
@@ -361,29 +373,6 @@ function AIChats() {
           >
             <Sparkles size={16} style={{ color: '#059669' }} />
             <span>Webhook Settings</span>
-          </button>
-
-          <button
-            onClick={handleCreateSampleLead}
-            disabled={creatingSample}
-            style={{
-              padding: '9px 16px',
-              borderRadius: 10,
-              border: '1px solid #cbd5e1',
-              background: '#ffffff',
-              color: '#475569',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: creatingSample ? 'not-allowed' : 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-            }}
-            title="Generate a sample lead to preview the table and chat transcript"
-          >
-            {creatingSample ? <RotateCw size={15} className="spin" /> : <Bot size={15} />}
-            <span>+ Sample Lead</span>
           </button>
 
           <button
@@ -514,6 +503,12 @@ function AIChats() {
           </div>
         </div>
       </div>
+
+      {error && (
+        <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, color: '#b91c1c', fontSize: 13, marginBottom: 16 }}>
+          {error}
+        </div>
+      )}
 
       {/* ────────────────────────────────────────────────────────────────────────── */}
       {/* 3. FILTER & SEARCH BAR                                                     */}
@@ -679,35 +674,23 @@ function AIChats() {
                       </p>
                       <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
                         <button
-                          onClick={handleCreateSampleLead}
-                          disabled={creatingSample}
+                          onClick={openWebhookModal}
                           style={{
-                            padding: '8px 16px',
+                            padding: '8px 18px',
                             borderRadius: 8,
                             background: '#059669',
-                            color: '#fff',
+                            color: '#ffffff',
                             border: 'none',
                             fontSize: 12.5,
                             fontWeight: 600,
-                            cursor: 'pointer'
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6
                           }}
                         >
-                          Generate Sample Lead
-                        </button>
-                        <button
-                          onClick={() => setShowWebhookModal(true)}
-                          style={{
-                            padding: '8px 16px',
-                            borderRadius: 8,
-                            background: '#fff',
-                            color: '#334155',
-                            border: '1px solid #cbd5e1',
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          View Setup Instructions
+                          <Sparkles size={14} />
+                          <span>View Setup Instructions</span>
                         </button>
                       </div>
                     </div>
@@ -1277,11 +1260,11 @@ function AIChats() {
               background: '#ffffff',
               borderRadius: 20,
               width: '100%',
-              maxWidth: 620,
+              maxWidth: 780,
               maxHeight: '90vh',
               overflowY: 'auto',
               boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-              padding: '28px'
+              padding: '32px'
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1333,14 +1316,20 @@ function AIChats() {
                     background: '#f8fafc',
                     border: '1px solid #cbd5e1',
                     borderRadius: 10,
-                    padding: '8px 12px'
+                    padding: '8px 12px',
+                    gap: 8
                   }}
                 >
                   <code style={{ flex: 1, fontSize: 13, color: '#0f172a', wordBreak: 'break-all' }}>
-                    https://hrms.bhoomitechzone.com/api/leads/webhook
+                    {webhookConfig.webhookUrl || (loadingConfig ? 'Loading webhook URL...' : 'https://hrmsbackend.bhoomitechzone.in/api/leads/webhook')}
                   </code>
                   <button
-                    onClick={() => handleCopy('https://hrms.bhoomitechzone.com/api/leads/webhook', 'url')}
+                    onClick={() =>
+                      handleCopy(
+                        webhookConfig.webhookUrl || 'https://hrmsbackend.bhoomitechzone.in/api/leads/webhook',
+                        'url'
+                      )
+                    }
                     style={{
                       border: 'none',
                       background: 'none',
@@ -1350,15 +1339,13 @@ function AIChats() {
                       alignItems: 'center',
                       gap: 4,
                       fontSize: 12,
-                      fontWeight: 600
+                      fontWeight: 600,
+                      flexShrink: 0
                     }}
                   >
                     {copiedKey === 'url' ? <Check size={14} /> : <Copy size={14} />}
                     <span>{copiedKey === 'url' ? 'Copied' : 'Copy'}</span>
                   </button>
-                </div>
-                <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 4 }}>
-                  (Alternative endpoint: <code>https://hrms.bhoomitechzone.com/api/ai-chats/webhook</code>)
                 </div>
               </div>
 
@@ -1375,24 +1362,69 @@ function AIChats() {
                     background: '#f8fafc',
                     border: '1px solid #cbd5e1',
                     borderRadius: 10,
-                    padding: '8px 12px'
+                    padding: '8px 12px',
+                    gap: 8
                   }}
                 >
-                  <code style={{ flex: 1, fontSize: 13, color: '#059669', fontWeight: 600 }}>
-                    bhoomi_secure_secret_2026
+                  <code
+                    style={{
+                      flex: 1,
+                      fontSize: 13,
+                      color: '#059669',
+                      fontWeight: 600,
+                      wordBreak: 'break-all',
+                      letterSpacing: showSecret ? 'normal' : '2px',
+                      userSelect: showSecret ? 'all' : 'none'
+                    }}
+                  >
+                    {webhookConfig.webhookSecret
+                      ? showSecret
+                        ? webhookConfig.webhookSecret
+                        : '••••••••••••••••••••••••••••••••'
+                      : (loadingConfig ? 'Loading secret...' : '••••••••••••••••')}
                   </code>
+
+                  {/* Eye Toggle Button */}
                   <button
-                    onClick={() => handleCopy('bhoomi_secure_secret_2026', 'secret')}
+                    type="button"
+                    onClick={() => setShowSecret((prev) => !prev)}
+                    title={showSecret ? 'Hide secret' : 'Show secret'}
+                    style={{
+                      border: '1px solid #cbd5e1',
+                      background: showSecret ? '#ecfdf5' : '#ffffff',
+                      borderRadius: 6,
+                      padding: '4px 8px',
+                      cursor: 'pointer',
+                      color: showSecret ? '#059669' : '#64748b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      flexShrink: 0,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {showSecret ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+
+                  {/* Copy Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(webhookConfig.webhookSecret || '', 'secret')}
+                    disabled={!webhookConfig.webhookSecret}
                     style={{
                       border: 'none',
                       background: 'none',
-                      cursor: 'pointer',
+                      cursor: webhookConfig.webhookSecret ? 'pointer' : 'not-allowed',
                       color: copiedKey === 'secret' ? '#10b981' : '#64748b',
                       display: 'flex',
                       alignItems: 'center',
                       gap: 4,
                       fontSize: 12,
-                      fontWeight: 600
+                      fontWeight: 600,
+                      flexShrink: 0
                     }}
                   >
                     {copiedKey === 'secret' ? <Check size={14} /> : <Copy size={14} />}

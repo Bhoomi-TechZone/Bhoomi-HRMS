@@ -11,28 +11,6 @@ const FOLLOW_UP_TIME_OPTIONS = Array.from({ length: 24 }, (_, i) => {
   return `${String(hour).padStart(2, '0')}:${minutes}`;
 });
 
-const META_STATUS_COLORS = {
-  'New': '#1e40af',
-  'Contacted': '#9a3412',
-  'Qualified': '#047857',
-  'Interested': '#3730a3',
-  'Follow-up': '#6b21a8',
-  'Converted': '#166534',
-  'Not Interested': '#991b1b',
-  'Closed': '#334155', 'Invalid': '#991b1b', 'International': '#0e7490'
-};
-
-const META_STATUS_BG_COLORS = {
-  'New': '#dbeafe',
-  'Contacted': '#ffedd5',
-  'Qualified': '#d1fae5',
-  'Interested': '#e0e7ff',
-  'Follow-up': '#f3e8ff',
-  'Converted': '#dcfce7',
-  'Not Interested': '#fee2e2',
-  'Closed': '#f1f5f9', 'Invalid': '#fee2e2', 'International': '#ecfeff'
-};
-
 // Cutoff timestamp: old leads data (before this cutoff) is strictly visible ONLY to Admin
 const DATA_CUTOFF_DATE = new Date('2026-10-16T19:00:00+05:30');
 
@@ -192,7 +170,6 @@ function MyLeads() {
   const [serverStats, setServerStats] = useState(null);
   const [totalLeadsCount, setTotalLeadsCount] = useState(0);
   const [exporting, setExporting] = useState(false);
-  const [pageLoading, setPageLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   // ── Filters ───────────────────────────────────────────────────────────────
@@ -319,7 +296,6 @@ function MyLeads() {
   const actionMenuDropRef = useRef(null);
   // ── Move to Pipeline Modal state ─────────────────────────────────────────
   const [showMovePipelineModal, setShowMovePipelineModal] = useState(false);
-  const [leadToMove, setLeadToMove] = useState(null);
   const [movePipelinePayload, setMovePipelinePayload] = useState(null);
   const [movingToPipeline, setMovingToPipeline] = useState(false);
   const [movePipelineSuccessInfo, setMovePipelineSuccessInfo] = useState(null);
@@ -384,7 +360,6 @@ function MyLeads() {
 
   const fetchLeadsForPage = useCallback(async (pageToLoad = currentPage, limitToLoad = leadsPerPage) => {
     try {
-      setPageLoading(true);
       const isMetaSource = filterSource && filterSource.startsWith('Meta');
       if (isMetaSource) {
         const metaParams = {
@@ -426,8 +401,6 @@ function MyLeads() {
       }
     } catch (err) {
       console.error('fetchLeadsForPage error:', err);
-    } finally {
-      setPageLoading(false);
     }
   }, [currentPage, leadsPerPage, debouncedSearch, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy]);
 
@@ -499,12 +472,14 @@ function MyLeads() {
 
   useEffect(() => {
     fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // When currentPage or leadsPerPage changes after initial fetch, load that exact page instantly in ~30ms
   useEffect(() => {
     if (!initialFetchDoneRef.current) return;
     fetchLeadsForPage(currentPage, leadsPerPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, leadsPerPage]);
 
   // When filters change, reset to page 1 and fetch
@@ -515,6 +490,7 @@ function MyLeads() {
     } else {
       fetchLeadsForPage(1, leadsPerPage);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy]);
 
   // Close assign dropdown on outside click
@@ -618,43 +594,6 @@ function MyLeads() {
 
     setNotificationPosition(next);
   }, [clampNotificationPosition, showFollowUpPanel]);
-
-  const startNotificationDrag = (e) => {
-    if (e.button !== 0) return;
-
-    const rect = followUpWidgetRef.current?.getBoundingClientRect();
-    const currentX = notificationPosition.x ?? (window.innerWidth - (rect?.width || 170) - 16);
-    const currentY = notificationPosition.y ?? (window.innerHeight - (rect?.height || 44) - 16);
-
-    notificationDragRef.current = {
-      dragging: true,
-      moved: false,
-      offsetX: e.clientX - currentX,
-      offsetY: e.clientY - currentY,
-      startX: e.clientX,
-      startY: e.clientY,
-    };
-
-    document.body.style.userSelect = 'none';
-  };
-
-  const startNotificationDragTouch = (e) => {
-    const touch = e.touches[0];
-    const rect = followUpWidgetRef.current?.getBoundingClientRect();
-    const currentX = notificationPosition.x ?? (window.innerWidth - (rect?.width || 170) - 16);
-    const currentY = notificationPosition.y ?? (window.innerHeight - (rect?.height || 44) - 16);
-
-    notificationDragRef.current = {
-      dragging: true,
-      moved: false,
-      offsetX: touch.clientX - currentX,
-      offsetY: touch.clientY - currentY,
-      startX: touch.clientX,
-      startY: touch.clientY,
-    };
-
-    document.body.style.userSelect = 'none';
-  };
 
   const handleNotificationToggle = () => {
     // Suppress synthetic click fired right after touchend
@@ -787,33 +726,6 @@ function MyLeads() {
     return () => clearTimeout(timer);
   }, [followUpAlerts.length]);
 
-  const dismissFollowUp = (alert) => {
-    const dismissed = JSON.parse(sessionStorage.getItem('dismissedFollowUps') || '[]');
-    const dismissKey = `${alert._id}-${alert.followUpDate || alert.nextFollowUp || ''}`;
-    dismissed.push(dismissKey);
-    sessionStorage.setItem('dismissedFollowUps', JSON.stringify(dismissed));
-    const updated = followUpAlerts.filter(a => a._id !== alert._id);
-    setFollowUpAlerts(updated);
-    if (updated.length === 0) setShowFollowUpPanel(false);
-  };
-
-  const markFollowUpComplete = async (alert) => {
-    try {
-      if (alert._alertType === 'meta') {
-        await api.put(`/meta-leads/${alert._id}/follow-up`, { followUpCompleted: true });
-      } else {
-        await api.put(`/leads/${alert._id}/follow-up`, { followUpCompleted: true });
-      }
-      const updated = followUpAlerts.filter(a => a._id !== alert._id);
-      setFollowUpAlerts(updated);
-      if (updated.length === 0) setShowFollowUpPanel(false);
-      fetchAll();
-    } catch (err) {
-      console.error('Error marking follow-up as complete:', err);
-      alert('Failed to mark follow-up as complete');
-    }
-  };
-
   // ── Normalise meta leads into a unified shape ─────────────────────────────
   // Each entry gets _type:'meta' so we know which API to call on update
   const allLeads = useMemo(() => {
@@ -936,8 +848,18 @@ function MyLeads() {
   const salesManagers = useMemo(() => {
     const managerReportsMap = new Map();
     employees.forEach(emp => {
-      if (!emp.isActive && emp.isActive !== undefined) return;
-      const mgrId = emp.assignedManager?._id ? String(emp.assignedManager._id) : (emp.assignedManager ? String(emp.assignedManager) : null);
+      if (!emp) return;
+      if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive' || emp.status === 'Suspended' || emp.status === 'Terminated') return;
+      const rawMgr = emp.assignedManager || emp.reportingManager || emp.manager;
+      let mgrId = '';
+      if (rawMgr) {
+        if (typeof rawMgr === 'object') {
+          mgrId = String(rawMgr._id || rawMgr.id || '');
+        } else {
+          mgrId = String(rawMgr);
+        }
+      }
+      mgrId = mgrId.trim();
       if (mgrId) {
         if (!managerReportsMap.has(mgrId)) {
           managerReportsMap.set(mgrId, []);
@@ -1001,11 +923,23 @@ function MyLeads() {
 
   // Helper to get assigned team members for a manager
   const getManagerTeam = useCallback((mgrId) => {
-    const idStr = String(mgrId);
+    if (!mgrId) return [];
+    const idStr = String(mgrId).trim();
     return employees.filter(emp => {
-      if (!emp.isActive && emp.isActive !== undefined) return false;
-      const empMgrId = emp.assignedManager?._id ? String(emp.assignedManager._id) : (emp.assignedManager ? String(emp.assignedManager) : null);
-      return empMgrId === idStr && String(emp._id || emp.id) !== idStr;
+      if (!emp) return false;
+      if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive' || emp.status === 'Suspended' || emp.status === 'Terminated') return false;
+      const rawMgr = emp.assignedManager || emp.reportingManager || emp.manager;
+      let empMgrId = '';
+      if (rawMgr) {
+        if (typeof rawMgr === 'object') {
+          empMgrId = String(rawMgr._id || rawMgr.id || '');
+        } else {
+          empMgrId = String(rawMgr);
+        }
+      }
+      empMgrId = empMgrId.trim();
+      const empId = String(emp._id || emp.id || '').trim();
+      return empMgrId && empMgrId === idStr && empId !== idStr;
     });
   }, [employees]);
 
@@ -2318,7 +2252,6 @@ function MyLeads() {
     };
 
     setMovePipelinePayload(payload);
-    setLeadToMove(lead);
     setShowMovePipelineModal(true);
   };
 
@@ -2326,16 +2259,8 @@ function MyLeads() {
     if (!movePipelinePayload) return;
     setMovingToPipeline(true);
     try {
-      const res = await api.post('/pipeline-contacts/move-lead', movePipelinePayload);
-      const contactId = res.data?.contact?._id;
-      const dealId = res.data?.deal?._id;
-
+      await api.post('/pipeline-contacts/move-lead', movePipelinePayload);
       const targetLeadId = movePipelinePayload.leadId;
-      const historyEntry = {
-        action: 'Moved to Pipeline',
-        details: `Lead moved to Pipeline Deals under "New Lead" stage by ${user?.firstName || 'User'}`,
-        date: new Date()
-      };
 
       if (movePipelinePayload.leadType === 'meta') {
         setMetaLeads(prev => prev.filter(m => m._id !== targetLeadId));
@@ -2723,10 +2648,6 @@ function MyLeads() {
     }
   };
 
-  const handleDownloadTemplate = () => {
-    handleDownloadTemplateXlsx();
-  };
-
   const cleanPhoneNumber = (val) => {
     if (val === undefined || val === null) return '';
     let str = String(val).trim();
@@ -3023,22 +2944,6 @@ function MyLeads() {
       setExporting(false);
     }
   };
-
-  // ── SVG Icons ─────────────────────────────────────────────────────────────
-  const IconBarChart = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /><line x1="2" y1="20" x2="22" y2="20" /></svg>);
-  const IconPlus = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></svg>);
-  const IconPhone = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.6 3.4 2 2 0 0 1 3.57 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.75a16 16 0 0 0 5.34 5.34l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 16.92z" /></svg>);
-  const IconCheckCircle = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>);
-  const IconXCircle = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>);
-  const IconCalendar = () => (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>);
-  const IconSearch = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>);
-  const IconRefresh = () => (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>);
-  const IconEye = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" /><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>);
-  const IconEdit = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>);
-  const IconPencil = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>);
-  const IconClock = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>);
-  const IconInbox = () => (<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>);
-  const IconTrash = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>);
 
   if (loading) return (
     <div className="page-container" style={{ background: '#f8fafc', minHeight: '100vh', fontFamily: "'Inter', -apple-system, sans-serif", padding: '28px 24px' }}>
@@ -3948,11 +3853,12 @@ function MyLeads() {
                       zIndex: 1000,
                       background: '#fff',
                       border: '1px solid #e2e8f0',
-                      borderRadius: '14px',
-                      boxShadow: '0 12px 38px rgba(15,23,42,0.14)',
-                      padding: '12px',
-                      width: '320px',
-                      maxWidth: '92vw'
+                      borderRadius: '16px',
+                      boxShadow: '0 16px 40px rgba(15,23,42,0.16)',
+                      padding: '14px',
+                      width: '400px',
+                      maxWidth: '94vw',
+                      boxSizing: 'border-box'
                     }}>
                       {/* View mode toggle: All Teams vs All Employees */}
                       <div style={{
@@ -3971,8 +3877,8 @@ function MyLeads() {
                             setFilterEmpSearch('');
                           }}
                           style={{
-                            padding: '6px 10px',
-                            fontSize: '11.5px',
+                            padding: '7px 10px',
+                            fontSize: '12px',
                             fontWeight: empViewMode === 'teams' ? 600 : 500,
                             color: empViewMode === 'teams' ? '#15803d' : '#64748b',
                             background: empViewMode === 'teams' ? '#fff' : 'transparent',
@@ -3987,7 +3893,7 @@ function MyLeads() {
                             transition: 'all 0.15s'
                           }}
                         >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                           All Teams
                         </button>
                         <button
@@ -3997,8 +3903,8 @@ function MyLeads() {
                             setFilterEmpSearch('');
                           }}
                           style={{
-                            padding: '6px 10px',
-                            fontSize: '11.5px',
+                            padding: '7px 10px',
+                            fontSize: '12px',
                             fontWeight: empViewMode === 'employees' ? 600 : 500,
                             color: empViewMode === 'employees' ? '#15803d' : '#64748b',
                             background: empViewMode === 'employees' ? '#fff' : 'transparent',
@@ -4013,7 +3919,7 @@ function MyLeads() {
                             transition: 'all 0.15s'
                           }}
                         >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                           All Employees
                         </button>
                       </div>
@@ -4026,10 +3932,10 @@ function MyLeads() {
                         onChange={e => setFilterEmpSearch(e.target.value)}
                         style={{
                           width: '100%',
-                          padding: '7px 10px',
+                          padding: '8px 12px',
                           border: '1px solid #e2e8f0',
                           borderRadius: '8px',
-                          fontSize: '12px',
+                          fontSize: '12.5px',
                           outline: 'none',
                           marginBottom: '8px',
                           boxSizing: 'border-box',
@@ -4038,7 +3944,18 @@ function MyLeads() {
                       />
 
                       {/* Dropdown Content */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '280px', overflowY: 'auto' }}>
+                      <div
+                        className="team-filter-scroll"
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                          maxHeight: '420px',
+                          overflowY: 'auto',
+                          overscrollBehavior: 'contain',
+                          paddingRight: '4px'
+                        }}
+                      >
                         {empViewMode === 'teams' ? (
                           <>
                             {/* All Teams option button (above all employees / resets filters) */}
@@ -4050,12 +3967,12 @@ function MyLeads() {
                                 setFilterEmpSearch('');
                               }}
                               style={{
-                                padding: '8px 10px',
+                                padding: '8px 12px',
                                 borderRadius: '8px',
                                 border: 'none',
                                 background: (!filterEmployee && !filterTeamMgrId) ? '#f0fdf4' : 'transparent',
                                 color: (!filterEmployee && !filterTeamMgrId) ? '#15803d' : '#334155',
-                                fontSize: '12px',
+                                fontSize: '12.5px',
                                 fontWeight: (!filterEmployee && !filterTeamMgrId) ? 700 : 500,
                                 cursor: 'pointer',
                                 textAlign: 'left',
@@ -4068,18 +3985,18 @@ function MyLeads() {
                               onMouseEnter={e => { if (filterEmployee || filterTeamMgrId) e.currentTarget.style.background = '#f8fafc'; }}
                               onMouseLeave={e => { if (filterEmployee || filterTeamMgrId) e.currentTarget.style.background = 'transparent'; }}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ width: '22px', height: '22px', borderRadius: '6px', background: '#dcfce7', color: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700 }}>👥</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+                                <span style={{ width: '24px', height: '24px', borderRadius: '6px', background: '#dcfce7', color: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700 }}>👥</span>
                                 <span>All Teams</span>
                               </div>
                               {(!filterEmployee && !filterTeamMgrId) && (
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                               )}
                             </button>
 
                             {/* Section header */}
                             <div style={{
-                              fontSize: '10px',
+                              fontSize: '10.5px',
                               fontWeight: 700,
                               color: '#94a3b8',
                               textTransform: 'uppercase',
@@ -4097,17 +4014,17 @@ function MyLeads() {
                               const team = getManagerTeam(mgrId);
                               const isExpanded = !!expandedManagers[mgrId] || !!(searchLower && team.length > 0);
                               const isTeamSelected = filterTeamMgrId === mgrId;
-                              const mgrName = `${mgr.firstName} ${mgr.lastName}`;
+                              const mgrName = `${mgr.firstName || ''} ${mgr.lastName || ''}`.trim() || mgr.name || mgr.email || 'Manager';
 
                               return (
-                                <div key={mgrId} style={{ borderRadius: '8px', border: isTeamSelected ? '1px solid #86efac' : '1px solid #f1f5f9', background: isTeamSelected ? '#f0fdf4' : '#fff', overflow: 'hidden', marginBottom: '3px' }}>
+                                <div key={mgrId} style={{ borderRadius: '10px', border: isTeamSelected ? '1px solid #86efac' : '1px solid #e2e8f0', background: isTeamSelected ? '#f0fdf4' : '#fff', overflow: 'hidden', marginBottom: '4px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
                                   {/* Manager row */}
                                   <div
                                     onClick={() => {
                                       setExpandedManagers(prev => ({ ...prev, [mgrId]: !prev[mgrId] }));
                                     }}
                                     style={{
-                                      padding: '7px 10px',
+                                      padding: '8px 12px',
                                       display: 'flex',
                                       alignItems: 'center',
                                       justifyContent: 'space-between',
@@ -4118,14 +4035,14 @@ function MyLeads() {
                                     onMouseEnter={e => { if (!isTeamSelected) e.currentTarget.style.background = '#f8fafc'; }}
                                     onMouseLeave={e => { if (!isTeamSelected) e.currentTarget.style.background = 'transparent'; }}
                                   >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0, flex: 1 }}>
                                       <div style={{
-                                        width: '24px',
-                                        height: '24px',
+                                        width: '26px',
+                                        height: '26px',
                                         borderRadius: '50%',
                                         background: isTeamSelected ? '#15803d' : '#3b775e',
                                         color: '#fff',
-                                        fontSize: '10px',
+                                        fontSize: '11px',
                                         fontWeight: 700,
                                         display: 'flex',
                                         alignItems: 'center',
@@ -4134,28 +4051,28 @@ function MyLeads() {
                                       }}>
                                         {mgr.firstName?.[0] || 'M'}
                                       </div>
-                                      <div style={{ minWidth: 0 }}>
-                                        <div style={{ fontSize: '12px', fontWeight: isTeamSelected ? 700 : 600, color: isTeamSelected ? '#15803d' : '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      <div style={{ minWidth: 0, flex: 1 }}>
+                                        <div style={{ fontSize: '12.5px', fontWeight: isTeamSelected ? 700 : 600, color: isTeamSelected ? '#15803d' : '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                           {mgrName}
                                         </div>
                                         {mgr.designation && (
-                                          <div style={{ fontSize: '10px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          <div style={{ fontSize: '10.5px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                             {mgr.designation}
                                           </div>
                                         )}
                                       </div>
                                     </div>
 
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                                      <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '10px', background: isTeamSelected ? '#dcfce7' : '#f1f5f9', color: isTeamSelected ? '#166534' : '#64748b', fontWeight: 600 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                                      <span style={{ fontSize: '10.5px', padding: '2px 7px', borderRadius: '10px', background: isTeamSelected ? '#dcfce7' : '#f1f5f9', color: isTeamSelected ? '#166534' : '#64748b', fontWeight: 600 }}>
                                         {team.length} {team.length === 1 ? 'member' : 'members'}
                                       </span>
                                       <svg
-                                        width="12"
-                                        height="12"
+                                        width="13"
+                                        height="13"
                                         viewBox="0 0 24 24"
                                         fill="none"
-                                        stroke="#94a3b8"
+                                        stroke="#64748b"
                                         strokeWidth="2.5"
                                         style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.18s' }}
                                       >
@@ -4166,7 +4083,20 @@ function MyLeads() {
 
                                   {/* Expanded team members */}
                                   {isExpanded && (
-                                    <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '6px 8px 6px 12px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                    <div
+                                      className="team-filter-scroll"
+                                      style={{
+                                        background: '#f8fafc',
+                                        borderTop: '1px solid #f1f5f9',
+                                        padding: '6px 10px 8px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '3px',
+                                        maxHeight: '260px',
+                                        overflowY: 'auto',
+                                        overscrollBehavior: 'contain'
+                                      }}
+                                    >
                                       {/* Option to select entire team */}
                                       <button
                                         type="button"
@@ -4178,35 +4108,38 @@ function MyLeads() {
                                           setFilterEmpSearch('');
                                         }}
                                         style={{
-                                          padding: '5px 8px',
+                                          padding: '6px 9px',
                                           borderRadius: '6px',
                                           border: isTeamSelected ? '1px solid #86efac' : '1px dashed #cbd5e1',
                                           background: isTeamSelected ? '#dcfce7' : '#fff',
                                           color: isTeamSelected ? '#166534' : '#334155',
-                                          fontSize: '11px',
+                                          fontSize: '11.5px',
                                           fontWeight: 600,
                                           cursor: 'pointer',
                                           textAlign: 'left',
                                           display: 'flex',
                                           alignItems: 'center',
                                           justifyContent: 'space-between',
-                                          fontFamily: "'Inter','Poppins','Segoe UI',sans-serif"
+                                          fontFamily: "'Inter','Poppins','Segoe UI',sans-serif",
+                                          transition: 'background 0.1s'
                                         }}
+                                        onMouseEnter={e => { if (!isTeamSelected) e.currentTarget.style.background = '#f1f5f9'; }}
+                                        onMouseLeave={e => { if (!isTeamSelected) e.currentTarget.style.background = '#fff'; }}
                                       >
                                         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                           <span>👥</span>
                                           <span>All {mgr.firstName}'s Team</span>
                                         </span>
                                         {isTeamSelected && (
-                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                                         )}
                                       </button>
 
                                       {/* Individual team members */}
-                                      {team.map(member => {
-                                        const memId = String(member._id || member.id);
+                                      {team.map((member, mIdx) => {
+                                        const memId = String(member._id || member.id || mIdx);
                                         const isMemberActive = filterEmployee === memId && !filterTeamMgrId;
-                                        const memName = `${member.firstName} ${member.lastName}`;
+                                        const memName = `${member.firstName || ''} ${member.lastName || ''}`.trim() || member.name || member.email || 'Team Member';
 
                                         return (
                                           <button
@@ -4219,34 +4152,35 @@ function MyLeads() {
                                               setFilterEmpSearch('');
                                             }}
                                             style={{
-                                              padding: '5px 8px',
+                                              padding: '6px 9px',
                                               borderRadius: '6px',
                                               border: 'none',
-                                              background: isMemberActive ? '#dcfce7' : 'transparent',
-                                              color: isMemberActive ? '#166534' : '#475569',
-                                              fontSize: '11px',
-                                              fontWeight: isMemberActive ? 700 : 400,
+                                              background: isMemberActive ? '#dcfce7' : '#ffffff',
+                                              color: isMemberActive ? '#166534' : '#334155',
+                                              fontSize: '11.5px',
+                                              fontWeight: isMemberActive ? 700 : 500,
                                               cursor: 'pointer',
                                               textAlign: 'left',
                                               display: 'flex',
                                               alignItems: 'center',
                                               justifyContent: 'space-between',
                                               fontFamily: "'Inter','Poppins','Segoe UI',sans-serif",
-                                              transition: 'background 0.1s'
+                                              transition: 'background 0.1s',
+                                              boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
                                             }}
-                                            onMouseEnter={e => { if (!isMemberActive) e.currentTarget.style.background = '#e2e8f0'; }}
-                                            onMouseLeave={e => { if (!isMemberActive) e.currentTarget.style.background = 'transparent'; }}
+                                            onMouseEnter={e => { if (!isMemberActive) e.currentTarget.style.background = '#f1f5f9'; }}
+                                            onMouseLeave={e => { if (!isMemberActive) e.currentTarget.style.background = '#ffffff'; }}
                                           >
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-                                              <span style={{ color: '#94a3b8', fontSize: '9px' }}>↳</span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, flex: 1 }}>
+                                              <span style={{ color: '#059669', fontSize: '10px', fontWeight: 700 }}>↳</span>
                                               <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{memName}</span>
                                             </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                                               {member.designation && (
-                                                <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>{member.designation}</span>
+                                                <span style={{ fontSize: '10px', color: '#64748b' }}>{member.designation}</span>
                                               )}
                                               {isMemberActive && (
-                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                                               )}
                                             </div>
                                           </button>
@@ -4254,7 +4188,7 @@ function MyLeads() {
                                       })}
 
                                       {team.length === 0 && (
-                                        <div style={{ padding: '4px 6px', fontSize: '10.5px', color: '#94a3b8', fontStyle: 'italic' }}>
+                                        <div style={{ padding: '6px 8px', fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', textAlign: 'center' }}>
                                           No team members assigned yet
                                         </div>
                                       )}
@@ -4325,7 +4259,7 @@ function MyLeads() {
                             {/* Flat Employee list */}
                             {filteredEmps.map(emp => {
                               const empId = String(emp._id || emp.id);
-                              const name = `${emp.firstName} ${emp.lastName}`;
+                              const name = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || emp.email || 'Employee';
                               const active = filterEmployee === empId && !filterTeamMgrId;
                               return (
                                 <button

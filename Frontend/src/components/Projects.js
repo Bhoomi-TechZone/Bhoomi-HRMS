@@ -436,7 +436,12 @@ function Projects() {
     }
   }, [projects]);
 
-  const isOverdue = (p) => p.deadline && p.status === "active" && new Date(p.deadline) < new Date();
+  const isOverdue = (p) => {
+    if (!p || !p.deadline) return false;
+    const s = String(p.status || '').toLowerCase();
+    const isActive = s === "active" || s === "in-progress" || s === "in progress" || s === "progress";
+    return isActive && new Date(p.deadline) < new Date();
+  };
 
   const formatDate = (v) => {
     if (!v) return "-";
@@ -468,8 +473,11 @@ function Projects() {
 
   const stats = useMemo(() => {
     const total = visibleProjects.length;
-    const active = visibleProjects.filter((p) => p.status === "active").length;
-    const completed = visibleProjects.filter((p) => p.status === "completed").length;
+    const active = visibleProjects.filter((p) => {
+      const s = String(p.status || '').toLowerCase();
+      return s === "active" || s === "in-progress" || s === "in progress" || s === "progress";
+    }).length;
+    const completed = visibleProjects.filter((p) => String(p.status || '').toLowerCase() === "completed").length;
     const overdue = visibleProjects.filter((p) => isOverdue(p)).length;
     return { total, active, completed, overdue };
   }, [visibleProjects]);
@@ -479,13 +487,16 @@ function Projects() {
     const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
     const prev = visibleProjects.filter((p) => {
-      const d = new Date(p.createdAt);
+      const d = new Date(p.createdAt || p.startDate || 0);
       return d >= start && d <= end;
     });
     return {
       total: prev.length,
-      active: prev.filter((p) => p.status === "active").length,
-      completed: prev.filter((p) => p.status === "completed").length,
+      active: prev.filter((p) => {
+        const s = String(p.status || '').toLowerCase();
+        return s === "active" || s === "in-progress" || s === "in progress" || s === "progress";
+      }).length,
+      completed: prev.filter((p) => String(p.status || '').toLowerCase() === "completed").length,
       overdue: prev.filter((p) => isOverdue(p)).length,
     };
   }, [visibleProjects]);
@@ -503,8 +514,11 @@ function Projects() {
       // Status filter
       if (filterStatus === 'overdue') {
         if (!isOverdue(p)) return false;
+      } else if (filterStatus === 'active') {
+        const s = String(p.status || '').toLowerCase();
+        if (s !== 'active' && s !== 'in-progress' && s !== 'in progress' && s !== 'progress') return false;
       } else if (filterStatus) {
-        if (p.status !== filterStatus) return false;
+        if (String(p.status || '').toLowerCase() !== String(filterStatus).toLowerCase()) return false;
       }
       // Search filter: project id (generated), name, clientName, clientEmail, clientCompany
       if (term) {
@@ -523,7 +537,7 @@ function Projects() {
   const pageStart = (currentPage - 1) * PROJECTS_PER_PAGE;
   const paginated = filteredProjects.slice(pageStart, pageStart + PROJECTS_PER_PAGE);
 
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterStatus, visibleProjects.length]);
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterStatus, showOldRecords]);
   useEffect(() => { if (currentPage > totalPages) setCurrentPage(totalPages); }, [currentPage, totalPages]);
 
   // Close filter dropdowns on outside click
@@ -1017,6 +1031,18 @@ function Projects() {
     { label: "Completed", filterValue: "completed", value: stats.completed, color: "#8b5cf6", trend: calcChange(stats.completed, prevMonthStats.completed), up: isUp(stats.completed, prevMonthStats.completed) },
     { label: "Overdue", filterValue: "overdue", value: stats.overdue, color: "#ef4444", trend: calcChange(stats.overdue, prevMonthStats.overdue), up: !isUp(stats.overdue, prevMonthStats.overdue) },
   ];
+
+  const handleCardClick = (item) => {
+    if (item.filterValue === "") {
+      // Total Projects clicked: reset to all
+      setFilterStatus("");
+    } else if (filterStatus === item.filterValue) {
+      // Toggle off if already selected
+      setFilterStatus("");
+    } else {
+      setFilterStatus(item.filterValue);
+    }
+  };
   const handleExportCSV = () => {
     const headers = ["Project ID", "Project Name", "Client Name", "Email", "Company", "Start Date", "Deadline", "Status", "Value"];
     const csvRows = [headers.join(",")];
@@ -1167,29 +1193,75 @@ function Projects() {
       </div>
 
       <div className="proj-metrics-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "22px" }}>
-        {metricsData.map((item) => (
-          <div key={item.label} onClick={() => { setFilterStatus(item.filterValue); setCurrentPage(1); }} style={{ background: filterStatus === item.filterValue ? "#f8fafc" : "#fff", border: `1px solid ${filterStatus === item.filterValue ? item.color : '#e2e8f0'}`, borderRadius: "12px", padding: "16px 18px", cursor: "pointer", transition: "all 0.2s ease", boxShadow: filterStatus === item.filterValue ? `0 0 0 1px ${item.color}33` : "none" }}>
-            <div style={{ position: "relative", zIndex: 1 }}>
-              <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 600, marginBottom: "10px" }}>{item.label}</div>
-              <div style={{ fontSize: "28px", fontWeight: 300, color: "#0f172a", lineHeight: 1, marginBottom: "8px" }}>{item.value}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                <span style={{ color: item.up ? "#a8e63d" : "#ef4444", display: "flex", alignItems: "center", gap: "2px" }}>
-                  {item.up ? (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
-                    </svg>
-                  ) : (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" /><polyline points="17 18 23 18 23 12" />
-                    </svg>
+        {metricsData.map((item) => {
+          const isSelected = item.filterValue === ""
+            ? (!filterStatus || filterStatus === 'all' || filterStatus === 'total')
+            : (filterStatus === item.filterValue);
+
+          return (
+            <div
+              key={item.label}
+              onClick={() => handleCardClick(item)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleCardClick(item); }}
+              style={{
+                background: isSelected ? "#f8fafc" : "#fff",
+                border: isSelected ? `2px solid ${item.color}` : '1px solid #e2e8f0',
+                borderRadius: "12px",
+                padding: "16px 18px",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                boxShadow: isSelected ? `0 4px 14px ${item.color}25` : "0 1px 3px rgba(0,0,0,0.02)",
+                position: "relative",
+                userSelect: "none"
+              }}
+              onMouseEnter={(e) => {
+                if (!isSelected) {
+                  e.currentTarget.style.borderColor = `${item.color}88`;
+                  e.currentTarget.style.boxShadow = `0 6px 18px rgba(0,0,0,0.06)`;
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isSelected) {
+                  e.currentTarget.style.borderColor = "#e2e8f0";
+                  e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.02)";
+                  e.currentTarget.style.transform = "none";
+                }
+              }}
+            >
+              <div style={{ position: "relative", zIndex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                  <span style={{ fontSize: "12px", color: isSelected ? item.color : "#64748b", fontWeight: 700 }}>
+                    {item.label}
+                  </span>
+                  {isSelected && (
+                    <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: item.color }} />
                   )}
-                  <span style={{ fontSize: "12px", fontWeight: 600 }}>{item.trend}</span>
-                </span>
-                <span style={{ fontSize: "12px", color: "#94a3b8" }}>from last month</span>
+                </div>
+                <div style={{ fontSize: "28px", fontWeight: isSelected ? 400 : 300, color: "#0f172a", lineHeight: 1, marginBottom: "8px" }}>
+                  {item.value}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <span style={{ color: item.up ? "#10b981" : "#ef4444", display: "flex", alignItems: "center", gap: "2px" }}>
+                    {item.up ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
+                      </svg>
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" /><polyline points="17 18 23 18 23 12" />
+                      </svg>
+                    )}
+                    <span style={{ fontSize: "12px", fontWeight: 600 }}>{item.trend}</span>
+                  </span>
+                  <span style={{ fontSize: "12px", color: "#94a3b8" }}>from last month</span>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div style={{ background: "#fff", borderRadius: "14px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(15,23,42,0.04)", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
