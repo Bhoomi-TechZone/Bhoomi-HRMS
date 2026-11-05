@@ -9,6 +9,7 @@ const { sendNotification } = require('../utils/socketNotifier');
 const Project = require('../models/Project');
 const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
+const { getModuleViewScope, getTeamUserIds } = require('../utils/roleAccess');
 
 // Configure multer for file uploads
 const uploadDir = path.join(__dirname, '../uploads/projects');
@@ -57,23 +58,25 @@ router.get('/', auth, async (req, res) => {
   try {
     const userRole = (req.user.role ? req.user.role.name : '').trim();
     const userRoleLower = userRole.toLowerCase();
-    
-    // Check if user has projects/accounts read permission OR is in management roles
-    const hasReadPermission = req.user.role && req.user.role.permissions && req.user.role.permissions.some(
-      p => p.module && ['projects', 'accounts'].includes(p.module.toLowerCase()) && p.actions.includes('read')
-    );
-    const managementRoles = ['admin', 'sales head', 'saleshead', 'head of sales', 'team leader', 'teamleader', 'hr manager', 'hr', 'manager', 'director', 'project manager'];
-    const hasFullAccess = managementRoles.includes(userRoleLower) || hasReadPermission;
+    const isAdmin = userRoleLower === 'admin' || userRoleLower === 'super admin' || userRoleLower === 'superadmin' || userRoleLower === 'director';
+
+    const moduleName = req.query.module === 'accounts' ? 'accounts' : 'projects';
+    const viewScope = getModuleViewScope(req.user, moduleName);
 
     let query = {};
-    if (!hasFullAccess) {
-      // Users without full access see only projects assigned to them or created by them
-      query = {
-        $or: [
-          { assignedEmployees: req.user._id },
-          { createdBy: req.user._id }
-        ]
-      };
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        query = { createdBy: req.user._id };
+      } else if (viewScope === 'team') {
+        const teamIds = await getTeamUserIds(req.user._id);
+        query = {
+          $or: [
+            { createdBy: { $in: teamIds } },
+            { assignedEmployees: { $in: teamIds } }
+          ]
+        };
+      }
+      // If viewScope === 'public', query remains {} (all projects/payments visible across organisation)
     }
 
     const projects = await Project.find(query)
@@ -82,7 +85,8 @@ router.get('/', auth, async (req, res) => {
         select: 'firstName lastName employeeId department designation email officialEmail role',
         populate: { path: 'role', select: 'name' }
       })
-      .populate('createdBy', 'firstName lastName')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('paymentHistory.recordedBy', 'firstName lastName email')
       .populate('documents.uploadedBy', 'firstName lastName')
       .populate('activities.performedBy', 'firstName lastName')
       .populate('activities.targetUser', 'firstName lastName')
@@ -299,7 +303,8 @@ router.put('/:id', auth, checkPermission(['projects', 'assignments', 'accounts']
         select: 'firstName lastName employeeId department designation email officialEmail role',
         populate: { path: 'role', select: 'name' }
       })
-      .populate('createdBy', 'firstName lastName')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('paymentHistory.recordedBy', 'firstName lastName email')
       .populate('documents.uploadedBy', 'firstName lastName')
       .populate('activities.performedBy', 'firstName lastName')
       .populate('activities.targetUser', 'firstName lastName');

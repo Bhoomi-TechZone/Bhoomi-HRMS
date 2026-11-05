@@ -398,8 +398,38 @@ router.get('/', auth, async (req, res) => {
       query.movedToPipeline = { $ne: true };
     }
 
-    // Filter by assigned date — match leads whose history has an Assignment Update on that date
-    if (assignedDate) {
+    // Filter by assign date range if provided
+    const { startDate, endDate } = req.query;
+    if (startDate || endDate) {
+      const dateCond = {};
+      if (startDate) {
+        const s = new Date(startDate);
+        s.setHours(0, 0, 0, 0);
+        dateCond.$gte = s;
+      }
+      if (endDate) {
+        const e = new Date(endDate);
+        e.setHours(23, 59, 59, 999);
+        dateCond.$lte = e;
+      }
+
+      const metaAssignFilter = {
+        $or: [
+          { assignedDate: dateCond },
+          { assignedDate: { $in: [null, undefined] }, assignedTo: { $ne: null }, createdTime: dateCond },
+          { history: { $elemMatch: { action: 'Assignment Update', date: dateCond } } }
+        ]
+      };
+
+      if (query.$or) {
+        query.$and = query.$and || [];
+        query.$and.push({ $or: query.$or });
+        delete query.$or;
+      }
+      query.$and = query.$and || [];
+      query.$and.push(metaAssignFilter);
+    } else if (assignedDate) {
+      // Legacy single assigned date filter
       const dateStart = new Date(assignedDate);
       dateStart.setHours(0, 0, 0, 0);
       const dateEnd = new Date(assignedDate);

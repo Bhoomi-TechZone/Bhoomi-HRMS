@@ -4,53 +4,31 @@ const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const Invoice = require('../models/Invoice');
 const Project = require('../models/Project');
+const { getModuleViewScope, getTeamUserIds } = require('../utils/roleAccess');
 
-// Helper to check if role has full management/read access to invoices
-const isManagementRole = (user) => {
-  if (!user) return false;
-  const roleName = ((user.role && user.role.name) || user.roleName || (typeof user.role === 'string' ? user.role : '')).toLowerCase().trim();
-  const managementRoles = [
-    'admin',
-    'sales head',
-    'saleshead',
-    'head of sales',
-    'team leader',
-    'teamleader',
-    'manager',
-    'hr manager',
-    'hr',
-    'director',
-    'project manager',
-    'super admin',
-    'superadmin',
-    'accountant',
-    'accounts',
-    'finance',
-    'finance manager',
-    'billing'
-  ];
-  if (managementRoles.includes(roleName)) return true;
-
-  const hasPerm = user.role && user.role.permissions && user.role.permissions.some(
-    p => p.module && ['accounts', 'projects', 'invoices'].includes(p.module.toLowerCase()) && (p.actions.includes('read') || p.actions.includes('create'))
-  );
-  return !!hasPerm;
-};
-
-// GET /api/invoices - Fetch all invoices
+// GET /api/invoices - Fetch invoices respecting accounts viewScope (public vs private vs team)
 router.get('/', auth, async (req, res) => {
   try {
-    const hasFullAccess = isManagementRole(req.user);
+    const roleName = ((req.user?.role && req.user.role.name) || req.user?.roleName || (typeof req.user?.role === 'string' ? req.user.role : '')).toLowerCase().trim();
+    const isAdmin = roleName === 'admin' || roleName === 'super admin' || roleName === 'superadmin' || roleName === 'director';
+    const viewScope = getModuleViewScope(req.user, 'accounts');
 
     let query = {};
-    if (!hasFullAccess) {
-      // Non-management users can see invoices they created, or unassigned/synced invoices
-      query = {
-        $or: [
-          { createdBy: req.user._id },
-          { createdBy: null }
-        ]
-      };
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        const userFullName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim();
+        const userRegex = userFullName ? new RegExp(userFullName, 'i') : null;
+        query = {
+          $or: [
+            { createdBy: req.user._id },
+            ...(userRegex ? [{ generatedBy: userRegex }] : [])
+          ]
+        };
+      } else if (viewScope === 'team') {
+        const teamIds = await getTeamUserIds(req.user._id);
+        query = { createdBy: { $in: teamIds } };
+      }
+      // If viewScope === 'public', query remains {} (all invoices visible)
     }
 
     const invoices = await Invoice.find(query)
@@ -294,6 +272,16 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Invoice not found' });
     }
 
+    const roleName = ((req.user?.role && req.user.role.name) || req.user?.roleName || (typeof req.user?.role === 'string' ? req.user.role : '')).toLowerCase().trim();
+    const isAdmin = roleName === 'admin' || roleName === 'super admin' || roleName === 'superadmin' || roleName === 'director';
+    const viewScope = getModuleViewScope(req.user, 'accounts');
+    if (!isAdmin && viewScope === 'private') {
+      const isOwner = invoice.createdBy && invoice.createdBy.toString() === req.user._id.toString();
+      if (!isOwner) {
+        return res.status(403).json({ message: 'Access denied: You can only edit your own invoices' });
+      }
+    }
+
     Object.assign(invoice, req.body);
     await invoice.save();
 
@@ -308,18 +296,29 @@ router.put('/:id', auth, async (req, res) => {
 router.delete('/:id', auth, async (req, res) => {
   try {
     const idOrNo = req.params.id;
-    let deleted = null;
-
+    let invoice = null;
     if (idOrNo.match(/^[0-9a-fA-F]{24}$/)) {
-      deleted = await Invoice.findByIdAndDelete(idOrNo);
+      invoice = await Invoice.findById(idOrNo);
     }
-    if (!deleted) {
-      deleted = await Invoice.findOneAndDelete({ invoiceNo: { $regex: `^${idOrNo}$`, $options: 'i' } });
+    if (!invoice) {
+      invoice = await Invoice.findOne({ invoiceNo: { $regex: `^${idOrNo}$`, $options: 'i' } });
     }
 
-    if (!deleted) {
+    if (!invoice) {
       return res.status(404).json({ message: 'Invoice not found' });
     }
+
+    const roleName = ((req.user?.role && req.user.role.name) || req.user?.roleName || (typeof req.user?.role === 'string' ? req.user.role : '')).toLowerCase().trim();
+    const isAdmin = roleName === 'admin' || roleName === 'super admin' || roleName === 'superadmin' || roleName === 'director';
+    const viewScope = getModuleViewScope(req.user, 'accounts');
+    if (!isAdmin && viewScope === 'private') {
+      const isOwner = invoice.createdBy && invoice.createdBy.toString() === req.user._id.toString();
+      if (!isOwner) {
+        return res.status(403).json({ message: 'Access denied: You can only delete your own invoices' });
+      }
+    }
+
+    const deleted = await Invoice.findByIdAndDelete(invoice._id);
 
     res.json({ message: 'Invoice deleted successfully', invoice: deleted });
   } catch (error) {

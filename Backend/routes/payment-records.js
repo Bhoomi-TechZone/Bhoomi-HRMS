@@ -7,6 +7,7 @@ const Deal = require('../models/Deal');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
+const { getModuleViewScope, getTeamUserIds } = require('../utils/roleAccess');
 
 // Robust helper to sync Project paidAmount and paymentStatus from PaymentRecord collection
 async function syncProjectPaymentStatusAndPaidAmount(projectId, fallbackProjectName, fallbackClientName) {
@@ -76,7 +77,7 @@ async function syncProjectPaymentStatusAndPaidAmount(projectId, fallbackProjectN
 }
 
 
-// Get payment records (optional filter by dealId, contactId, or projectId)
+// Get payment records (respecting accounts viewScope: public vs private vs team)
 router.get('/', auth, async (req, res) => {
   try {
     const { dealId, contactId, projectId } = req.query;
@@ -85,6 +86,45 @@ router.get('/', auth, async (req, res) => {
     if (contactId) query.contactId = contactId;
     if (projectId) {
       query.$or = [{ projectId: projectId }, { dealId: projectId }];
+    }
+
+    const roleName = ((req.user?.role && req.user.role.name) || req.user?.roleName || (typeof req.user?.role === 'string' ? req.user.role : '')).toLowerCase().trim();
+    const isAdmin = roleName === 'admin' || roleName === 'super admin' || roleName === 'superadmin' || roleName === 'director';
+    const viewScope = getModuleViewScope(req.user, 'accounts');
+
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        const userFullName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim();
+        const userRegex = userFullName ? new RegExp(userFullName, 'i') : null;
+        const privateConditions = [
+          { createdBy: req.user._id },
+          ...(userRegex ? [{ addedBy: userRegex }] : [])
+        ];
+        if (query.$or) {
+          query.$and = [
+            { $or: query.$or },
+            { $or: privateConditions }
+          ];
+          delete query.$or;
+        } else {
+          query.$or = privateConditions;
+        }
+      } else if (viewScope === 'team') {
+        const teamIds = await getTeamUserIds(req.user._id);
+        const teamConditions = [
+          { createdBy: { $in: teamIds } }
+        ];
+        if (query.$or) {
+          query.$and = [
+            { $or: query.$or },
+            { $or: teamConditions }
+          ];
+          delete query.$or;
+        } else {
+          query.$or = teamConditions;
+        }
+      }
+      // If viewScope === 'public', query fetches all payment records
     }
 
     const records = await PaymentRecord.find(query)
@@ -117,12 +157,17 @@ router.post('/', auth, async (req, res) => {
       recordedOnTime,
       recordedOn,
       attachmentName,
-      notes
+      notes,
+      addedBy
     } = req.body;
 
     const now = new Date();
     const defaultRecordedDate = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
     const defaultRecordedTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const authorName = req.user
+      ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || req.user.email
+      : (addedBy || 'Admin System');
 
     const newRecord = new PaymentRecord({
       projectId: projectId || null,
@@ -141,6 +186,7 @@ router.post('/', auth, async (req, res) => {
       recordedOn: recordedOn || `${recordedOnDate || defaultRecordedDate}, ${recordedOnTime || defaultRecordedTime}`,
       attachmentName: attachmentName || '',
       notes: notes || '',
+      addedBy: addedBy || authorName,
       createdBy: req.user?._id || null
     });
 

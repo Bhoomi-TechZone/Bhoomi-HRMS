@@ -60,7 +60,7 @@ function Roles() {
 
   const modules = [
     'broadcasts', 'goals', 'projects', 'assignments', 'assets', 'vendor-management', 'leaves',
-    'employees', 'roles', 'accounts', 'leads', 'clients', 'deals', 'pipeline',
+    'employees', 'roles', 'accounts', 'leads', 'clients', 'deals', 'pipeline', 'ai-chats',
     'payroll', 'attendance', 'activities',
     'biometric-logs', 'documents', 'my-payslips', 'my-documents',
     'proposals', 'recruitment', 'letters', 'calendar', 'access-policies'
@@ -73,6 +73,7 @@ function Roles() {
     'clients': 'Clients',
     'accounts': 'Accounts',
     'pipeline': 'Pipeline',
+    'ai-chats': 'AI Chats',
     'my-payslips': 'Finance',
     'my-documents': 'My Documents',
     'biometric-logs': 'Biometric Logs',

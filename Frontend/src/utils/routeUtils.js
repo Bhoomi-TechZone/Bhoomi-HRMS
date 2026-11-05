@@ -73,6 +73,12 @@ export const ROUTES = {
     MARKETING_LEADS: '/leads/marketing/overview',
   },
 
+  // AI & Automation
+  AI: {
+    ROOT: '/ai-chats',
+    CHATS: '/ai-chats/conversation/overview',
+  },
+
   // Workforce & HR
   WORKFORCE: {
     EMPLOYEES: '/employees/directory/overview',
@@ -134,6 +140,7 @@ export const NAV_ROUTE_QUERIES = {
   [ROUTES.CRM.DEALS]: { ref: 'sidebar', tab: 'deals', view: 'kanban' },
   [ROUTES.CRM.PIPELINE]: { ref: 'sidebar', tab: 'deals', view: 'kanban' },
   [ROUTES.CRM.LEADS]: { ref: 'sidebar', tab: 'all', status: 'new' },
+  [ROUTES.AI.CHATS]: { ref: 'sidebar', tab: 'chat' },
   [ROUTES.FINANCE.PAYROLL]: { ref: 'sidebar', tab: 'all', status: 'processed' },
   [ROUTES.FINANCE.MY_PAYSLIPS]: { ref: 'sidebar', tab: 'my-payslips' },
   [ROUTES.FINANCE.PAYMENTS]: { ref: 'sidebar', tab: 'payments' },

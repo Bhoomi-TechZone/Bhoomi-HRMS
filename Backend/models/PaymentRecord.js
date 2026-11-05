@@ -78,6 +78,10 @@ const paymentRecordSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  addedBy: {
+    type: String,
+    default: ''
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

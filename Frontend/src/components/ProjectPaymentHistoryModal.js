@@ -112,7 +112,8 @@ export default function ProjectPaymentHistoryModal({
         recordedOnDate: defaultRecordedDate,
         recordedOnTime: defaultRecordedTime,
         recordedOn: `${defaultRecordedDate}, ${defaultRecordedTime}`,
-        notes: notes || ''
+        notes: notes || '',
+        addedBy: currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.name || currentUser.email : ''
       };
 
       await api.post('/payment-records', payload);
@@ -206,7 +207,8 @@ export default function ProjectPaymentHistoryModal({
         recordedOnDate: defaultRecordedDate,
         recordedOnTime: defaultRecordedTime,
         recordedOn: `${defaultRecordedDate}, ${defaultRecordedTime}`,
-        notes: `Marked as full payment by ${currentUser?.firstName || currentUser?.name || 'Admin'}`
+        notes: `Marked as full payment by ${currentUser?.firstName || currentUser?.name || 'Admin'}`,
+        addedBy: currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.name || currentUser.email : ''
       });
 
       await fetchRecords();
@@ -581,8 +583,36 @@ export default function ProjectPaymentHistoryModal({
                       <td style={{ color: '#475569', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {rec.notes || '—'}
                       </td>
-                      <td style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap' }}>
-                        {rec.createdBy ? `${rec.createdBy.firstName || ''} ${rec.createdBy.lastName || ''}`.trim() : (rec.recordedOnTime || 'Admin')}
+                      <td style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
+                        {(() => {
+                          const nameColors = [
+                            { bg: '#eff6ff', color: '#1e40af', border: '#bfdbfe' }, // Blue
+                            { bg: '#f5f3ff', color: '#5b21b6', border: '#e9d5ff' }, // Purple
+                            { bg: '#fdf2f8', color: '#9d174d', border: '#fbcfe8' }, // Pink
+                            { bg: '#fffbeb', color: '#92400e', border: '#fde68a' }, // Amber
+                            { bg: '#f0fdf4', color: '#065f46', border: '#bbf7d0' }, // Emerald
+                            { bg: '#fef2f2', color: '#991b1b', border: '#fca5a5' }, // Red
+                            { bg: '#f0fdfa', color: '#0f766e', border: '#99f6e4' }  // Teal
+                          ];
+                          const nameStr = rec.createdBy ? `${rec.createdBy.firstName || ''} ${rec.createdBy.lastName || ''}`.trim() || rec.createdBy.email : (rec.addedBy || 'Admin System');
+                          const colorIdx = nameStr.length > 0 ? nameStr.charCodeAt(0) % nameColors.length : 0;
+                          const c = nameColors[colorIdx];
+                          return (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '2px 8px',
+                              borderRadius: '999px',
+                              background: c.bg,
+                              color: c.color,
+                              border: `1px solid ${c.border}`,
+                              fontSize: '10.5px',
+                              fontWeight: 600
+                            }}>
+                              {nameStr}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <button

@@ -11,7 +11,7 @@ import {
   FileText, Shield, Wallet,
   Fingerprint, Landmark, Settings, Building2,
   LogOut, User, Menu, X, Handshake, Mail, TrendingUp, Activity, Bell, GitBranch,
-  ChevronsLeft, ChevronsRight, Store
+  ChevronsLeft, ChevronsRight, Store, Bot
 } from "lucide-react";
 
 function Navbar() {
@@ -359,6 +359,17 @@ function Navbar() {
                 title="My Leads"
               >
                 <UserCog size={20} /><span className="nav-label">Leads</span>
+              </Link>
+            )}
+
+            {hasPermission('ai-chats', 'read') && (
+              <Link
+                to={buildSemanticUrl(ROUTES.AI.CHATS)}
+                onClick={handleLinkClick}
+                className={`nav-item ${isRouteActive(ROUTES.AI.CHATS, ["/ai-chats"])}`}
+                title="AI Chats"
+              >
+                <Bot size={20} /><span className="nav-label">AI Chats</span>
               </Link>
             )}
 

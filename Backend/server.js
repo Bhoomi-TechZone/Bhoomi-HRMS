@@ -285,6 +285,7 @@ app.use("/api/webhooks", require("./routes/webhooks"));
 app.use("/api/webhook", require("./routes/webhooks")); // Alias for singular
 app.use("/api/meta-leads", require("./routes/meta-leads"));
 app.use("/api/website-leads", require("./routes/website-leads"));
+app.use("/api/ai-chats", require("./routes/ai-chats").router);
 app.use("/api/recruitment", require("./routes/recruitment"));
 app.use("/api/agent", require("./routes/agent"));
 app.use("/api/notifications", require("./routes/notifications"));

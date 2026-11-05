@@ -54,6 +54,7 @@ import MyLeads from "./components/MyLeads";
 import MarketingLeads from "./components/MarketingLeads";
 import Activities from "./components/Activities";
 import VendorManagement from "./components/VendorManagement";
+import AIChats from "./components/AIChats";
 import { ROUTES } from "./utils/routeUtils";
 
 // Wrapper component to show correct leads page based on role
@@ -398,6 +399,16 @@ function AppContent() {
           }
         />
 
+        {/* AI & Assistant */}
+        <Route
+          path="/ai-chats/conversation/overview"
+          element={
+            <PermissionRoute module="ai-chats">
+              <AIChats />
+            </PermissionRoute>
+          }
+        />
+
         {/* Workforce & HR */}
         <Route
           path="/employees/directory/overview"
@@ -581,6 +592,7 @@ function AppContent() {
         <Route path="/deals" element={<Navigate to={ROUTES.CRM.DEALS} replace />} />
         <Route path="/pipeline" element={<Navigate to={ROUTES.CRM.PIPELINE} replace />} />
         <Route path="/leads" element={<Navigate to={ROUTES.CRM.LEADS} replace />} />
+        <Route path="/ai-chats" element={<Navigate to={ROUTES.AI.CHATS} replace />} />
 
         <Route path="/employees" element={<Navigate to={ROUTES.WORKFORCE.EMPLOYEES} replace />} />
         <Route path="/roles" element={<Navigate to={ROUTES.WORKFORCE.ROLES} replace />} />

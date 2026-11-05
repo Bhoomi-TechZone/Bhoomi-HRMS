@@ -49,7 +49,10 @@ const DeleteIcon = () => (
 
 function ClientPayments() {
   const { user, hasPermission } = useAuth();
-  const isAdmin = user?.role?.name === 'Admin';
+  const roleName = ((user?.role && user.role.name) || user?.roleName || (typeof user?.role === 'string' ? user.role : '')).toLowerCase().trim();
+  const isAdmin = roleName === 'admin' || roleName === 'super admin' || roleName === 'superadmin' || roleName === 'director';
+  const accountsPerm = user?.role?.permissions?.find(p => p.module && p.module.toLowerCase().trim() === 'accounts');
+  const accountsViewScope = isAdmin ? 'public' : (accountsPerm?.viewScope?.toLowerCase().trim() || 'public');
   const canCreate = hasPermission?.('accounts', 'create');
   const canDelete = hasPermission?.('accounts', 'delete');
   const canEdit = hasPermission?.('accounts', 'update') || hasPermission?.('projects', 'update');
@@ -195,7 +198,7 @@ function ClientPayments() {
     setLoading(true);
     try {
       const [projectsRes, invoicesRes, paymentsRes] = await Promise.allSettled([
-        api.get('/projects'),
+        api.get('/projects?module=accounts'),
         api.get('/invoices'),
         api.get('/payment-records')
       ]);
@@ -226,7 +229,7 @@ function ClientPayments() {
         console.warn('Sync invoices error:', syncErr);
       }
 
-            // Merge dbInvoices and local storage so any newly created local invoices are always preserved
+      // Merge dbInvoices and local storage so any newly created local invoices are always preserved
       const mergedInvoices = [...dbInvoices];
       const knownNos = new Set(dbInvoices.map(i => String(i.invoiceNo || i.id || '').trim().toLowerCase()));
       try {
@@ -234,6 +237,15 @@ function ClientPayments() {
         if (Array.isArray(localRaw)) {
           localRaw.forEach(loc => {
             const locNo = String(loc.invoiceNo || loc.id || '').trim().toLowerCase();
+            if (accountsViewScope === 'private') {
+              const locCreatedBy = (loc.createdBy?._id || loc.createdBy || '').toString();
+              const userId = (user?._id || user?.id || '').toString();
+              const userName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim().toLowerCase();
+              const genBy = (loc.generatedBy || '').toLowerCase();
+              const isMine = (locCreatedBy && userId && locCreatedBy === userId) ||
+                (userName && genBy.includes(userName));
+              if (!isMine) return;
+            }
             if (locNo && !knownNos.has(locNo)) {
               mergedInvoices.push(loc);
               knownNos.add(locNo);
@@ -283,6 +295,43 @@ function ClientPayments() {
         } else {
           derivedPaymentStatus = 'Unpaid';
         }
+
+        // Determine username who added the payment record / project
+        const sortedLinkedRecords = [...linkedRecords].sort((a, b) => new Date(b.createdAt || b.paymentDate || 0) - new Date(a.createdAt || a.paymentDate || 0));
+        const latestRecord = sortedLinkedRecords[0];
+
+        let addedByStr = '';
+        let addedByUserObj = null;
+
+        if (latestRecord) {
+          if (latestRecord.createdBy && typeof latestRecord.createdBy === 'object') {
+            addedByUserObj = latestRecord.createdBy;
+            addedByStr = `${latestRecord.createdBy.firstName || ''} ${latestRecord.createdBy.lastName || ''}`.trim() || latestRecord.createdBy.email || '';
+          } else if (latestRecord.addedBy) {
+            addedByStr = latestRecord.addedBy;
+          }
+        }
+
+        if (!addedByStr && Array.isArray(project.paymentHistory) && project.paymentHistory.length > 0) {
+          const latestHistory = project.paymentHistory[project.paymentHistory.length - 1];
+          if (latestHistory?.recordedBy && typeof latestHistory.recordedBy === 'object') {
+            addedByUserObj = latestHistory.recordedBy;
+            addedByStr = `${latestHistory.recordedBy.firstName || ''} ${latestHistory.recordedBy.lastName || ''}`.trim() || latestHistory.recordedBy.email || '';
+          }
+        }
+
+        if (!addedByStr && project.createdBy) {
+          if (typeof project.createdBy === 'object') {
+            addedByUserObj = project.createdBy;
+            addedByStr = `${project.createdBy.firstName || ''} ${project.createdBy.lastName || ''}`.trim() || project.createdBy.email || '';
+          } else {
+            addedByStr = String(project.createdBy);
+          }
+        }
+
+        if (!addedByStr) {
+          addedByStr = project.addedBy || 'Admin System';
+        }
         
         return {
           id: project.projectId || `PRJ${String(index + 1).padStart(4, '0')}`,
@@ -306,6 +355,8 @@ function ClientPayments() {
           rate: baseAmount,
           totalAmount: baseAmount,
           paidAmount: paidAmount,
+          addedBy: addedByStr,
+          addedByUser: addedByUserObj,
           description: project.description || '',
           itemDetails: project.description || '',
           hsnSac: project.hsnSac || '9975',
@@ -315,7 +366,23 @@ function ClientPayments() {
         };
       });
 
-      setPaymentData(paymentsWithData);
+      let finalPayments = paymentsWithData;
+      if (accountsViewScope === 'private') {
+        const userId = (user?._id || user?.id || '').toString();
+        const userName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim().toLowerCase();
+        const userEmail = (user?.email || '').toLowerCase();
+
+        finalPayments = paymentsWithData.filter(p => {
+          const pCreatedBy = (p._id && p.createdBy?._id ? p.createdBy._id : (p.createdBy || '')).toString();
+          if (userId && pCreatedBy && userId === pCreatedBy) return true;
+          const addedByStr = (p.addedBy || '').toLowerCase();
+          if (userName && addedByStr.includes(userName)) return true;
+          if (userEmail && addedByStr.includes(userEmail)) return true;
+          return false;
+        });
+      }
+
+      setPaymentData(finalPayments);
 
       // Calculate previous month data for trend comparison
       const lastMonthStart = new Date();
@@ -366,6 +433,7 @@ function ClientPayments() {
       const id = String(payment.id || '').toLowerCase();
       const payStatus = String(payment.paymentStatus || '').toLowerCase();
       const projStatus = String(payment.projectStatus || '').toLowerCase();
+      const addedBy = String(payment.addedBy || '').toLowerCase();
 
       const matchesSearch = !query ||
         clientName.includes(query) ||
@@ -374,7 +442,8 @@ function ClientPayments() {
         projectName.includes(query) ||
         id.includes(query) ||
         payStatus.includes(query) ||
-        projStatus.includes(query);
+        projStatus.includes(query) ||
+        addedBy.includes(query);
 
       const matchesStatus = !statusFilter || statusFilter.toLowerCase() === 'all' || 
         payStatus === statusFilter.toLowerCase() ||
@@ -446,7 +515,8 @@ function ClientPayments() {
       'Paid Amount (₹)',
       'Due Amount (₹)',
       'Payment Status',
-      'Payment %'
+      'Payment %',
+      'Added By'
     ];
     const rows = filteredData.map(p => {
       const total = Math.round(p.totalAmount || 0);
@@ -465,7 +535,8 @@ function ClientPayments() {
         paid,
         due,
         paymentStatus,
-        pct + '%'
+        pct + '%',
+        p.addedBy || 'Admin System'
       ];
     });
 
@@ -551,8 +622,23 @@ function ClientPayments() {
       });
     });
 
+    if (accountsViewScope === 'private') {
+      const userId = (user?._id || user?.id || '').toString();
+      const userName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim().toLowerCase();
+      const userEmail = (user?.email || '').toLowerCase();
+
+      return result.filter(inv => {
+        const invCreatedBy = (inv.createdBy?._id || inv.createdBy || '').toString();
+        if (userId && invCreatedBy && userId === invCreatedBy) return true;
+        const genBy = (inv.generatedBy || '').toLowerCase();
+        if (userName && genBy.includes(userName)) return true;
+        if (userEmail && genBy.includes(userEmail)) return true;
+        return false;
+      });
+    }
+
     return result;
-  }, [customInvoices, paymentData]);
+  }, [customInvoices, paymentData, accountsViewScope, user]);
 
   // Filter and search invoices
   const filteredInvoices = useMemo(() => {
@@ -1707,21 +1793,22 @@ ${isDownload ? '' : `
         const defaultRecordedDate = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
         const defaultRecordedTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
 
-        await api.post('/payment-records', {
-          projectId: payment._id,
-          srNo: 1,
-          clientName: payment.clientName,
-          clientEmail: payment.email,
-          projectName: payment.projectName,
-          paidAmount: `₹ ${dueAmount.toLocaleString('en-IN')}`,
-          paymentMode: 'Bank Transfer',
-          paymentStatus: 'Paid',
-          paymentDate: defaultRecordedDate,
-          recordedOnDate: defaultRecordedDate,
-          recordedOnTime: defaultRecordedTime,
-          recordedOn: `${defaultRecordedDate}, ${defaultRecordedTime}`,
-          notes: `Marked as fully paid by ${user?.name || user?.firstName || 'Admin'}`
-        });
+          await api.post('/payment-records', {
+            projectId: payment._id,
+            srNo: 1,
+            clientName: payment.clientName,
+            clientEmail: payment.email,
+            projectName: payment.projectName,
+            paidAmount: `₹ ${dueAmount.toLocaleString('en-IN')}`,
+            paymentMode: 'Bank Transfer',
+            paymentStatus: 'Paid',
+            paymentDate: defaultRecordedDate,
+            recordedOnDate: defaultRecordedDate,
+            recordedOnTime: defaultRecordedTime,
+            recordedOn: `${defaultRecordedDate}, ${defaultRecordedTime}`,
+            notes: `Marked as fully paid by ${user?.name || user?.firstName || 'Admin'}`,
+            addedBy: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || user?.email || 'Admin System'
+          });
       }
 
       // Also ensure project paymentStatus and paidAmount are updated
@@ -1776,7 +1863,8 @@ ${isDownload ? '' : `
             recordedOnDate: defaultRecordedDate,
             recordedOnTime: defaultRecordedTime,
             recordedOn: `${defaultRecordedDate}, ${defaultRecordedTime}`,
-            notes: `Status changed to Paid by ${user?.name || user?.firstName || 'Admin'}`
+            notes: `Status changed to Paid by ${user?.name || user?.firstName || 'Admin'}`,
+            addedBy: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || user?.email || 'Admin System'
           });
         }
         updatePayload.paidAmount = total;
@@ -1869,7 +1957,8 @@ ${isDownload ? '' : `
         recordedOnDate: defaultRecordedDate,
         recordedOnTime: defaultRecordedTime,
         recordedOn: `${defaultRecordedDate}, ${defaultRecordedTime}`,
-        notes: paymentForm.notes || ''
+        notes: paymentForm.notes || '',
+        addedBy: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || user?.email || 'Admin System'
       });
 
       // 2. Update Project paidAmount
@@ -2784,13 +2873,14 @@ ${isDownload ? '' : `
                     <th style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Total Amount</th>
                     <th style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Paid Amount</th>
                     <th style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Due Amount</th>
+                    <th style={{ padding: '12px 14px', textAlign: 'left', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Added By</th>
                     <th style={{ padding: '12px 14px', textAlign: 'center', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap', fontSize: '11px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedData.length === 0 ? (
                     <tr>
-                      <td colSpan="10" style={{
+                      <td colSpan="11" style={{
                         padding: '40px 14px',
                         textAlign: 'center',
                         color: '#94a3b8',
@@ -2896,6 +2986,40 @@ ${isDownload ? '' : `
                           }}>
                             ₹{Math.round(Math.max(0, payment.totalAmount - payment.paidAmount)).toLocaleString()}
                           </span>
+                        </td>
+                        <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                          {(() => {
+                            const nameColors = [
+                              { bg: '#eff6ff', color: '#1e40af', border: '#bfdbfe' }, // Blue
+                              { bg: '#f5f3ff', color: '#5b21b6', border: '#e9d5ff' }, // Purple
+                              { bg: '#fdf2f8', color: '#9d174d', border: '#fbcfe8' }, // Pink
+                              { bg: '#fffbeb', color: '#92400e', border: '#fde68a' }, // Amber
+                              { bg: '#f0fdf4', color: '#065f46', border: '#bbf7d0' }, // Emerald
+                              { bg: '#fef2f2', color: '#991b1b', border: '#fca5a5' }, // Red
+                              { bg: '#f0fdfa', color: '#0f766e', border: '#99f6e4' }  // Teal
+                            ];
+                            const nameStr = payment.addedBy || 'Admin System';
+                            const colorIdx = nameStr.length > 0 ? nameStr.charCodeAt(0) % nameColors.length : 0;
+                            const c = nameColors[colorIdx];
+                            return (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  padding: '2.5px 9px',
+                                  borderRadius: '999px',
+                                  background: c.bg,
+                                  color: c.color,
+                                  border: `1px solid ${c.border}`,
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  fontFamily: "'Inter', sans-serif"
+                                }}
+                              >
+                                {nameStr}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td style={{ padding: '11px 14px', textAlign: 'center' }}>
                           <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', position: 'relative' }}>

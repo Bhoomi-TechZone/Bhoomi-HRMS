@@ -166,11 +166,20 @@ router.get('/', auth, async (req, res) => {
       }
     }
 
-    // Filter by assigned employee if provided
+    // Filter by assigned employee or team of employees if provided
     if (req.query.assignedTo) {
-      const empId = req.query.assignedTo;
-      const validEmpId = mongoose.Types.ObjectId.isValid(empId) ? new mongoose.Types.ObjectId(empId) : empId;
-      const empConditions = [{ assignedTo: validEmpId }, { createdBy: validEmpId }];
+      const raw = String(req.query.assignedTo).trim();
+      const empIdList = raw.includes(',')
+        ? raw.split(',').map(s => s.trim()).filter(Boolean)
+        : [raw];
+
+      const validObjIds = empIdList.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id));
+      const allIds = [...new Set([...validObjIds, ...empIdList])];
+
+      const empConditions = [
+        { assignedTo: { $in: allIds } },
+        { createdBy: { $in: allIds } }
+      ];
       if (query.$and) {
         query.$and.push({ $or: empConditions });
       } else if (query.$or) {
@@ -181,23 +190,34 @@ router.get('/', auth, async (req, res) => {
       }
     }
 
-    // Filter by date range if provided
+    // Filter by assign date range if provided
     if (req.query.startDate || req.query.endDate) {
       const dateCond = {};
       if (req.query.startDate) {
-        dateCond.$gte = new Date(req.query.startDate);
+        const start = new Date(req.query.startDate);
+        start.setHours(0, 0, 0, 0);
+        dateCond.$gte = start;
       }
       if (req.query.endDate) {
         const end = new Date(req.query.endDate);
         end.setHours(23, 59, 59, 999);
         dateCond.$lte = end;
       }
-      if (query.createdAt) {
+
+      const assignDateFilter = {
+        $or: [
+          { assignedDate: dateCond },
+          { assignedDate: { $in: [null, undefined] }, assignedTo: { $ne: null }, createdAt: dateCond }
+        ]
+      };
+
+      if (query.$or) {
         query.$and = query.$and || [];
-        query.$and.push({ createdAt: dateCond });
-      } else {
-        query.createdAt = dateCond;
+        query.$and.push({ $or: query.$or });
+        delete query.$or;
       }
+      query.$and = query.$and || [];
+      query.$and.push(assignDateFilter);
     }
 
     // Exclude leads moved to pipeline by default so they only appear in Deals in Pipeline
@@ -1374,6 +1394,21 @@ router.get('/followups/due', auth, async (req, res) => {
     console.error('Error fetching due follow-ups:', error);
     res.status(500).json({ message: 'Error fetching due follow-ups' });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WEBSITE AI CHATBOT WEBHOOK INTEGRATION
+// Exposes: POST /api/leads/webhook
+// ─────────────────────────────────────────────────────────────────────────────
+const { processWebhookPayload } = require('./ai-chats');
+router.post('/webhook', express.json(), processWebhookPayload);
+router.get('/webhook', (req, res) => {
+  res.json({
+    status: 'online',
+    endpoint: '/api/leads/webhook',
+    method: 'POST',
+    description: 'Bhoomi HRMS Website AI Assistant Webhook Receiver'
+  });
 });
 
 module.exports = router;

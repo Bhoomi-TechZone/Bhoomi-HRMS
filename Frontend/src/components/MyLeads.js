@@ -210,6 +210,9 @@ function MyLeads() {
   const [filterDate, setFilterDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
   const [filterEmployee, setFilterEmployee] = useState('');
+  const [filterTeamMgrId, setFilterTeamMgrId] = useState('');
+  const [empViewMode, setEmpViewMode] = useState('teams'); // 'teams' | 'employees'
+  const [expandedManagers, setExpandedManagers] = useState({});
   const [sortBy, setSortBy] = useState('newest');
 
   // ── Pagination ────────────────────────────────────────────────────────────
@@ -295,7 +298,7 @@ function MyLeads() {
   const modalFileInputRef = useRef(null);
   // ── Assign dropdown for Excel leads ──────────────────────────────────────
   const [openAssignDropdown, setOpenAssignDropdown] = useState(null); // leadId
-  const [assignDropPos, setAssignDropPos] = useState({ top: 0, left: 0 });
+  const [assignDropPos, setAssignDropPos] = useState({ top: null, bottom: null, left: 0 });
   const [assignSearch, setAssignSearch] = useState('');
   const assignDropdownRef = useRef(null);
   // ── Filter card dropdowns ─────────────────────────────────────────────────
@@ -304,15 +307,15 @@ function MyLeads() {
   const filterDropRef = useRef(null);
   // ── Inline row status card dropdowns ─────────────────────────────────────
   const [openStatusDrop, setOpenStatusDrop] = useState(null); // leadId
-  const [statusDropPos, setStatusDropPos] = useState({ top: 0, left: 0 });
+  const [statusDropPos, setStatusDropPos] = useState({ top: null, bottom: null, left: 0 });
   const statusDropRef = useRef(null);
   // ── Inline row leadType card dropdowns ─────────────────────────────────────
   const [openLeadTypeDrop, setOpenLeadTypeDrop] = useState(null); // leadId
-  const [leadTypeDropPos, setLeadTypeDropPos] = useState({ top: 0, left: 0 });
+  const [leadTypeDropPos, setLeadTypeDropPos] = useState({ top: null, bottom: null, left: 0 });
   const leadTypeDropRef = useRef(null);
   // ── Inline row action (3-dots) dropdown ──────────────────────────────────
   const [openActionMenuDrop, setOpenActionMenuDrop] = useState(null); // compositeId
-  const [actionMenuDropPos, setActionMenuDropPos] = useState({ top: 0, left: 0 });
+  const [actionMenuDropPos, setActionMenuDropPos] = useState({ top: null, bottom: null, left: 0 });
   const actionMenuDropRef = useRef(null);
   // ── Move to Pipeline Modal state ─────────────────────────────────────────
   const [showMovePipelineModal, setShowMovePipelineModal] = useState(false);
@@ -570,6 +573,23 @@ function MyLeads() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // Close open fixed row dropdowns on scroll outside the dropdown itself
+  useEffect(() => {
+    const handleScroll = (e) => {
+      if (assignDropdownRef.current && assignDropdownRef.current.contains(e.target)) return;
+      if (statusDropRef.current && statusDropRef.current.contains(e.target)) return;
+      if (leadTypeDropRef.current && leadTypeDropRef.current.contains(e.target)) return;
+      if (actionMenuDropRef.current && actionMenuDropRef.current.contains(e.target)) return;
+
+      if (openAssignDropdown) setOpenAssignDropdown(null);
+      if (openStatusDrop) setOpenStatusDrop(null);
+      if (openLeadTypeDrop) setOpenLeadTypeDrop(null);
+      if (openActionMenuDrop) setOpenActionMenuDrop(null);
+    };
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, [openAssignDropdown, openStatusDrop, openLeadTypeDrop, openActionMenuDrop]);
 
   const clampNotificationPosition = useCallback((x, y) => {
     const pad = 12;
@@ -912,6 +932,90 @@ function MyLeads() {
     return salesEmployees.filter(emp => String(emp._id || emp.id || '') === uid);
   }, [salesEmployees, isAdmin, leadsViewScope, teamMemberIds, user?._id, user?.id]);
 
+  // ── Active managers who are from sales role or manage sales employees ───
+  const salesManagers = useMemo(() => {
+    const managerReportsMap = new Map();
+    employees.forEach(emp => {
+      if (!emp.isActive && emp.isActive !== undefined) return;
+      const mgrId = emp.assignedManager?._id ? String(emp.assignedManager._id) : (emp.assignedManager ? String(emp.assignedManager) : null);
+      if (mgrId) {
+        if (!managerReportsMap.has(mgrId)) {
+          managerReportsMap.set(mgrId, []);
+        }
+        managerReportsMap.get(mgrId).push(emp);
+      }
+    });
+
+    const list = employees.filter(emp => {
+      if (!emp.isActive && emp.isActive !== undefined) return false;
+      const idStr = String(emp._id || emp.id || '');
+      const roleName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
+      const department = (emp.department || '').toLowerCase().trim();
+      const designation = (emp.designation || '').toLowerCase().trim();
+
+      const isSales =
+        roleName.includes('sales') ||
+        roleName.includes('business development') ||
+        roleName.includes('bde') ||
+        roleName.includes('telecaller') ||
+        department.includes('sales') ||
+        designation.includes('sales') ||
+        designation.includes('business development') ||
+        designation.includes('bde') ||
+        designation.includes('telecaller');
+
+      const reports = managerReportsMap.get(idStr) || [];
+      const hasReports = reports.length > 0;
+      const isMgrFlag = emp.isManager === true;
+      const isMgrTitle =
+        designation.includes('manager') ||
+        designation.includes('head') ||
+        designation.includes('lead') ||
+        roleName.includes('manager') ||
+        roleName.includes('head') ||
+        roleName.includes('lead');
+
+      const isMgr = isMgrFlag || isMgrTitle || hasReports;
+      if (!isMgr) return false;
+
+      // Must be sales role or manage sales employees
+      const managesSales = reports.some(r => {
+        const rRole = (typeof r.role === 'string' ? r.role : (r.role?.name || '')).toLowerCase();
+        const rDept = (r.department || '').toLowerCase();
+        const rDesig = (r.designation || '').toLowerCase();
+        return rRole.includes('sales') || rRole.includes('bde') || rDept.includes('sales') || rDesig.includes('sales') || rDesig.includes('bde');
+      });
+
+      return isSales || managesSales;
+    });
+
+    if (isAdmin || leadsViewScope === 'public') {
+      return list;
+    }
+    if (leadsViewScope === 'team') {
+      return list.filter(mgr => teamMemberIds.has(String(mgr._id || mgr.id || '')));
+    }
+    const uid = String(user?._id || user?.id || '');
+    return list.filter(mgr => String(mgr._id || mgr.id || '') === uid);
+  }, [employees, isAdmin, leadsViewScope, teamMemberIds, user?._id, user?.id]);
+
+  // Helper to get assigned team members for a manager
+  const getManagerTeam = useCallback((mgrId) => {
+    const idStr = String(mgrId);
+    return employees.filter(emp => {
+      if (!emp.isActive && emp.isActive !== undefined) return false;
+      const empMgrId = emp.assignedManager?._id ? String(emp.assignedManager._id) : (emp.assignedManager ? String(emp.assignedManager) : null);
+      return empMgrId === idStr && String(emp._id || emp.id) !== idStr;
+    });
+  }, [employees]);
+
+  // Helper to get all IDs in a manager's team (manager + their reports)
+  const getManagerTeamAllIds = useCallback((mgrId) => {
+    const team = getManagerTeam(mgrId);
+    const ids = [String(mgrId), ...team.map(t => String(t._id || t.id))];
+    return [...new Set(ids)];
+  }, [getManagerTeam]);
+
   // ── Base dataset for stats: scoped to user's permissions ──────────
   const statsLeads = useMemo(() => {
     const uid = String(user?._id || user?.id || '');
@@ -1140,10 +1244,12 @@ function MyLeads() {
 
   // ── Pagination calculations ──────────────────────────────────────────────
   const hasFilterApplied = !!(filterStatus || filterSource || filterEmployee || filterDate || filterEndDate || debouncedSearch);
-  const displayedTotal = hasFilterApplied ? filteredLeads.length : (totalLeadsCount || serverStats?.total || filteredLeads.length);
+  const displayedTotal = (totalLeadsCount !== undefined && totalLeadsCount !== null && totalLeadsCount > 0)
+    ? totalLeadsCount
+    : (filteredLeads.length > 0 ? filteredLeads.length : (hasFilterApplied ? 0 : (serverStats?.total || 0)));
   const totalPages = Math.max(1, Math.ceil(displayedTotal / leadsPerPage));
   const startIndex = (currentPage - 1) * leadsPerPage;
-  const isServerPaginated = totalLeadsCount > 0 && filteredLeads.length < displayedTotal && filteredLeads.length <= leadsPerPage;
+  const isServerPaginated = totalLeadsCount > 0 && (filteredLeads.length < displayedTotal || leadsPerPage < displayedTotal);
   const paginatedLeads = isServerPaginated ? filteredLeads : (filteredLeads.length <= leadsPerPage && startIndex === 0 ? filteredLeads : filteredLeads.slice(startIndex, startIndex + leadsPerPage));
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getStatusClass = (status) => ({
@@ -1528,7 +1634,7 @@ function MyLeads() {
 
   const clearFilters = () => {
     setSearchTerm(''); setFilterStatus(''); setFilterSource('');
-    setFilterDate(''); setFilterEndDate(''); setFilterEmployee(''); setSortBy('newest');
+    setFilterDate(''); setFilterEndDate(''); setFilterEmployee(''); setFilterTeamMgrId(''); setSortBy('newest');
     setCurrentPage(1);
   };
 
@@ -3772,24 +3878,68 @@ function MyLeads() {
               );
             })()}
 
-            {/* Employees — single-column refined card (hidden for regular employees) */}
+            {/* Teams & Employees filter dropdown (hidden for regular employees) */}
             {hasFullAccess && (() => {
-              const selectedEmp = filterEmployees.find(e => e._id === filterEmployee);
-              const label = selectedEmp ? `${selectedEmp.firstName} ${selectedEmp.lastName}` : 'All Employees';
-              const isActive = !!filterEmployee;
-              const filteredEmps = filterEmployees.filter(e => {
-                const name = `${e.firstName} ${e.lastName}`.toLowerCase();
-                return name.includes(filterEmpSearch.toLowerCase());
+              let label = empViewMode === 'teams' ? 'All Teams' : 'All Employees';
+              let isActive = false;
+              if (filterTeamMgrId) {
+                const mgr = employees.find(e => String(e._id) === String(filterTeamMgrId));
+                label = mgr ? `Team: ${mgr.firstName} ${mgr.lastName}` : 'Selected Team';
+                isActive = true;
+              } else if (filterEmployee) {
+                const emp = employees.find(e => String(e._id) === String(filterEmployee));
+                label = emp ? `${emp.firstName} ${emp.lastName}` : 'Selected Employee';
+                isActive = true;
+              }
+
+              const searchLower = filterEmpSearch.toLowerCase().trim();
+
+              const filteredManagers = salesManagers.filter(mgr => {
+                if (!searchLower) return true;
+                const mgrName = `${mgr.firstName} ${mgr.lastName}`.toLowerCase();
+                const mgrDesig = (mgr.designation || '').toLowerCase();
+                const team = getManagerTeam(mgr._id);
+                const hasMatchingMember = team.some(m => `${m.firstName} ${m.lastName}`.toLowerCase().includes(searchLower) || (m.designation || '').toLowerCase().includes(searchLower));
+                return mgrName.includes(searchLower) || mgrDesig.includes(searchLower) || hasMatchingMember;
               });
+
+              const filteredEmps = filterEmployees.filter(e => {
+                if (!searchLower) return true;
+                const name = `${e.firstName} ${e.lastName}`.toLowerCase();
+                const desig = (e.designation || '').toLowerCase();
+                return name.includes(searchLower) || desig.includes(searchLower);
+              });
+
               return (
                 <div style={{ position: 'relative', zIndex: openFilterDrop === 'employee' ? 101 : 'auto' }}>
                   <button
                     onClick={() => { setOpenFilterDrop(p => p === 'employee' ? null : 'employee'); setFilterEmpSearch(''); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 9px', border: `1px solid ${isActive ? '#3b775e' : '#e2e8f0'}`, borderRadius: '8px', fontSize: '11px', color: isActive ? '#3b775e' : '#475569', background: isActive ? '#f0fdf4' : '#fff', cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 500, transition: 'all 0.15s', whiteSpace: 'nowrap' }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '5px 10px',
+                      border: `1px solid ${isActive ? '#3b775e' : '#e2e8f0'}`,
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      color: isActive ? '#3b775e' : '#475569',
+                      background: isActive ? '#f0fdf4' : '#fff',
+                      cursor: 'pointer',
+                      fontFamily: "'Inter','Poppins','Segoe UI',sans-serif",
+                      fontWeight: 500,
+                      transition: 'all 0.15s',
+                      whiteSpace: 'nowrap'
+                    }}
                   >
+                    {filterTeamMgrId ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    ) : filterEmployee ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    ) : null}
                     {label}
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                   </button>
+
                   {openFilterDrop === 'employee' && (
                     <div style={{
                       position: 'absolute',
@@ -3799,41 +3949,114 @@ function MyLeads() {
                       background: '#fff',
                       border: '1px solid #e2e8f0',
                       borderRadius: '14px',
-                      boxShadow: '0 10px 35px rgba(15,23,42,0.15)',
+                      boxShadow: '0 12px 38px rgba(15,23,42,0.14)',
                       padding: '12px',
-                      width: '280px',
-                      maxWidth: '90vw'
+                      width: '320px',
+                      maxWidth: '92vw'
                     }}>
-                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', padding: '0 2px' }}>Sales Employees</div>
+                      {/* View mode toggle: All Teams vs All Employees */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: '4px',
+                        background: '#f1f5f9',
+                        padding: '3px',
+                        borderRadius: '10px',
+                        marginBottom: '10px'
+                      }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEmpViewMode('teams');
+                            setFilterEmpSearch('');
+                          }}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: '11.5px',
+                            fontWeight: empViewMode === 'teams' ? 600 : 500,
+                            color: empViewMode === 'teams' ? '#15803d' : '#64748b',
+                            background: empViewMode === 'teams' ? '#fff' : 'transparent',
+                            borderRadius: '8px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            boxShadow: empViewMode === 'teams' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '5px',
+                            transition: 'all 0.15s'
+                          }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                          All Teams
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEmpViewMode('employees');
+                            setFilterEmpSearch('');
+                          }}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: '11.5px',
+                            fontWeight: empViewMode === 'employees' ? 600 : 500,
+                            color: empViewMode === 'employees' ? '#15803d' : '#64748b',
+                            background: empViewMode === 'employees' ? '#fff' : 'transparent',
+                            borderRadius: '8px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            boxShadow: empViewMode === 'employees' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '5px',
+                            transition: 'all 0.15s'
+                          }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                          All Employees
+                        </button>
+                      </div>
+
+                      {/* Search box */}
                       <input
                         autoFocus
-                        placeholder="Search sales employees..."
+                        placeholder={empViewMode === 'teams' ? "Search sales managers & teams..." : "Search sales employees..."}
                         value={filterEmpSearch}
                         onChange={e => setFilterEmpSearch(e.target.value)}
-                        style={{ width: '100%', padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px', outline: 'none', marginBottom: '8px', boxSizing: 'border-box', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif" }}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          outline: 'none',
+                          marginBottom: '8px',
+                          boxSizing: 'border-box',
+                          fontFamily: "'Inter','Poppins','Segoe UI',sans-serif"
+                        }}
                       />
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '250px', overflowY: 'auto' }}>
-                        <button
-                          onClick={() => { setFilterEmployee(''); setOpenFilterDrop(null); setFilterEmpSearch(''); }}
-                          style={{ padding: '7px 10px', borderRadius: '8px', border: 'none', background: !filterEmployee ? '#f0fdf4' : 'transparent', color: !filterEmployee ? '#15803d' : '#475569', fontSize: '12px', fontWeight: !filterEmployee ? 700 : 400, cursor: 'pointer', textAlign: 'left', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", transition: 'background 0.12s' }}
-                          onMouseEnter={e => { if (filterEmployee) e.currentTarget.style.background = '#f0fdf4'; }}
-                          onMouseLeave={e => { if (filterEmployee) e.currentTarget.style.background = 'transparent'; }}
-                        >All Employees</button>
-                        {filteredEmps.map(emp => {
-                          const name = `${emp.firstName} ${emp.lastName}`;
-                          const active = filterEmployee === emp._id;
-                          return (
+
+                      {/* Dropdown Content */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '280px', overflowY: 'auto' }}>
+                        {empViewMode === 'teams' ? (
+                          <>
+                            {/* All Teams option button (above all employees / resets filters) */}
                             <button
-                              key={emp._id}
-                              onClick={() => { setFilterEmployee(emp._id); setOpenFilterDrop(null); setFilterEmpSearch(''); }}
+                              onClick={() => {
+                                setFilterEmployee('');
+                                setFilterTeamMgrId('');
+                                setOpenFilterDrop(null);
+                                setFilterEmpSearch('');
+                              }}
                               style={{
-                                padding: '7px 10px',
+                                padding: '8px 10px',
                                 borderRadius: '8px',
                                 border: 'none',
-                                background: active ? '#f0fdf4' : 'transparent',
-                                color: active ? '#15803d' : '#475569',
+                                background: (!filterEmployee && !filterTeamMgrId) ? '#f0fdf4' : 'transparent',
+                                color: (!filterEmployee && !filterTeamMgrId) ? '#15803d' : '#334155',
                                 fontSize: '12px',
-                                fontWeight: active ? 700 : 400,
+                                fontWeight: (!filterEmployee && !filterTeamMgrId) ? 700 : 500,
                                 cursor: 'pointer',
                                 textAlign: 'left',
                                 fontFamily: "'Inter','Poppins','Segoe UI',sans-serif",
@@ -3842,18 +4065,308 @@ function MyLeads() {
                                 alignItems: 'center',
                                 justifyContent: 'space-between'
                               }}
-                              onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#f8fafc'; }}
-                              onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                              onMouseEnter={e => { if (filterEmployee || filterTeamMgrId) e.currentTarget.style.background = '#f8fafc'; }}
+                              onMouseLeave={e => { if (filterEmployee || filterTeamMgrId) e.currentTarget.style.background = 'transparent'; }}
                             >
-                              <span>{name}</span>
-                              {emp.designation && <span style={{ fontSize: '10px', color: '#94a3b8' }}>{emp.designation}</span>}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ width: '22px', height: '22px', borderRadius: '6px', background: '#dcfce7', color: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700 }}>👥</span>
+                                <span>All Teams</span>
+                              </div>
+                              {(!filterEmployee && !filterTeamMgrId) && (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                              )}
                             </button>
-                          );
-                        })}
-                        {filteredEmps.length === 0 && (
-                          <div style={{ padding: '12px 8px', fontSize: '11.5px', color: '#94a3b8', textAlign: 'center' }}>
-                            No sales employees found
-                          </div>
+
+                            {/* Section header */}
+                            <div style={{
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              color: '#94a3b8',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.06em',
+                              marginTop: '6px',
+                              marginBottom: '4px',
+                              padding: '0 4px'
+                            }}>
+                              Sales Managers ({filteredManagers.length})
+                            </div>
+
+                            {/* Manager Cards with Accordion Team Expansion */}
+                            {filteredManagers.map(mgr => {
+                              const mgrId = String(mgr._id || mgr.id);
+                              const team = getManagerTeam(mgrId);
+                              const isExpanded = !!expandedManagers[mgrId] || !!(searchLower && team.length > 0);
+                              const isTeamSelected = filterTeamMgrId === mgrId;
+                              const mgrName = `${mgr.firstName} ${mgr.lastName}`;
+
+                              return (
+                                <div key={mgrId} style={{ borderRadius: '8px', border: isTeamSelected ? '1px solid #86efac' : '1px solid #f1f5f9', background: isTeamSelected ? '#f0fdf4' : '#fff', overflow: 'hidden', marginBottom: '3px' }}>
+                                  {/* Manager row */}
+                                  <div
+                                    onClick={() => {
+                                      setExpandedManagers(prev => ({ ...prev, [mgrId]: !prev[mgrId] }));
+                                    }}
+                                    style={{
+                                      padding: '7px 10px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      cursor: 'pointer',
+                                      background: isTeamSelected ? '#ecfdf5' : 'transparent',
+                                      transition: 'background 0.12s'
+                                    }}
+                                    onMouseEnter={e => { if (!isTeamSelected) e.currentTarget.style.background = '#f8fafc'; }}
+                                    onMouseLeave={e => { if (!isTeamSelected) e.currentTarget.style.background = 'transparent'; }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                                      <div style={{
+                                        width: '24px',
+                                        height: '24px',
+                                        borderRadius: '50%',
+                                        background: isTeamSelected ? '#15803d' : '#3b775e',
+                                        color: '#fff',
+                                        fontSize: '10px',
+                                        fontWeight: 700,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        flexShrink: 0
+                                      }}>
+                                        {mgr.firstName?.[0] || 'M'}
+                                      </div>
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: '12px', fontWeight: isTeamSelected ? 700 : 600, color: isTeamSelected ? '#15803d' : '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          {mgrName}
+                                        </div>
+                                        {mgr.designation && (
+                                          <div style={{ fontSize: '10px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                            {mgr.designation}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                      <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '10px', background: isTeamSelected ? '#dcfce7' : '#f1f5f9', color: isTeamSelected ? '#166534' : '#64748b', fontWeight: 600 }}>
+                                        {team.length} {team.length === 1 ? 'member' : 'members'}
+                                      </span>
+                                      <svg
+                                        width="12"
+                                        height="12"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="#94a3b8"
+                                        strokeWidth="2.5"
+                                        style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.18s' }}
+                                      >
+                                        <polyline points="6 9 12 15 18 9" />
+                                      </svg>
+                                    </div>
+                                  </div>
+
+                                  {/* Expanded team members */}
+                                  {isExpanded && (
+                                    <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '6px 8px 6px 12px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                      {/* Option to select entire team */}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const allTeamIds = getManagerTeamAllIds(mgrId);
+                                          setFilterEmployee(allTeamIds.join(','));
+                                          setFilterTeamMgrId(mgrId);
+                                          setOpenFilterDrop(null);
+                                          setFilterEmpSearch('');
+                                        }}
+                                        style={{
+                                          padding: '5px 8px',
+                                          borderRadius: '6px',
+                                          border: isTeamSelected ? '1px solid #86efac' : '1px dashed #cbd5e1',
+                                          background: isTeamSelected ? '#dcfce7' : '#fff',
+                                          color: isTeamSelected ? '#166534' : '#334155',
+                                          fontSize: '11px',
+                                          fontWeight: 600,
+                                          cursor: 'pointer',
+                                          textAlign: 'left',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          fontFamily: "'Inter','Poppins','Segoe UI',sans-serif"
+                                        }}
+                                      >
+                                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <span>👥</span>
+                                          <span>All {mgr.firstName}'s Team</span>
+                                        </span>
+                                        {isTeamSelected && (
+                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                        )}
+                                      </button>
+
+                                      {/* Individual team members */}
+                                      {team.map(member => {
+                                        const memId = String(member._id || member.id);
+                                        const isMemberActive = filterEmployee === memId && !filterTeamMgrId;
+                                        const memName = `${member.firstName} ${member.lastName}`;
+
+                                        return (
+                                          <button
+                                            key={memId}
+                                            type="button"
+                                            onClick={() => {
+                                              setFilterEmployee(memId);
+                                              setFilterTeamMgrId('');
+                                              setOpenFilterDrop(null);
+                                              setFilterEmpSearch('');
+                                            }}
+                                            style={{
+                                              padding: '5px 8px',
+                                              borderRadius: '6px',
+                                              border: 'none',
+                                              background: isMemberActive ? '#dcfce7' : 'transparent',
+                                              color: isMemberActive ? '#166534' : '#475569',
+                                              fontSize: '11px',
+                                              fontWeight: isMemberActive ? 700 : 400,
+                                              cursor: 'pointer',
+                                              textAlign: 'left',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'space-between',
+                                              fontFamily: "'Inter','Poppins','Segoe UI',sans-serif",
+                                              transition: 'background 0.1s'
+                                            }}
+                                            onMouseEnter={e => { if (!isMemberActive) e.currentTarget.style.background = '#e2e8f0'; }}
+                                            onMouseLeave={e => { if (!isMemberActive) e.currentTarget.style.background = 'transparent'; }}
+                                          >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                                              <span style={{ color: '#94a3b8', fontSize: '9px' }}>↳</span>
+                                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{memName}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                                              {member.designation && (
+                                                <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>{member.designation}</span>
+                                              )}
+                                              {isMemberActive && (
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                              )}
+                                            </div>
+                                          </button>
+                                        );
+                                      })}
+
+                                      {team.length === 0 && (
+                                        <div style={{ padding: '4px 6px', fontSize: '10.5px', color: '#94a3b8', fontStyle: 'italic' }}>
+                                          No team members assigned yet
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+
+                            {filteredManagers.length === 0 && (
+                              <div style={{ padding: '12px 8px', fontSize: '11.5px', color: '#94a3b8', textAlign: 'center' }}>
+                                No sales managers found
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {/* All Employees option button */}
+                            <button
+                              onClick={() => {
+                                setFilterEmployee('');
+                                setFilterTeamMgrId('');
+                                setOpenFilterDrop(null);
+                                setFilterEmpSearch('');
+                              }}
+                              style={{
+                                padding: '8px 10px',
+                                borderRadius: '8px',
+                                border: 'none',
+                                background: (!filterEmployee && !filterTeamMgrId) ? '#f0fdf4' : 'transparent',
+                                color: (!filterEmployee && !filterTeamMgrId) ? '#15803d' : '#334155',
+                                fontSize: '12px',
+                                fontWeight: (!filterEmployee && !filterTeamMgrId) ? 700 : 500,
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                fontFamily: "'Inter','Poppins','Segoe UI',sans-serif",
+                                transition: 'background 0.12s',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between'
+                              }}
+                              onMouseEnter={e => { if (filterEmployee || filterTeamMgrId) e.currentTarget.style.background = '#f8fafc'; }}
+                              onMouseLeave={e => { if (filterEmployee || filterTeamMgrId) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ width: '22px', height: '22px', borderRadius: '6px', background: '#dcfce7', color: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700 }}>👤</span>
+                                <span>All Employees</span>
+                              </div>
+                              {(!filterEmployee && !filterTeamMgrId) && (
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#15803d" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                              )}
+                            </button>
+
+                            {/* Section header */}
+                            <div style={{
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              color: '#94a3b8',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.06em',
+                              marginTop: '6px',
+                              marginBottom: '4px',
+                              padding: '0 4px'
+                            }}>
+                              Sales Employees ({filteredEmps.length})
+                            </div>
+
+                            {/* Flat Employee list */}
+                            {filteredEmps.map(emp => {
+                              const empId = String(emp._id || emp.id);
+                              const name = `${emp.firstName} ${emp.lastName}`;
+                              const active = filterEmployee === empId && !filterTeamMgrId;
+                              return (
+                                <button
+                                  key={empId}
+                                  onClick={() => {
+                                    setFilterEmployee(empId);
+                                    setFilterTeamMgrId('');
+                                    setOpenFilterDrop(null);
+                                    setFilterEmpSearch('');
+                                  }}
+                                  style={{
+                                    padding: '7px 10px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    background: active ? '#f0fdf4' : 'transparent',
+                                    color: active ? '#15803d' : '#475569',
+                                    fontSize: '12px',
+                                    fontWeight: active ? 700 : 400,
+                                    cursor: 'pointer',
+                                    textAlign: 'left',
+                                    fontFamily: "'Inter','Poppins','Segoe UI',sans-serif",
+                                    transition: 'background 0.12s',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between'
+                                  }}
+                                  onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#f8fafc'; }}
+                                  onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                                >
+                                  <span>{name}</span>
+                                  {emp.designation && <span style={{ fontSize: '10px', color: '#94a3b8' }}>{emp.designation}</span>}
+                                </button>
+                              );
+                            })}
+
+                            {filteredEmps.length === 0 && (
+                              <div style={{ padding: '12px 8px', fontSize: '11.5px', color: '#94a3b8', textAlign: 'center' }}>
+                                No sales employees found
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -3862,14 +4375,14 @@ function MyLeads() {
               );
             })()}
 
-            {/* Date */}
+            {/* Assign Date Filter */}
             {(() => {
               const label = filterDate && filterEndDate
-                ? `${new Date(filterDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} - ${new Date(filterEndDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                ? `${new Date(filterDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} - ${new Date(filterEndDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`
                 : filterDate
-                  ? `>= ${new Date(filterDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                  ? `>= ${new Date(filterDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`
                   : filterEndDate
-                    ? `<= ${new Date(filterEndDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                    ? `<= ${new Date(filterEndDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`
                     : 'Any Date';
               const isActive = !!filterDate || !!filterEndDate;
               return (
@@ -3878,19 +4391,23 @@ function MyLeads() {
                     onClick={() => { setOpenFilterDrop(p => p === 'date' ? null : 'date'); setFilterEmpSearch(''); }}
                     style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 9px', border: `1px solid ${isActive ? '#3b775e' : '#e2e8f0'}`, borderRadius: '8px', fontSize: '11px', color: isActive ? '#3b775e' : '#475569', background: isActive ? '#f0fdf4' : '#fff', cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 500, transition: 'all 0.15s', whiteSpace: 'nowrap' }}
                   >
-                    {label}
+                    {isActive ? `Assign: ${label}` : label}
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                   </button>
                   {openFilterDrop === 'date' && (
-                    <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 1000, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '14px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '12px', minWidth: '200px' }}>
-                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', padding: '0 2px' }}>Start Date</div>
+                    <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 1000, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '14px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '12px', minWidth: '220px' }}>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#3b775e', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', padding: '0 2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span>📅</span>
+                        <span>Assign Date Range</span>
+                      </div>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px', padding: '0 2px' }}>Start Date</div>
                       <input
                         type="date"
                         value={filterDate}
                         onChange={e => setFilterDate(e.target.value)}
                         style={{ width: '100%', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '12px', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", outline: 'none', marginBottom: '8px', boxSizing: 'border-box' }}
                       />
-                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', padding: '0 2px' }}>End Date</div>
+                      <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px', padding: '0 2px' }}>End Date</div>
                       <input
                         type="date"
                         value={filterEndDate}
@@ -3963,7 +4480,7 @@ function MyLeads() {
 
           </div>
 
-          {(searchTerm || filterStatus || filterSource || filterEmployee || filterDate || filterEndDate) && (
+          {(searchTerm || filterStatus || filterSource || filterEmployee || filterTeamMgrId || filterDate || filterEndDate) && (
             <button className="ist-btn-ghost" onClick={clearFilters} style={{ padding: '7px 12px', fontSize: '11px' }}>Clear</button>
           )}
 
@@ -4614,7 +5131,15 @@ function MyLeads() {
                               <button
                                 onClick={(e) => {
                                   const rect = e.currentTarget.getBoundingClientRect();
-                                  setLeadTypeDropPos({ top: rect.bottom + 5, left: rect.left });
+                                  const dropdownHeight = 160;
+                                  const spaceBelow = window.innerHeight - rect.bottom;
+                                  const spaceAbove = rect.top;
+                                  const openUpward = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+                                  setLeadTypeDropPos({
+                                    top: openUpward ? null : rect.bottom + 5,
+                                    bottom: openUpward ? window.innerHeight - rect.top + 5 : null,
+                                    left: Math.min(Math.max(10, rect.left), window.innerWidth - 150)
+                                  });
                                   setOpenLeadTypeDrop(p => p === lead._id ? null : lead._id);
                                 }}
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 7px', border: `1px solid ${cfg.border}`, borderRadius: '999px', fontSize: '10px', color: cfg.color, background: cfg.bg, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 700, whiteSpace: 'nowrap' }}
@@ -4627,7 +5152,7 @@ function MyLeads() {
                                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                               </button>
                               {openLeadTypeDrop === lead._id && (
-                                <div style={{ position: 'fixed', top: leadTypeDropPos.top, left: leadTypeDropPos.left, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '6px', minWidth: '130px' }}>
+                                <div style={{ position: 'fixed', ...(leadTypeDropPos.bottom != null ? { bottom: `${leadTypeDropPos.bottom}px` } : { top: `${leadTypeDropPos.top}px` }), left: `${leadTypeDropPos.left}px`, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '6px', minWidth: '130px' }}>
                                   {/* None / clear option */}
                                   <button
                                     onClick={() => {
@@ -4722,7 +5247,21 @@ function MyLeads() {
                           return (
                             <div ref={openAssignDropdown === lead._id ? assignDropdownRef : null} style={{ display: 'inline-block' }}>
                               <button
-                                onClick={(e) => { if (isDisabled) return; const rect = e.currentTarget.getBoundingClientRect(); setAssignDropPos({ top: rect.bottom + 4, left: rect.left }); setOpenAssignDropdown(openAssignDropdown === lead._id ? null : lead._id); setAssignSearch(''); }}
+                                onClick={(e) => {
+                                  if (isDisabled) return;
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  const dropdownHeight = 280;
+                                  const spaceBelow = window.innerHeight - rect.bottom;
+                                  const spaceAbove = rect.top;
+                                  const openUpward = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+                                  setAssignDropPos({
+                                    top: openUpward ? null : rect.bottom + 4,
+                                    bottom: openUpward ? window.innerHeight - rect.top + 4 : null,
+                                    left: Math.min(Math.max(10, rect.left), window.innerWidth - 235)
+                                  });
+                                  setOpenAssignDropdown(openAssignDropdown === lead._id ? null : lead._id);
+                                  setAssignSearch('');
+                                }}
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 7px', border: '1px solid #e2e8f0', borderRadius: '7px', background: '#fff', fontSize: '10px', fontWeight: 600, color: assignedEmp ? '#0f172a' : '#94a3b8', cursor: isDisabled ? 'not-allowed' : 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", opacity: isDisabled ? 0.6 : 1, whiteSpace: 'nowrap', maxWidth: '130px', overflow: 'hidden' }}
                               >
                                 {assignedEmp ? (
@@ -4736,7 +5275,7 @@ function MyLeads() {
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                               </button>
                               {openAssignDropdown === lead._id && (
-                                <div style={{ position: 'fixed', top: assignDropPos.top, left: assignDropPos.left, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 24px rgba(15,23,42,0.14)', width: '220px', overflow: 'hidden' }}>
+                                <div style={{ position: 'fixed', ...(assignDropPos.bottom != null ? { bottom: `${assignDropPos.bottom}px` } : { top: `${assignDropPos.top}px` }), left: `${assignDropPos.left}px`, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 24px rgba(15,23,42,0.14)', width: '220px', overflow: 'hidden' }}>
                                   <div style={{ padding: '8px 10px', borderBottom: '1px solid #f1f5f9' }}>
                                     <input
                                       autoFocus
@@ -4806,7 +5345,15 @@ function MyLeads() {
                             <button
                               onClick={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect();
-                                setStatusDropPos({ top: rect.bottom + 5, left: rect.left });
+                                const dropdownHeight = 250;
+                                const spaceBelow = window.innerHeight - rect.bottom;
+                                const spaceAbove = rect.top;
+                                const openUpward = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+                                setStatusDropPos({
+                                  top: openUpward ? null : rect.bottom + 5,
+                                  bottom: openUpward ? window.innerHeight - rect.top + 5 : null,
+                                  left: Math.min(Math.max(10, rect.left), window.innerWidth - 170)
+                                });
                                 setOpenStatusDrop(p => p === lead._id ? null : lead._id);
                               }}
                               style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 7px', border: `1px solid ${st.dot}`, borderRadius: '999px', fontSize: '10px', color: st.color, background: st.bg, cursor: 'pointer', fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", fontWeight: 600, whiteSpace: 'nowrap' }}
@@ -4816,7 +5363,7 @@ function MyLeads() {
                               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                             </button>
                             {openStatusDrop === lead._id && (
-                              <div style={{ position: 'fixed', top: statusDropPos.top, left: statusDropPos.left, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '6px', minWidth: '150px' }}>
+                              <div style={{ position: 'fixed', ...(statusDropPos.bottom != null ? { bottom: `${statusDropPos.bottom}px` } : { top: `${statusDropPos.top}px` }), left: `${statusDropPos.left}px`, zIndex: 9999, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 8px 32px rgba(15,23,42,0.13)', padding: '6px', minWidth: '150px' }}>
                                 {STATUS_OPTIONS.map(s => {
                                   const isCurrent = displayStatus === s;
                                   const optCfg = statusColors[s] || { bg: '#eff6ff', color: '#2563eb', dot: '#3b82f6' };
@@ -4974,8 +5521,13 @@ function MyLeads() {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     const rect = e.currentTarget.getBoundingClientRect();
+                                    const dropdownHeight = 200;
+                                    const spaceBelow = window.innerHeight - rect.bottom;
+                                    const spaceAbove = rect.top;
+                                    const openUpward = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
                                     setActionMenuDropPos({
-                                      top: rect.bottom + 5,
+                                      top: openUpward ? null : rect.bottom + 5,
+                                      bottom: openUpward ? window.innerHeight - rect.top + 5 : null,
                                       left: Math.max(10, rect.right - 155)
                                     });
                                     setOpenActionMenuDrop(prev => prev === compositeId ? null : compositeId);
@@ -4994,8 +5546,8 @@ function MyLeads() {
                                   <div
                                     style={{
                                       position: 'fixed',
-                                      top: actionMenuDropPos.top,
-                                      left: actionMenuDropPos.left,
+                                      ...(actionMenuDropPos.bottom != null ? { bottom: `${actionMenuDropPos.bottom}px` } : { top: `${actionMenuDropPos.top}px` }),
+                                      left: `${actionMenuDropPos.left}px`,
                                       zIndex: 9999,
                                       background: '#fff',
                                       border: '1px solid #e2e8f0',
