@@ -10,6 +10,7 @@ const Deal = require('../models/Deal');
 const Client = require('../models/Client');
 const User = require('../models/User');
 const metaService = require('../services/metaService');
+const { getModuleViewScope, getTeamUserIds } = require('../utils/roleAccess');
 
 // Cutoff timestamp: old Meta leads are strictly visible ONLY to Admin
 const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-17T00:00:00+05:30');
@@ -358,35 +359,39 @@ router.get('/', auth, async (req, res) => {
 
     const query = {};
 
-    // Only Sales Head, Sales Manager, and Admin see all new leads to assign them
+    // Role-based Meta lead access:
     const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
     const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
 
-    // Role-based Meta lead access:
-    // 1. Non-manager sales executives see all Meta leads assigned to them
-    // 2. Sales managers see all leads assigned to them + new Meta leads from cutoff date onwards
-    // 3. Admin sees all Meta leads
     const currentUserId = req.user?._id || req.user?.id;
     const validObjectId = (mongoose.Types.ObjectId.isValid(currentUserId))
       ? new mongoose.Types.ObjectId(currentUserId)
       : currentUserId;
 
-    if (!canSeeAllLeads) {
-      query.$or = [
-        { assignedTo: currentUserId },
-        { assignedTo: validObjectId }
-      ];
-    } else if (!isAdmin) {
-      query.$or = [
-        { assignedTo: currentUserId },
-        { assignedTo: validObjectId },
-        { createdTime: { $gte: DATA_CUTOFF_DATE } }
-      ];
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        query.$or = [
+          { assignedTo: currentUserId },
+          { assignedTo: validObjectId }
+        ];
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(currentUserId);
+        query.$or = [
+          { assignedTo: { $in: teamUserIds } }
+        ];
+      } else {
+        query.$or = [
+          { assignedTo: currentUserId },
+          { assignedTo: validObjectId },
+          { createdTime: { $gte: DATA_CUTOFF_DATE } }
+        ];
+      }
     }
 
     if (status) query.status = status;
     if (pageId) query.pageId = pageId;
-    if (assignedTo && canSeeAllLeads) query.assignedTo = assignedTo;
+    if (assignedTo && (isAdmin || viewScope === 'public' || viewScope === 'team')) query.assignedTo = assignedTo;
 
     // Exclude leads moved to pipeline by default so they only appear in Deals in Pipeline
     if (req.query.includeMoved !== 'true') {
@@ -470,11 +475,15 @@ router.get('/stats', auth, async (req, res) => {
     // Only Admin sees stats for old leads; others only see new data
     const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
     const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
     if (!isAdmin) {
       baseQuery.createdTime = { $gte: DATA_CUTOFF_DATE };
-    }
-    if (!canSeeAllLeads) {
-      baseQuery.assignedTo = req.user._id;
+      if (viewScope === 'private') {
+        baseQuery.assignedTo = req.user._id;
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(req.user._id);
+        baseQuery.assignedTo = { $in: teamUserIds };
+      }
     }
 
     if (pageId) baseQuery.pageId = pageId;
@@ -518,10 +527,18 @@ router.get('/stats', auth, async (req, res) => {
  */
 router.get('/source-stats', auth, async (req, res) => {
   try {
-    const roleName = req.user.role?.name;
-    const isAdmin = ['Admin', 'Director', 'HR'].includes(roleName);
+    const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
+    const { isAdmin } = getMetaLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
     const matchQuery = {};
-    if (!isAdmin) matchQuery.assignedTo = req.user._id;
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        matchQuery.assignedTo = req.user._id;
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(req.user._id);
+        matchQuery.assignedTo = { $in: teamUserIds };
+      }
+    }
 
     const stats = await MetaLead.aggregate([
       { $match: matchQuery },
@@ -601,15 +618,9 @@ router.get('/source-stats', auth, async (req, res) => {
  */
 router.get('/timeline', auth, async (req, res) => {
   try {
-    const roleName = (req.user.role?.name || '').toLowerCase();
-    const canSeeAllLeads =
-      roleName.includes('admin') ||
-      roleName.includes('director') ||
-      roleName.includes('hr') ||
-      roleName.includes('leader') ||
-      roleName.includes('team lead') ||
-      roleName.includes('head') ||
-      roleName.includes('manager');
+    const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
+    const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
 
     // Parse month param or default to current month
     const { month } = req.query;
@@ -627,7 +638,14 @@ router.get('/timeline', auth, async (req, res) => {
     const matchQuery = {
       createdTime: { $gte: startDate, $lte: endDate }
     };
-    if (!canSeeAllLeads) matchQuery.assignedTo = req.user._id;
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        matchQuery.assignedTo = req.user._id;
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(req.user._id);
+        matchQuery.assignedTo = { $in: teamUserIds };
+      }
+    }
 
     // Aggregate leads by day and source
     const [timelineMeta, timelineManual] = await Promise.all([
@@ -836,6 +854,7 @@ router.get('/followups/due', auth, async (req, res) => {
 
     const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
     const { canSeeAllLeads: canManageLeads, isAdmin } = getMetaLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
 
     const query = {
       followUpDate: { $ne: null, $lte: now },
@@ -845,8 +864,13 @@ router.get('/followups/due', auth, async (req, res) => {
     };
     if (!isAdmin) {
       query.createdTime = { $gte: DATA_CUTOFF_DATE };
+      if (viewScope === 'private') {
+        query.assignedTo = req.user._id;
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(req.user._id);
+        query.assignedTo = { $in: teamUserIds };
+      }
     }
-    if (!canManageLeads) query.assignedTo = req.user._id;
 
     const leads = await MetaLead.find(query)
       .populate('assignedTo', 'firstName lastName')
@@ -877,6 +901,7 @@ router.get('/:id', auth, async (req, res) => {
     // Non-admin roles cannot view old Meta leads
     const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
     const { canSeeAllLeads, isAdmin } = getMetaLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
     const isAssignee = String(lead.assignedTo?._id || lead.assignedTo) === String(req.user._id);
     if (!isAdmin && !isAssignee) {
       const leadTime = new Date(lead.createdTime || lead.createdAt || 0);
@@ -884,8 +909,18 @@ router.get('/:id', auth, async (req, res) => {
         return res.status(403).json({ message: 'Access denied. Old leads are only visible to Admin.' });
       }
     }
-    if (!canSeeAllLeads && !isAssignee) {
-      return res.status(403).json({ message: 'Access denied. This lead is not assigned to you.' });
+    if (!isAdmin) {
+      if (viewScope === 'private' && !isAssignee) {
+        return res.status(403).json({ message: 'Access denied. This lead is not assigned to you.' });
+      }
+      if (viewScope === 'team' && !isAssignee) {
+        const teamUserIds = await getTeamUserIds(req.user._id);
+        const teamIdStrings = teamUserIds.map(id => id.toString());
+        const leadAssignedToId = (lead.assignedTo?._id || lead.assignedTo || '').toString();
+        if (!teamIdStrings.includes(leadAssignedToId)) {
+          return res.status(403).json({ message: 'Access denied. This lead does not belong to your team.' });
+        }
+      }
     }
 
     res.json(lead);
@@ -936,14 +971,40 @@ router.patch('/:id', auth, async (req, res) => {
     const lead = await MetaLead.findById(req.params.id);
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
-    // Only Sales Head, Sales Manager, and Admin can assign and reassign leads
-    const { canAssign } = getMetaLeadRoleAccess(req.user);
-    if (!canAssign) {
-      if (String(lead.assignedTo) !== String(req.user._id)) {
-        return res.status(403).json({ message: 'Access denied. This lead is not assigned to you.' });
+    const user = req.user?.role?.name ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
+    const { canAssign, isAdmin } = getMetaLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
+    const isAssignee = String(lead.assignedTo?._id || lead.assignedTo) === String(req.user._id);
+
+    let hasScopeAccess = false;
+    if (isAdmin || viewScope === 'public') {
+      hasScopeAccess = true;
+    } else if (viewScope === 'team') {
+      if (isAssignee) {
+        hasScopeAccess = true;
+      } else {
+        const teamUserIds = await getTeamUserIds(req.user._id);
+        const teamIdStrings = teamUserIds.map(id => id.toString());
+        const leadAssignedToId = (lead.assignedTo?._id || lead.assignedTo || '').toString();
+        hasScopeAccess = teamIdStrings.includes(leadAssignedToId);
       }
-      if (assignedTo !== undefined && String(assignedTo) !== String(req.user._id)) {
-        return res.status(403).json({ message: 'You cannot reassign leads.' });
+    } else {
+      hasScopeAccess = isAssignee;
+    }
+
+    if (!hasScopeAccess) {
+      return res.status(403).json({ message: 'Access denied. You can only update your assigned or team leads.' });
+    }
+
+    if (!canAssign && assignedTo !== undefined && String(assignedTo) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'You cannot reassign leads.' });
+    }
+
+    if (assignedTo && viewScope === 'team' && !isAdmin) {
+      const teamUserIds = await getTeamUserIds(req.user._id);
+      const teamIdStrings = teamUserIds.map(id => id.toString());
+      if (!teamIdStrings.includes(String(assignedTo))) {
+        return res.status(403).json({ message: 'Access denied. You can only assign leads to your own team members.' });
       }
     }
 

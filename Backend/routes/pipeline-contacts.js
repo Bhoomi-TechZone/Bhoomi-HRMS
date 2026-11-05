@@ -9,6 +9,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { sendCrmNotification, sendAdminDataActivityNotification } = require('../utils/crmNotifier');
 const { notifyFollowUpScheduled, parseFollowUpDateTime } = require('../services/followupNotificationService');
+const { getModuleViewScope, getTeamUserIds } = require('../utils/roleAccess');
 
 // Cutoff timestamp: old pipeline data (before this cutoff) is strictly visible ONLY to Admin
 const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-17T00:00:00+05:30');
@@ -57,12 +58,11 @@ function checkAccess(user) {
 }
 
 // Helper to check if a specific contact is accessible to a user
-function isContactOwnedByUser(contact, user, hasFullAccess, isAdmin) {
-  if (isAdmin || hasFullAccess) return true;
+function isContactOwnedByUser(contact, user, hasFullAccess, isAdmin, teamUserIds = null, teamUsers = null) {
+  if (isAdmin) return true;
   if (!contact || !user) return false;
 
   const contactDate = new Date(contact.createdAt || 0);
-  if (contactDate < DATA_CUTOFF_DATE) return false;
 
   const userId = (user._id || user.id || '').toString();
   const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
@@ -80,27 +80,55 @@ function isContactOwnedByUser(contact, user, hasFullAccess, isAdmin) {
   if (userEmail && (contactEmail === userEmail || owner === userEmail || addedBy === userEmail)) return true;
   if (userOfficialEmail && (contactEmail === userOfficialEmail || owner === userOfficialEmail)) return true;
 
+  if (contactDate < DATA_CUTOFF_DATE) return false;
+
+  const viewScope = getModuleViewScope(user, 'pipeline');
+  if (viewScope === 'public') return true;
+  if (viewScope === 'team') {
+    if (Array.isArray(teamUserIds)) {
+      const teamIdStrings = teamUserIds.map(id => id.toString());
+      if (teamIdStrings.includes(assignedId) || teamIdStrings.includes(createdId)) return true;
+    }
+    if (Array.isArray(teamUsers)) {
+      const isTeamMatch = teamUsers.some(u => {
+        const fn = `${u.firstName || ''} ${u.lastName || ''}`.trim().toLowerCase();
+        return (fn && (owner === fn || addedBy === fn));
+      });
+      if (isTeamMatch) return true;
+    }
+  }
+
   return false;
 }
 
-// Filter activities: Admin, Sales Head, and Sales Manager see all activities.
-// Sales Executives and other non-full-access users only see follow-ups they personally created.
-function filterActivitiesForUser(activities, user, hasFullAccess) {
-  if (hasFullAccess || !Array.isArray(activities)) return activities;
+// Filter activities based on viewScope:
+// public -> all activities
+// team -> activities created/assigned to self or team
+// private -> activities created/assigned to self
+function filterActivitiesForUser(activities, user, hasFullAccess, viewScope = 'public', teamUserIds = null) {
+  if (viewScope === 'public' || !Array.isArray(activities)) return activities;
   const userId = (user._id || user.id || '').toString();
   const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
   const userEmail = (user.email || '').trim().toLowerCase();
   const userOfficialEmail = (user.officialEmail || '').trim().toLowerCase();
+  const teamIdStrings = Array.isArray(teamUserIds) ? teamUserIds.map(id => id.toString()) : [];
 
   return activities.filter(act => {
     if (act.type !== 'followup') return true;
     const creatorId = (act.createdBy?._id || act.createdBy || '').toString();
+    const assignedId = (act.assignedTo?._id || act.assignedTo || act.memberId || '').toString();
     const author = (act.author || '').trim().toLowerCase();
+    const memberName = (act.memberName || act.assignedToName || '').trim().toLowerCase();
 
-    if (userId && creatorId && creatorId === userId) return true;
-    if (userFullName && author === userFullName) return true;
-    if (userEmail && author === userEmail) return true;
-    if (userOfficialEmail && author === userOfficialEmail) return true;
+    if (userId && (creatorId === userId || assignedId === userId)) return true;
+    if (userFullName && (author === userFullName || memberName === userFullName)) return true;
+    if (userEmail && (author === userEmail || memberName === userEmail)) return true;
+    if (userOfficialEmail && (author === userOfficialEmail || memberName === userOfficialEmail)) return true;
+
+    if (viewScope === 'team') {
+      if (teamIdStrings.includes(creatorId) || teamIdStrings.includes(assignedId)) return true;
+    }
+
     return false;
   });
 }
@@ -154,28 +182,48 @@ router.get('/', auth, async (req, res) => {
       query.createdAt = { $lt: DATA_CUTOFF_DATE };
     }
 
-    // Data isolation: Sales Head, Sales Manager, and Admin see all new contacts; other roles only see their own
-    if (!hasFullAccess) {
-      const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-      const userEmail = (user.email || '').toLowerCase().trim();
-      const userOfficialEmail = (user.officialEmail || '').toLowerCase().trim();
+    // Data isolation based on viewScope ('public' | 'private' | 'team')
+    const viewScope = getModuleViewScope(user, 'pipeline');
 
-      const orConditions = [
-        { assignedTo: user._id },
-        { createdBy: user._id }
-      ];
-      if (userFullName) {
-        orConditions.push({ owner: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
-        orConditions.push({ addedBy: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
-      }
-      if (userEmail) {
-        orConditions.push({ email: userEmail });
-      }
-      if (userOfficialEmail) {
-        orConditions.push({ email: userOfficialEmail });
-      }
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        const userEmail = (user.email || '').toLowerCase().trim();
+        const userOfficialEmail = (user.officialEmail || '').toLowerCase().trim();
 
-      query.$or = orConditions;
+        const orConditions = [
+          { assignedTo: user._id },
+          { createdBy: user._id }
+        ];
+        if (userFullName) {
+          orConditions.push({ owner: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+          orConditions.push({ addedBy: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+        }
+        if (userEmail) {
+          orConditions.push({ email: userEmail });
+        }
+        if (userOfficialEmail) {
+          orConditions.push({ email: userOfficialEmail });
+        }
+
+        query.$or = orConditions;
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(user._id);
+        const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+        const teamFullNames = teamUsers.map(u => `${u.firstName || ''} ${u.lastName || ''}`.trim()).filter(Boolean);
+
+        const orConditions = [
+          { assignedTo: { $in: teamUserIds } },
+          { createdBy: { $in: teamUserIds } }
+        ];
+        if (teamFullNames.length > 0) {
+          teamFullNames.forEach(fn => {
+            orConditions.push({ owner: { $regex: new RegExp(`^${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+            orConditions.push({ addedBy: { $regex: new RegExp(`^${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+          });
+        }
+        query.$or = orConditions;
+      }
     }
 
     const contacts = await PipelineContact.find(query)
@@ -183,11 +231,16 @@ router.get('/', auth, async (req, res) => {
       .populate('createdBy', 'firstName lastName email')
       .sort({ createdAt: -1 });
 
-    const sanitizedContacts = (!hasFullAccess && Array.isArray(contacts))
+    let teamUserIds = null;
+    if (viewScope === 'team') {
+      teamUserIds = await getTeamUserIds(user._id);
+    }
+
+    const sanitizedContacts = (viewScope !== 'public' && !isAdmin && Array.isArray(contacts))
       ? contacts.map(c => {
           const cObj = c.toObject ? c.toObject() : { ...c };
           if (cObj.activities) {
-            cObj.activities = filterActivitiesForUser(cObj.activities, user, hasFullAccess);
+            cObj.activities = filterActivitiesForUser(cObj.activities, user, hasFullAccess, viewScope, teamUserIds);
           }
           return cObj;
         })
@@ -199,11 +252,15 @@ router.get('/', auth, async (req, res) => {
     try {
       // Fallback without populate if population schema has any issue
       const unpopulated = await PipelineContact.find(query).sort({ createdAt: -1 });
-      const sanitizedContacts = (!hasFullAccess && Array.isArray(unpopulated))
+      let teamUserIds = null;
+      if (viewScope === 'team') {
+        teamUserIds = await getTeamUserIds(user._id);
+      }
+      const sanitizedContacts = (viewScope !== 'public' && !isAdmin && Array.isArray(unpopulated))
         ? unpopulated.map(c => {
             const cObj = c.toObject ? c.toObject() : { ...c };
             if (cObj.activities) {
-              cObj.activities = filterActivitiesForUser(cObj.activities, user, hasFullAccess);
+              cObj.activities = filterActivitiesForUser(cObj.activities, user, hasFullAccess, viewScope, teamUserIds);
             }
             return cObj;
           })
@@ -237,7 +294,9 @@ router.get('/:id', auth, async (req, res) => {
     }
 
     // Role data isolation check
-    if (!isContactOwnedByUser(contact, user, hasFullAccess, isAdmin)) {
+    const teamUserIds = await getTeamUserIds(user._id);
+    const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+    if (!isContactOwnedByUser(contact, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only view your own contacts.' });
     }
 
@@ -1108,7 +1167,9 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    if (!isContactOwnedByUser(contact, user, hasFullAccess, isAdmin)) {
+    const teamUserIds = await getTeamUserIds(user._id);
+    const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+    if (!isContactOwnedByUser(contact, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only update your own contacts.' });
     }
 
@@ -1209,7 +1270,9 @@ router.delete('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    if (!isContactOwnedByUser(contact, user, hasFullAccess, isAdmin)) {
+    const teamUserIds = await getTeamUserIds(user._id);
+    const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+    if (!isContactOwnedByUser(contact, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only delete your own contacts.' });
     }
 
@@ -1255,7 +1318,9 @@ router.post('/:id/activities', auth, async (req, res) => {
       return res.status(404).json({ message: 'Contact not found' });
     }
 
-    if (!isContactOwnedByUser(contact, user, hasFullAccess, isAdmin)) {
+    const teamUserIds = await getTeamUserIds(user._id);
+    const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+    if (!isContactOwnedByUser(contact, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only add activities to your own contacts.' });
     }
 

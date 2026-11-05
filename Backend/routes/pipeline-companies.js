@@ -5,6 +5,7 @@ const PipelineCompany = require('../models/PipelineCompany');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
+const { getModuleViewScope, getTeamUserIds } = require('../utils/roleAccess');
 
 // Helper for checking role permissions and data access levels
 // Cutoff timestamp: old pipeline data (before this cutoff) is strictly visible ONLY to Admin
@@ -53,14 +54,15 @@ function checkAccess(user) {
 }
 
 // Helper to check if a specific company is accessible to a user
-function isCompanyOwnedByUser(company, user, hasFullAccess, isAdmin) {
+function isCompanyOwnedByUser(company, user, hasFullAccess, isAdmin, teamUserIds = null, teamUsers = null) {
   if (isAdmin) return true;
   if (!company || !user) return false;
 
   const companyDate = new Date(company.createdAt || 0);
   if (companyDate < DATA_CUTOFF_DATE) return false;
 
-  if (hasFullAccess) return true;
+  const viewScope = getModuleViewScope(user, 'pipeline');
+  if (viewScope === 'public') return true;
 
   const userId = (user._id || user.id || '').toString();
   const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
@@ -73,6 +75,20 @@ function isCompanyOwnedByUser(company, user, hasFullAccess, isAdmin) {
   if (userId && (assignedId === userId || createdId === userId)) return true;
   if (userFullName && owner === userFullName) return true;
   if (userEmail && owner === userEmail) return true;
+
+  if (viewScope === 'team' && Array.isArray(teamUserIds)) {
+    const teamIdStrings = teamUserIds.map(id => id.toString());
+    if (teamIdStrings.includes(assignedId) || teamIdStrings.includes(createdId)) return true;
+
+    if (Array.isArray(teamUsers)) {
+      const isTeamMatch = teamUsers.some(u => {
+        const fn = `${u.firstName || ''} ${u.lastName || ''}`.trim().toLowerCase();
+        const em = (u.email || '').toLowerCase().trim();
+        return (fn && owner === fn) || (em && owner === em);
+      });
+      if (isTeamMatch) return true;
+    }
+  }
 
   return false;
 }
@@ -95,10 +111,6 @@ router.get('/', auth, async (req, res) => {
     const dataViewMode = (req.query.dataViewMode || '').toLowerCase().trim();
 
     // Data filtering by cutoff:
-    // If not admin, strictly only see data from 17 OCT 2026 onwards
-    // If admin and dataViewMode === 'new', only see data >= DATA_CUTOFF_DATE
-    // If admin and dataViewMode === 'old', only see data < DATA_CUTOFF_DATE
-    // If admin and dataViewMode === 'all' (or not specified), see all data
     if (!isAdmin) {
       query.createdAt = { $gte: DATA_CUTOFF_DATE };
     } else if (dataViewMode === 'new') {
@@ -107,23 +119,47 @@ router.get('/', auth, async (req, res) => {
       query.createdAt = { $lt: DATA_CUTOFF_DATE };
     }
 
-    // Data isolation: Sales Head, Sales Manager, and Admin see all new companies; other roles only see their own
-    if (!hasFullAccess) {
-      const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-      const userEmail = (user.email || '').toLowerCase().trim();
+    // Data isolation based on viewScope ('public' | 'private' | 'team')
+    const viewScope = getModuleViewScope(user, 'pipeline');
 
-      const orConditions = [
-        { assignedTo: user._id },
-        { createdBy: user._id }
-      ];
-      if (userFullName) {
-        orConditions.push({ owner: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
-      }
-      if (userEmail) {
-        orConditions.push({ owner: userEmail });
-      }
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        const userEmail = (user.email || '').toLowerCase().trim();
 
-      query.$or = orConditions;
+        const orConditions = [
+          { assignedTo: user._id },
+          { createdBy: user._id }
+        ];
+        if (userFullName) {
+          orConditions.push({ owner: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+        }
+        if (userEmail) {
+          orConditions.push({ owner: userEmail });
+        }
+
+        query.$or = orConditions;
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(user._id);
+        const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+        const teamFullNames = teamUsers.map(u => `${u.firstName || ''} ${u.lastName || ''}`.trim()).filter(Boolean);
+        const teamEmails = teamUsers.map(u => (u.email || '').toLowerCase().trim()).filter(Boolean);
+
+        const orConditions = [
+          { assignedTo: { $in: teamUserIds } },
+          { createdBy: { $in: teamUserIds } }
+        ];
+        if (teamFullNames.length > 0) {
+          teamFullNames.forEach(fn => {
+            orConditions.push({ owner: { $regex: new RegExp(`^${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+          });
+        }
+        if (teamEmails.length > 0) {
+          orConditions.push({ owner: { $in: teamEmails } });
+        }
+
+        query.$or = orConditions;
+      }
     }
 
     const companies = await PipelineCompany.find(query)
@@ -159,7 +195,15 @@ router.get('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Company not found' });
     }
 
-    if (!isCompanyOwnedByUser(company, user, hasFullAccess, isAdmin)) {
+    const viewScope = getModuleViewScope(user, 'pipeline');
+    let teamUserIds = null;
+    let teamUsers = null;
+    if (viewScope === 'team') {
+      teamUserIds = await getTeamUserIds(user._id);
+      teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+    }
+
+    if (!isCompanyOwnedByUser(company, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only view your own companies.' });
     }
 
@@ -258,7 +302,15 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Company not found' });
     }
 
-    if (!isCompanyOwnedByUser(company, user, hasFullAccess, isAdmin)) {
+    const viewScope = getModuleViewScope(user, 'pipeline');
+    let teamUserIds = null;
+    let teamUsers = null;
+    if (viewScope === 'team') {
+      teamUserIds = await getTeamUserIds(user._id);
+      teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+    }
+
+    if (!isCompanyOwnedByUser(company, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only update your own companies.' });
     }
 
@@ -327,7 +379,15 @@ router.delete('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Company not found' });
     }
 
-    if (!isCompanyOwnedByUser(company, user, hasFullAccess, isAdmin)) {
+    const viewScope = getModuleViewScope(user, 'pipeline');
+    let teamUserIds = null;
+    let teamUsers = null;
+    if (viewScope === 'team') {
+      teamUserIds = await getTeamUserIds(user._id);
+      teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+    }
+
+    if (!isCompanyOwnedByUser(company, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only delete your own companies.' });
     }
 

@@ -9,6 +9,7 @@ const MetaLead = require('../models/MetaLead');
 const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
 const { notifyFollowUpScheduled, parseFollowUpDateTime } = require('../services/followupNotificationService');
+const { getModuleViewScope, getTeamUserIds } = require('../utils/roleAccess');
 
 // Helper to safely parse dates (supports DD-MM-YYYY, ISO strings, timestamps)
 function parseDate(val) {
@@ -90,14 +91,16 @@ function checkAccess(user) {
 }
 
 // Helper to check if a specific deal is accessible to a user
-function isDealOwnedByUser(deal, user, hasFullAccess, isAdmin) {
-  if (isAdmin || hasFullAccess) return true;
+function isDealOwnedByUser(deal, user, hasFullAccess, isAdmin, teamUserIds = null, teamUsers = null) {
+  if (isAdmin) return true;
   if (!deal || !user) return false;
 
   // Non-privileged users cannot access deals before cutoff
   const dealDate = new Date(deal.createdAt || 0);
   if (dealDate < DATA_CUTOFF_DATE) return false;
-  if (!deal || !user) return false;
+
+  const viewScope = getModuleViewScope(user, 'pipeline');
+  if (viewScope === 'public') return true;
 
   const userId = (user._id || user.id || '').toString();
   const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
@@ -110,32 +113,58 @@ function isDealOwnedByUser(deal, user, hasFullAccess, isAdmin) {
   const addedBy = (deal.addedBy || '').trim().toLowerCase();
   const dealEmail = (deal.email || '').trim().toLowerCase();
 
+  // Direct ownership
   if (userId && (assignedId === userId || createdId === userId)) return true;
   if (userFullName && (salesOwner === userFullName || addedBy === userFullName)) return true;
   if (userEmail && (dealEmail === userEmail || salesOwner === userEmail || addedBy === userEmail)) return true;
   if (userOfficialEmail && (dealEmail === userOfficialEmail || salesOwner === userOfficialEmail)) return true;
 
+  // Team ownership
+  if (viewScope === 'team' && Array.isArray(teamUserIds)) {
+    const teamIdStrings = teamUserIds.map(id => id.toString());
+    if (teamIdStrings.includes(assignedId) || teamIdStrings.includes(createdId)) return true;
+
+    if (Array.isArray(teamUsers)) {
+      const isTeamMatch = teamUsers.some(u => {
+        const fn = `${u.firstName || ''} ${u.lastName || ''}`.trim().toLowerCase();
+        const em = (u.email || '').toLowerCase().trim();
+        const offEm = (u.officialEmail || '').toLowerCase().trim();
+        return (fn && (salesOwner === fn || addedBy === fn)) ||
+          (em && (dealEmail === em || salesOwner === em || addedBy === em)) ||
+          (offEm && (dealEmail === offEm || salesOwner === offEm));
+      });
+      if (isTeamMatch) return true;
+    }
+  }
+
   return false;
 }
 
-// Filter activities: Admin, Sales Head, and Sales Manager see all activities.
-// Sales Executives and other non-full-access users only see follow-ups they personally created.
-function filterActivitiesForUser(activities, user, hasFullAccess) {
-  if (hasFullAccess || !Array.isArray(activities)) return activities;
+// Filter activities based on user's viewScope
+function filterActivitiesForUser(activities, user, hasFullAccess, viewScope = 'public', teamUserIds = null) {
+  if (viewScope === 'public' || !Array.isArray(activities)) return activities;
   const userId = (user._id || user.id || '').toString();
   const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
   const userEmail = (user.email || '').trim().toLowerCase();
   const userOfficialEmail = (user.officialEmail || '').trim().toLowerCase();
+  const teamIdStrings = Array.isArray(teamUserIds) ? teamUserIds.map(id => id.toString()) : [];
 
   return activities.filter(act => {
     if (act.type !== 'followup') return true;
     const creatorId = (act.createdBy?._id || act.createdBy || '').toString();
+    const assignedId = (act.assignedTo?._id || act.assignedTo || act.memberId || '').toString();
     const author = (act.author || '').trim().toLowerCase();
+    const memberName = (act.memberName || act.assignedToName || '').trim().toLowerCase();
 
-    if (userId && creatorId && creatorId === userId) return true;
-    if (userFullName && author === userFullName) return true;
-    if (userEmail && author === userEmail) return true;
-    if (userOfficialEmail && author === userOfficialEmail) return true;
+    if (userId && (creatorId === userId || assignedId === userId)) return true;
+    if (userFullName && (author === userFullName || memberName === userFullName)) return true;
+    if (userEmail && (author === userEmail || memberName === userEmail)) return true;
+    if (userOfficialEmail && (author === userOfficialEmail || memberName === userOfficialEmail)) return true;
+
+    if (viewScope === 'team') {
+      if (teamIdStrings.includes(creatorId) || teamIdStrings.includes(assignedId)) return true;
+    }
+
     return false;
   });
 }
@@ -169,45 +198,76 @@ router.get('/', auth, async (req, res) => {
       query.createdAt = { $lt: DATA_CUTOFF_DATE };
     }
 
-    // Data isolation: Sales Head, Sales Manager, and Admin see all new deals; other roles only see their own
-    if (!hasFullAccess) {
-      const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-      const userEmail = (user.email || '').toLowerCase().trim();
-      const userOfficialEmail = (user.officialEmail || '').toLowerCase().trim();
+    // Data isolation based on viewScope ('public' | 'private' | 'team')
+    const viewScope = getModuleViewScope(user, 'pipeline');
+    let teamUserIds = null;
+    let teamUsers = null;
 
-      const orConditions = [
-        { assignedTo: user._id },
-        { createdBy: user._id }
-      ];
-      if (userFullName) {
-        orConditions.push({ salesOwner: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
-        orConditions.push({ addedBy: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
-      }
-      if (userEmail) {
-        orConditions.push({ email: userEmail });
-      }
-      if (userOfficialEmail) {
-        orConditions.push({ email: userOfficialEmail });
-      }
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        const userEmail = (user.email || '').toLowerCase().trim();
+        const userOfficialEmail = (user.officialEmail || '').toLowerCase().trim();
 
-      query.$or = orConditions;
+        const orConditions = [
+          { assignedTo: user._id },
+          { createdBy: user._id }
+        ];
+        if (userFullName) {
+          orConditions.push({ salesOwner: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+          orConditions.push({ addedBy: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+        }
+        if (userEmail) {
+          orConditions.push({ email: userEmail });
+        }
+        if (userOfficialEmail) {
+          orConditions.push({ email: userOfficialEmail });
+        }
+
+        query.$or = orConditions;
+      } else if (viewScope === 'team') {
+        teamUserIds = await getTeamUserIds(user._id);
+        teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email officialEmail');
+        const teamFullNames = teamUsers.map(u => `${u.firstName || ''} ${u.lastName || ''}`.trim()).filter(Boolean);
+        const teamEmails = teamUsers.map(u => (u.email || '').toLowerCase().trim()).filter(Boolean);
+        const teamOfficialEmails = teamUsers.map(u => (u.officialEmail || '').toLowerCase().trim()).filter(Boolean);
+
+        const orConditions = [
+          { assignedTo: { $in: teamUserIds } },
+          { createdBy: { $in: teamUserIds } }
+        ];
+        if (teamFullNames.length > 0) {
+          teamFullNames.forEach(fn => {
+            orConditions.push({ salesOwner: { $regex: new RegExp(`^${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+            orConditions.push({ addedBy: { $regex: new RegExp(`^${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+          });
+        }
+        if (teamEmails.length > 0) {
+          orConditions.push({ email: { $in: teamEmails } });
+        }
+        if (teamOfficialEmails.length > 0) {
+          orConditions.push({ email: { $in: teamOfficialEmails } });
+        }
+
+        query.$or = orConditions;
+      }
     }
 
     // Filter by pipeline if provided
     if (req.query.pipeline) {
       query.pipeline = req.query.pipeline;
     }
-    
+
     // Filter by stage if provided
     if (req.query.stage && req.query.stage !== 'all') {
       query.stage = req.query.stage;
     }
-    
+
     // Filter by source if provided
     if (req.query.source && req.query.source !== 'all') {
       query.source = req.query.source;
     }
-    
+
     try {
       const deals = await Deal.find(query)
         .populate('assignedTo', 'firstName lastName email officialEmail employeeId designation department phone alternatePhone isActive role')
@@ -216,27 +276,27 @@ router.get('/', auth, async (req, res) => {
         .populate('relatedMetaLead', 'phone notes businessCategory fieldData')
         .sort({ createdAt: -1 });
 
-      const sanitizedDeals = (!hasFullAccess && Array.isArray(deals))
+      const sanitizedDeals = (!isAdmin && viewScope !== 'public' && Array.isArray(deals))
         ? deals.map(d => {
-            const dObj = d.toObject ? d.toObject() : { ...d };
-            if (dObj.activities) {
-              dObj.activities = filterActivitiesForUser(dObj.activities, user, hasFullAccess);
-            }
-            return dObj;
-          })
+          const dObj = d.toObject ? d.toObject() : { ...d };
+          if (dObj.activities) {
+            dObj.activities = filterActivitiesForUser(dObj.activities, user, hasFullAccess, viewScope, teamUserIds);
+          }
+          return dObj;
+        })
         : deals;
 
       res.json(sanitizedDeals || []);
     } catch (popError) {
       const unpopulated = await Deal.find(query).sort({ createdAt: -1 });
-      const sanitizedDeals = (!hasFullAccess && Array.isArray(unpopulated))
+      const sanitizedDeals = (!isAdmin && viewScope !== 'public' && Array.isArray(unpopulated))
         ? unpopulated.map(d => {
-            const dObj = d.toObject ? d.toObject() : { ...d };
-            if (dObj.activities) {
-              dObj.activities = filterActivitiesForUser(dObj.activities, user, hasFullAccess);
-            }
-            return dObj;
-          })
+          const dObj = d.toObject ? d.toObject() : { ...d };
+          if (dObj.activities) {
+            dObj.activities = filterActivitiesForUser(dObj.activities, user, hasFullAccess, viewScope, teamUserIds);
+          }
+          return dObj;
+        })
         : unpopulated;
       res.json(sanitizedDeals || []);
     }
@@ -269,19 +329,27 @@ router.get('/:id', auth, async (req, res) => {
     } catch (e) {
       deal = await Deal.findById(req.params.id);
     }
-    
+
     if (!deal) {
       return res.status(404).json({ message: 'Deal not found' });
     }
 
     // Role data isolation check
-    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin)) {
+    const viewScope = getModuleViewScope(user, 'pipeline');
+    let teamUserIds = null;
+    let teamUsers = null;
+    if (viewScope === 'team') {
+      teamUserIds = await getTeamUserIds(user._id);
+      teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email officialEmail');
+    }
+
+    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only view your own deals.' });
     }
-    
-    if (!hasFullAccess && deal.activities) {
+
+    if (!isAdmin && viewScope !== 'public' && deal.activities) {
       const dealObj = deal.toObject ? deal.toObject() : { ...deal };
-      dealObj.activities = filterActivitiesForUser(dealObj.activities, user, hasFullAccess);
+      dealObj.activities = filterActivitiesForUser(dealObj.activities, user, hasFullAccess, viewScope, teamUserIds);
       return res.json(dealObj);
     }
 
@@ -327,7 +395,7 @@ router.post('/', auth, async (req, res) => {
       notes,
       assignedTo
     } = req.body;
-    
+
     let validAssignedTo = parseObjectId(assignedTo, null);
     const validCreatedBy = parseObjectId(req.user?._id, null);
     const parsedCloseDate = parseDate(expectedCloseDate);
@@ -371,9 +439,9 @@ router.post('/', auth, async (req, res) => {
       createdBy: validCreatedBy,
       addedBy: req.body.addedBy || (req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() : '') || 'Admin'
     });
-    
+
     await deal.save();
-    
+
     // Trigger CRM notification
     try {
       const io = req.app.get('socketio');
@@ -389,7 +457,7 @@ router.post('/', auth, async (req, res) => {
     } catch (notifErr) {
       console.error('Deal create notification error:', notifErr);
     }
-    
+
     try {
       const populatedDeal = await Deal.findById(deal._id)
         .populate('assignedTo', 'firstName lastName email employeeId')
@@ -422,10 +490,18 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Deal not found' });
     }
 
-    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin)) {
+    const viewScope = getModuleViewScope(user, 'pipeline');
+    let teamUserIds = null;
+    let teamUsers = null;
+    if (viewScope === 'team') {
+      teamUserIds = await getTeamUserIds(user._id);
+      teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email officialEmail');
+    }
+
+    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only update your own deals.' });
     }
-    
+
     const {
       dealName,
       clientName,
@@ -453,7 +529,7 @@ router.put('/:id', auth, async (req, res) => {
 
     const oldSalesOwner = (deal.salesOwner || '').trim();
     const oldAssignedToStr = (deal.assignedTo?._id || deal.assignedTo || '').toString();
-    
+
     // Update fields
     if (dealName !== undefined) deal.dealName = dealName;
     if (clientName !== undefined) deal.clientName = clientName;
@@ -524,7 +600,7 @@ router.put('/:id', auth, async (req, res) => {
         createdAt: now
       });
     }
-    
+
     // Update stage & keep synchronized with pipeline
     if (stage !== undefined) {
       deal.stage = stage;
@@ -532,7 +608,7 @@ router.put('/:id', auth, async (req, res) => {
         deal.pipeline = stage;
       }
     }
-    
+
     const effectiveStage = (deal.stage || deal.pipeline || '').trim();
     if (effectiveStage.toLowerCase() === 'won' || effectiveStage.toLowerCase() === 'closed won') {
       deal.actualCloseDate = new Date();
@@ -558,9 +634,9 @@ router.put('/:id', auth, async (req, res) => {
       deal.actualCloseDate = new Date();
       if (lostReason) deal.lostReason = lostReason;
     }
-    
+
     await deal.save();
-    
+
     // Trigger CRM notification
     try {
       const io = req.app.get('socketio');
@@ -576,7 +652,7 @@ router.put('/:id', auth, async (req, res) => {
     } catch (notifErr) {
       console.error('Deal update notification error:', notifErr);
     }
-    
+
     try {
       const updatedDeal = await Deal.findById(deal._id)
         .populate('assignedTo', 'firstName lastName email employeeId')
@@ -640,13 +716,13 @@ router.post('/bulk-delete', auth, async (req, res) => {
       await Lead.updateMany(
         { _id: { $in: leadIds } },
         { $set: { movedToPipeline: false, pipelineDealId: null } }
-      ).catch(() => {});
+      ).catch(() => { });
     }
     if (metaLeadIds.length > 0) {
       await MetaLead.updateMany(
         { _id: { $in: metaLeadIds } },
         { $set: { movedToPipeline: false, pipelineDealId: null } }
-      ).catch(() => {});
+      ).catch(() => { });
     }
 
     // Trigger CRM notification
@@ -659,7 +735,7 @@ router.post('/bulk-delete', auth, async (req, res) => {
         entityName: `${dealsToDelete.length} Deal(s)`,
         link: '/pipeline?tab=deals'
       });
-    } catch (notifErr) {}
+    } catch (notifErr) { }
 
     res.json({ success: true, count: result.deletedCount });
   } catch (error) {
@@ -686,10 +762,18 @@ router.delete('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Deal not found' });
     }
 
-    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin)) {
+    const viewScope = getModuleViewScope(user, 'pipeline');
+    let teamUserIds = null;
+    let teamUsers = null;
+    if (viewScope === 'team') {
+      teamUserIds = await getTeamUserIds(user._id);
+      teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email officialEmail');
+    }
+
+    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only delete your own deals.' });
     }
-    
+
     const deletedDealName = deal.dealName || deal.clientName || 'Deal';
     await Deal.findByIdAndDelete(req.params.id);
 
@@ -732,13 +816,21 @@ router.post('/:id/activities', auth, async (req, res) => {
       return res.status(404).json({ message: 'Deal not found' });
     }
 
-    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin)) {
+    const viewScope = getModuleViewScope(user, 'pipeline');
+    let teamUserIds = null;
+    let teamUsers = null;
+    if (viewScope === 'team') {
+      teamUserIds = await getTeamUserIds(user._id);
+      teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email officialEmail');
+    }
+
+    if (!isDealOwnedByUser(deal, user, hasFullAccess, isAdmin, teamUserIds, teamUsers)) {
       return res.status(403).json({ message: 'Access denied. You can only add activities to your own deals.' });
     }
 
     const { type, title, content, remarks, channel, status, followUpDate, followUpTime, nextFollowUpDate, author, authorRole, time, date, memberId, memberName, assignedTo, assignedToName } = req.body;
     const authorName = author || (req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() : 'Admin System');
-    
+
     // Resolve member/assignedTo ObjectId if valid MongoDB ObjectId
     const resolvedMemberId = memberId || assignedTo || null;
     const isValidMemberObjectId = resolvedMemberId && mongoose.Types.ObjectId.isValid(resolvedMemberId);
@@ -934,12 +1026,59 @@ router.delete('/:id/activities/:activityId', auth, async (req, res) => {
 // Get deals statistics
 router.get('/stats/overview', auth, async (req, res) => {
   try {
-    const allDeals = await Deal.find({});
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    const { isAdmin } = checkAccess(user);
+    const viewScope = getModuleViewScope(user, 'pipeline');
+
+    let query = {};
+    if (!isAdmin) {
+      query.createdAt = { $gte: DATA_CUTOFF_DATE };
+
+      if (viewScope === 'private') {
+        const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        const userEmail = (user.email || '').toLowerCase().trim();
+        const userOfficialEmail = (user.officialEmail || '').toLowerCase().trim();
+
+        const orConditions = [
+          { assignedTo: user._id },
+          { createdBy: user._id }
+        ];
+        if (userFullName) {
+          orConditions.push({ salesOwner: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+          orConditions.push({ addedBy: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+        }
+        if (userEmail) orConditions.push({ email: userEmail });
+        if (userOfficialEmail) orConditions.push({ email: userOfficialEmail });
+        query.$or = orConditions;
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(user._id);
+        const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email officialEmail');
+        const teamFullNames = teamUsers.map(u => `${u.firstName || ''} ${u.lastName || ''}`.trim()).filter(Boolean);
+        const teamEmails = teamUsers.map(u => (u.email || '').toLowerCase().trim()).filter(Boolean);
+        const teamOfficialEmails = teamUsers.map(u => (u.officialEmail || '').toLowerCase().trim()).filter(Boolean);
+
+        const orConditions = [
+          { assignedTo: { $in: teamUserIds } },
+          { createdBy: { $in: teamUserIds } }
+        ];
+        if (teamFullNames.length > 0) {
+          teamFullNames.forEach(fn => {
+            orConditions.push({ salesOwner: { $regex: new RegExp(`^${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+            orConditions.push({ addedBy: { $regex: new RegExp(`^${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+          });
+        }
+        if (teamEmails.length > 0) orConditions.push({ email: { $in: teamEmails } });
+        if (teamOfficialEmails.length > 0) orConditions.push({ email: { $in: teamOfficialEmails } });
+        query.$or = orConditions;
+      }
+    }
+
+    const allDeals = await Deal.find(query);
     const total = allDeals.length;
     const wonDeals = allDeals.filter(d => (d.stage || '').toLowerCase() === 'won' || d.stage === 'Closed Won');
     const totalValue = allDeals.reduce((sum, d) => sum + (d.dealValue || 0), 0);
     const wonValue = wonDeals.reduce((sum, d) => sum + (d.dealValue || 0), 0);
-    
+
     res.json({
       total,
       totalValue,

@@ -7,6 +7,7 @@ const Deal = require('../models/Deal');
 const PipelineContact = require('../models/PipelineContact');
 const auth = require('../middleware/auth');
 const { sendCrmNotification } = require('../utils/crmNotifier');
+const { getModuleViewScope, getTeamUserIds } = require('../utils/roleAccess');
 
 // Cutoff timestamp: old pipeline data (before this cutoff) is strictly visible ONLY to Admin
 const DATA_CUTOFF_DATE = new Date(process.env.CRM_DATA_CUTOFF_DATE || '2026-10-17T00:00:00+05:30');
@@ -55,7 +56,7 @@ function checkAccess(user) {
 }
 
 // Helper to check if a specific task is accessible to a user
-async function isTaskOwnedByUser(task, user, hasFullAccess, isAdmin) {
+async function isTaskOwnedByUser(task, user, hasFullAccess, isAdmin, teamUserIds = null, teamUsers = null) {
   if (isAdmin) return true;
   if (!task || !user) return false;
 
@@ -63,7 +64,8 @@ async function isTaskOwnedByUser(task, user, hasFullAccess, isAdmin) {
   const taskDate = new Date(task.createdAt || 0);
   if (taskDate < DATA_CUTOFF_DATE) return false;
 
-  if (hasFullAccess) return true;
+  const viewScope = getModuleViewScope(user, 'pipeline');
+  if (viewScope === 'public') return true;
 
   const userId = (user._id || user.id || '').toString();
   const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
@@ -77,30 +79,53 @@ async function isTaskOwnedByUser(task, user, hasFullAccess, isAdmin) {
   if (userFullName && (assignee === userFullName || assignee === 'admin system')) return true;
   if (userEmail && assignee === userEmail) return true;
 
-  // Check if associated with a deal owned by or assigned to this user
+  const teamIdStrings = Array.isArray(teamUserIds) ? teamUserIds.map(id => id.toString()) : [];
+  if (viewScope === 'team') {
+    if (teamIdStrings.includes(assignedId) || teamIdStrings.includes(createdId)) return true;
+    if (Array.isArray(teamUsers)) {
+      const isTeamMatch = teamUsers.some(u => {
+        const fn = `${u.firstName || ''} ${u.lastName || ''}`.trim().toLowerCase();
+        const em = (u.email || '').toLowerCase().trim();
+        return (fn && assignee === fn) || (em && assignee === em);
+      });
+      if (isTeamMatch) return true;
+    }
+  }
+
+  // Check if associated with a deal
   if (task.associatedDealId) {
     try {
-      const deal = await Deal.findById(task.associatedDealId).select('assignedTo salesOwner addedBy');
+      const deal = await Deal.findById(task.associatedDealId).select('assignedTo createdBy salesOwner addedBy');
       if (deal) {
         const dealAssignedId = (deal.assignedTo?._id || deal.assignedTo || '').toString();
+        const dealCreatedId = (deal.createdBy?._id || deal.createdBy || '').toString();
         const dealOwner = (deal.salesOwner || '').toLowerCase().trim();
         const dealAddedBy = (deal.addedBy || '').toLowerCase().trim();
-        if (userId && dealAssignedId === userId) return true;
+        if (userId && (dealAssignedId === userId || dealCreatedId === userId)) return true;
         if (userFullName && (dealOwner === userFullName || dealAddedBy === userFullName)) return true;
+
+        if (viewScope === 'team') {
+          if (teamIdStrings.includes(dealAssignedId) || teamIdStrings.includes(dealCreatedId)) return true;
+        }
       }
     } catch (e) {}
   }
 
-  // Check if associated with a contact owned by or assigned to this user
+  // Check if associated with a contact
   if (task.associatedContactId) {
     try {
-      const contact = await PipelineContact.findById(task.associatedContactId).select('assignedTo owner addedBy');
+      const contact = await PipelineContact.findById(task.associatedContactId).select('assignedTo createdBy owner addedBy');
       if (contact) {
         const contactAssignedId = (contact.assignedTo?._id || contact.assignedTo || '').toString();
+        const contactCreatedId = (contact.createdBy?._id || contact.createdBy || '').toString();
         const contactOwner = (contact.owner || '').toLowerCase().trim();
         const contactAddedBy = (contact.addedBy || '').toLowerCase().trim();
-        if (userId && contactAssignedId === userId) return true;
+        if (userId && (contactAssignedId === userId || contactCreatedId === userId)) return true;
         if (userFullName && (contactOwner === userFullName || contactAddedBy === userFullName)) return true;
+
+        if (viewScope === 'team') {
+          if (teamIdStrings.includes(contactAssignedId) || teamIdStrings.includes(contactCreatedId)) return true;
+        }
       }
     } catch (e) {}
   }
@@ -138,51 +163,105 @@ router.get('/', auth, async (req, res) => {
       query.createdAt = { $lt: DATA_CUTOFF_DATE };
     }
 
-    // Data isolation: Sales Head, Sales Manager, and Admin see all new tasks; other roles only see their data
-    if (!hasFullAccess) {
-      const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-      const userEmail = (user.email || '').toLowerCase().trim();
+    // Data isolation based on viewScope ('public' | 'private' | 'team')
+    const viewScope = getModuleViewScope(user, 'pipeline');
 
-      const orConditions = [
-        { assignedTo: user._id },
-        { createdBy: user._id }
-      ];
-      if (userFullName) {
-        orConditions.push({ assignee: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
-      }
-      if (userEmail) {
-        orConditions.push({ assignee: userEmail });
-      }
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        const userEmail = (user.email || '').toLowerCase().trim();
 
-      // Also include tasks associated with user's assigned deals
-      try {
-        const userDeals = await Deal.find({
-          $or: [
-            { assignedTo: user._id },
-            ...(userFullName ? [{ salesOwner: userFullName }] : [])
-          ]
-        }).select('_id');
-        const dealIds = userDeals.map(d => d._id.toString());
-        if (dealIds.length > 0) {
-          orConditions.push({ associatedDealId: { $in: dealIds } });
+        const orConditions = [
+          { assignedTo: user._id },
+          { createdBy: user._id }
+        ];
+        if (userFullName) {
+          orConditions.push({ assignee: { $regex: new RegExp(`^${userFullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
         }
-      } catch (e) {}
-
-      // Also include tasks associated with user's assigned contacts
-      try {
-        const userContacts = await PipelineContact.find({
-          $or: [
-            { assignedTo: user._id },
-            ...(userFullName ? [{ owner: userFullName }] : [])
-          ]
-        }).select('_id');
-        const contactIds = userContacts.map(c => c._id.toString());
-        if (contactIds.length > 0) {
-          orConditions.push({ associatedContactId: { $in: contactIds } });
+        if (userEmail) {
+          orConditions.push({ assignee: userEmail });
         }
-      } catch (e) {}
 
-      query.$or = orConditions;
+        // Also include tasks associated with user's assigned deals
+        try {
+          const userDeals = await Deal.find({
+            $or: [
+              { assignedTo: user._id },
+              ...(userFullName ? [{ salesOwner: userFullName }] : [])
+            ]
+          }).select('_id');
+          const dealIds = userDeals.map(d => d._id.toString());
+          if (dealIds.length > 0) {
+            orConditions.push({ associatedDealId: { $in: dealIds } });
+          }
+        } catch (e) {}
+
+        // Also include tasks associated with user's assigned contacts
+        try {
+          const userContacts = await PipelineContact.find({
+            $or: [
+              { assignedTo: user._id },
+              ...(userFullName ? [{ owner: userFullName }] : [])
+            ]
+          }).select('_id');
+          const contactIds = userContacts.map(c => c._id.toString());
+          if (contactIds.length > 0) {
+            orConditions.push({ associatedContactId: { $in: contactIds } });
+          }
+        } catch (e) {}
+
+        query.$or = orConditions;
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(user._id);
+        const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+        const teamFullNames = teamUsers.map(u => `${u.firstName || ''} ${u.lastName || ''}`.trim()).filter(Boolean);
+        const teamEmails = teamUsers.map(u => (u.email || '').toLowerCase().trim()).filter(Boolean);
+
+        const orConditions = [
+          { assignedTo: { $in: teamUserIds } },
+          { createdBy: { $in: teamUserIds } }
+        ];
+        if (teamFullNames.length > 0) {
+          teamFullNames.forEach(fn => {
+            orConditions.push({ assignee: { $regex: new RegExp(`^${fn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } });
+          });
+        }
+        if (teamEmails.length > 0) {
+          orConditions.push({ assignee: { $in: teamEmails } });
+        }
+
+        // Include tasks associated with team's deals
+        try {
+          const teamDeals = await Deal.find({
+            $or: [
+              { assignedTo: { $in: teamUserIds } },
+              { createdBy: { $in: teamUserIds } },
+              ...(teamFullNames.length > 0 ? [{ salesOwner: { $in: teamFullNames } }] : [])
+            ]
+          }).select('_id');
+          const dealIds = teamDeals.map(d => d._id.toString());
+          if (dealIds.length > 0) {
+            orConditions.push({ associatedDealId: { $in: dealIds } });
+          }
+        } catch (e) {}
+
+        // Include tasks associated with team's contacts
+        try {
+          const teamContacts = await PipelineContact.find({
+            $or: [
+              { assignedTo: { $in: teamUserIds } },
+              { createdBy: { $in: teamUserIds } },
+              ...(teamFullNames.length > 0 ? [{ owner: { $in: teamFullNames } }] : [])
+            ]
+          }).select('_id');
+          const contactIds = teamContacts.map(c => c._id.toString());
+          if (contactIds.length > 0) {
+            orConditions.push({ associatedContactId: { $in: contactIds } });
+          }
+        } catch (e) {}
+
+        query.$or = orConditions;
+      }
     }
 
     const tasks = await PipelineTask.find(query)
@@ -218,7 +297,10 @@ router.get('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    if (!(await isTaskOwnedByUser(task, user, hasFullAccess, isAdmin))) {
+    const teamUserIds = await getTeamUserIds(user._id);
+    const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+
+    if (!(await isTaskOwnedByUser(task, user, hasFullAccess, isAdmin, teamUserIds, teamUsers))) {
       return res.status(403).json({ message: 'Access denied. You can only view your own tasks.' });
     }
 
@@ -328,7 +410,10 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    if (!(await isTaskOwnedByUser(task, user, hasFullAccess, isAdmin))) {
+    const teamUserIds = await getTeamUserIds(user._id);
+    const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+
+    if (!(await isTaskOwnedByUser(task, user, hasFullAccess, isAdmin, teamUserIds, teamUsers))) {
       return res.status(403).json({ message: 'Access denied. You can only update your own tasks.' });
     }
 
@@ -412,7 +497,10 @@ router.delete('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Task not found' });
     }
 
-    if (!(await isTaskOwnedByUser(task, user, hasFullAccess, isAdmin))) {
+    const teamUserIds = await getTeamUserIds(user._id);
+    const teamUsers = await User.find({ _id: { $in: teamUserIds } }).select('firstName lastName email');
+
+    if (!(await isTaskOwnedByUser(task, user, hasFullAccess, isAdmin, teamUserIds, teamUsers))) {
       return res.status(403).json({ message: 'Access denied. You can only delete your own tasks.' });
     }
 

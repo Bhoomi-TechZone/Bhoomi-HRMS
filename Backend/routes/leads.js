@@ -10,6 +10,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
 const { sendAdminDataActivityNotification } = require('../utils/crmNotifier');
+const { getModuleViewScope, getTeamUserIds } = require('../utils/roleAccess');
 
 // Cutoff timestamp: old leads (before this cutoff) are strictly visible ONLY to Admin.
 // Sales Head and other roles only see new leads added from this cutoff onwards.
@@ -92,26 +93,35 @@ router.get('/', auth, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. Read permission required.' });
     }
 
-    // Role-based visibility:
-    // 1. Non-full-access roles (e.g. Sales Executives, Telecallers, Employees) see all leads assigned to them or created by them
-    // 2. Sales Head & Sales Manager (who have full access, but not admin) see new organisation leads from cutoff date onwards
-    // 3. Admin sees all organisation leads (old and new)
+    // Role-based visibility based on viewScope ('public' | 'private' | 'team'):
+    // 1. If viewScope is 'public' (or Admin): user can see all leads (from DATA_CUTOFF_DATE onwards for non-admins)
+    // 2. If viewScope is 'private': user can ONLY see leads assigned to him directly or created by him
+    // 3. If viewScope is 'team': user can see leads assigned to his team (or created by his team)
+    const viewScope = getModuleViewScope(user, 'leads');
+
     if (!isAdmin) {
       const currentUserId = req.user?._id || req.user?.id;
       const validObjectId = (mongoose.Types.ObjectId.isValid(currentUserId))
         ? new mongoose.Types.ObjectId(currentUserId)
         : currentUserId;
 
-      if (!hasFullAccess) {
-        // Standard sales executives and employees strictly see leads assigned to them or created by them
+      if (viewScope === 'private') {
+        // Private: strictly leads assigned to or created by this user
         query.$or = [
           { assignedTo: currentUserId },
           { assignedTo: validObjectId },
           { createdBy: currentUserId },
           { createdBy: validObjectId }
         ];
+      } else if (viewScope === 'team') {
+        // Team: leads assigned to or created by anyone in the user's team
+        const teamUserIds = await getTeamUserIds(currentUserId);
+        query.$or = [
+          { assignedTo: { $in: teamUserIds } },
+          { createdBy: { $in: teamUserIds } }
+        ];
       } else {
-        // Sales managers and sales heads see leads assigned to them OR created by them OR any new organisation leads
+        // Public: all organisation leads from cutoff date onwards, or assigned/created by user
         query.$or = [
           { assignedTo: currentUserId },
           { assignedTo: validObjectId },
@@ -263,6 +273,7 @@ router.get('/:id', auth, async (req, res) => {
     }
 
     const { hasFullAccess, isAdmin } = getLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
 
     // Sales and regular employees can only view their assigned leads or leads they created/added
     const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
@@ -276,8 +287,23 @@ router.get('/:id', auth, async (req, res) => {
       }
     }
 
-    if (!hasFullAccess && !isOwnerOrAssignee) {
-      return res.status(403).json({ message: 'Access denied' });
+    if (!isAdmin) {
+      if (viewScope === 'private') {
+        if (!isOwnerOrAssignee) {
+          return res.status(403).json({ message: 'Access denied. You can only view your assigned or created leads.' });
+        }
+      } else if (viewScope === 'team') {
+        if (!isOwnerOrAssignee) {
+          const teamUserIds = await getTeamUserIds(req.user.id);
+          const teamIdStrings = teamUserIds.map(id => id.toString());
+          const leadAssignedToId = (lead.assignedTo?._id || lead.assignedTo || '').toString();
+          const leadCreatedById = (lead.createdBy?._id || lead.createdBy || '').toString();
+          const isTeamMemberLead = teamIdStrings.includes(leadAssignedToId) || teamIdStrings.includes(leadCreatedById);
+          if (!isTeamMemberLead) {
+            return res.status(403).json({ message: 'Access denied. You can only view leads belonging to your team.' });
+          }
+        }
+      }
     }
 
     res.json(lead);
@@ -782,6 +808,7 @@ router.put('/:id', auth, async (req, res) => {
       p => p.module === 'leads' && p.actions.includes('read')
     ) : false;
     const { hasFullAccess, canAssignOrManage, isAdmin } = getLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
 
     const isOwnerOrAssignee = (lead.assignedTo?._id?.toString() || lead.assignedTo?.toString() || '') === req.user.id ||
       (lead.createdBy?._id?.toString() || lead.createdBy?.toString() || '') === req.user.id;
@@ -794,8 +821,26 @@ router.put('/:id', auth, async (req, res) => {
       }
     }
 
-    if (!hasFullAccess && !isOwnerOrAssignee) {
-      return res.status(403).json({ message: 'Access denied. You can only update your assigned or created leads.' });
+    let hasScopeAccess = false;
+    if (isAdmin || viewScope === 'public') {
+      hasScopeAccess = true;
+    } else if (viewScope === 'team') {
+      if (isOwnerOrAssignee) {
+        hasScopeAccess = true;
+      } else {
+        const teamUserIds = await getTeamUserIds(req.user.id);
+        const teamIdStrings = teamUserIds.map(id => id.toString());
+        const leadAssignedToId = (lead.assignedTo?._id || lead.assignedTo || '').toString();
+        const leadCreatedById = (lead.createdBy?._id || lead.createdBy || '').toString();
+        hasScopeAccess = teamIdStrings.includes(leadAssignedToId) || teamIdStrings.includes(leadCreatedById);
+      }
+    } else {
+      // private
+      hasScopeAccess = isOwnerOrAssignee;
+    }
+
+    if (!hasScopeAccess) {
+      return res.status(403).json({ message: 'Access denied. You can only update your assigned or team leads.' });
     }
 
     // For read-only users without assignment/update permission, restrict updates to status/followup/type/notes only
@@ -967,6 +1012,13 @@ router.put('/:id', auth, async (req, res) => {
     if (assignedTo !== undefined && canAssignOrManage) {
       const currentAssignee = lead.assignedTo ? lead.assignedTo.toString() : null;
       const newAssignee = assignedTo ? assignedTo.toString() : null;
+      if (newAssignee && viewScope === 'team' && !isAdmin) {
+        const teamUserIds = await getTeamUserIds(req.user.id);
+        const teamIdStrings = teamUserIds.map(id => id.toString());
+        if (!teamIdStrings.includes(newAssignee)) {
+          return res.status(403).json({ message: 'Access denied. You can only assign leads to your own team members.' });
+        }
+      }
       if (currentAssignee !== newAssignee) {
         historyEntries.push({
           action: 'Assignment Update',
@@ -1112,50 +1164,74 @@ router.get('/stats/overview', auth, async (req, res) => {
   try {
     const user = (req.user?.role?.name) ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
 
-    let query = {};
-
-    // Full access: Admin, Sales Head, Sales Manager
     const { hasFullAccess, isAdmin } = getLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
 
-    // Only Admin sees stats for old data; others only see stats for new data
+    const andConditions = [{ movedToPipeline: { $ne: true } }];
+
     if (!isAdmin) {
-      query.$and = query.$and || [];
-      query.$and.push({
-        $or: [
-          { createdAt: { $gte: DATA_CUTOFF_DATE } },
-          { addedOn: { $gte: DATA_CUTOFF_DATE } }
-        ]
-      });
+      const currentUserId = req.user?._id || req.user?.id;
+      const validObjectId = (mongoose.Types.ObjectId.isValid(currentUserId))
+        ? new mongoose.Types.ObjectId(currentUserId)
+        : currentUserId;
+
+      if (viewScope === 'private') {
+        andConditions.push({
+          $or: [
+            { assignedTo: currentUserId },
+            { assignedTo: validObjectId },
+            { createdBy: currentUserId },
+            { createdBy: validObjectId }
+          ]
+        });
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(currentUserId);
+        andConditions.push({
+          $or: [
+            { assignedTo: { $in: teamUserIds } },
+            { createdBy: { $in: teamUserIds } }
+          ]
+        });
+      } else {
+        // Public: only see new data from cutoff date onwards, or assigned/created by current user
+        andConditions.push({
+          $or: [
+            { createdAt: { $gte: DATA_CUTOFF_DATE } },
+            { addedOn: { $gte: DATA_CUTOFF_DATE } },
+            { assignedTo: currentUserId },
+            { assignedTo: validObjectId },
+            { createdBy: currentUserId },
+            { createdBy: validObjectId }
+          ]
+        });
+      }
     }
 
-    // Regular sales, executives, and other roles only see their assigned leads or leads they added stats
-    if (!hasFullAccess) {
-      query.$or = [
-        { assignedTo: req.user.id },
-        { createdBy: req.user.id }
-      ];
-    }
-
-    const baseQuery = { ...query, movedToPipeline: { $ne: true } };
+    const baseQuery = { $and: andConditions };
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
+    const followUpCondition = {
+      $or: [
+        { status: 'Follow-up' },
+        {
+          nextFollowUp: { $ne: null },
+          followUpCompleted: { $ne: true },
+          status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Invalid', 'Lost'] }
+        }
+      ]
+    };
+
     const [total, newLeads, inProgress, converted, lost, followUp, notInterested, contacted, todayLeads] = await Promise.all([
       Lead.countDocuments(baseQuery),
-      Lead.countDocuments({ ...baseQuery, status: 'New' }),
-      Lead.countDocuments({ ...baseQuery, status: 'In Progress' }),
-      Lead.countDocuments({ ...baseQuery, status: 'Converted' }),
-      Lead.countDocuments({ ...baseQuery, status: 'Lost' }),
-      Lead.countDocuments({
-        ...baseQuery,
-        $or: [
-          { status: 'Follow-up' },
-          { nextFollowUp: { $ne: null }, followUpCompleted: { $ne: true }, status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Invalid', 'Lost'] } }
-        ]
-      }),
-      Lead.countDocuments({ ...baseQuery, status: 'Not Interested' }),
-      Lead.countDocuments({ ...baseQuery, status: { $in: ['Contacted', 'Connected'] } }),
-      Lead.countDocuments({ ...baseQuery, createdAt: { $gte: startOfToday } })
+      Lead.countDocuments({ $and: [...andConditions, { status: 'New' }] }),
+      Lead.countDocuments({ $and: [...andConditions, { status: 'In Progress' }] }),
+      Lead.countDocuments({ $and: [...andConditions, { status: 'Converted' }] }),
+      Lead.countDocuments({ $and: [...andConditions, { status: 'Lost' }] }),
+      Lead.countDocuments({ $and: [...andConditions, followUpCondition] }),
+      Lead.countDocuments({ $and: [...andConditions, { status: 'Not Interested' }] }),
+      Lead.countDocuments({ $and: [...andConditions, { status: { $in: ['Contacted', 'Connected'] } }] }),
+      Lead.countDocuments({ $and: [...andConditions, { createdAt: { $gte: startOfToday } }] })
     ]);
 
     res.json({
@@ -1238,32 +1314,54 @@ router.get('/followups/due', auth, async (req, res) => {
     const now = new Date();
 
     const user = (req.user?.role?.name) ? req.user : await User.findById(req.user?._id || req.user?.id).populate('role');
-    // Check if user has full access
     const { hasFullAccess, isAdmin } = getLeadRoleAccess(user);
+    const viewScope = getModuleViewScope(user, 'leads');
 
-    const query = {
-      nextFollowUp: { $ne: null, $lte: now },
-      followUpCompleted: { $ne: true },
-      status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost', 'Invalid'] },
-      movedToPipeline: { $ne: true }
-    };
+    const andConditions = [
+      { nextFollowUp: { $ne: null, $lte: now } },
+      { followUpCompleted: { $ne: true } },
+      { status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost', 'Invalid'] } },
+      { movedToPipeline: { $ne: true } }
+    ];
 
     if (!isAdmin) {
-      query.$and = query.$and || [];
-      query.$and.push({
-        $or: [
-          { createdAt: { $gte: DATA_CUTOFF_DATE } },
-          { addedOn: { $gte: DATA_CUTOFF_DATE } }
-        ]
-      });
+      const currentUserId = req.user?._id || req.user?.id;
+      const validObjectId = (mongoose.Types.ObjectId.isValid(currentUserId))
+        ? new mongoose.Types.ObjectId(currentUserId)
+        : currentUserId;
+
+      if (viewScope === 'private') {
+        andConditions.push({
+          $or: [
+            { assignedTo: currentUserId },
+            { assignedTo: validObjectId },
+            { createdBy: currentUserId },
+            { createdBy: validObjectId }
+          ]
+        });
+      } else if (viewScope === 'team') {
+        const teamUserIds = await getTeamUserIds(currentUserId);
+        andConditions.push({
+          $or: [
+            { assignedTo: { $in: teamUserIds } },
+            { createdBy: { $in: teamUserIds } }
+          ]
+        });
+      } else {
+        andConditions.push({
+          $or: [
+            { createdAt: { $gte: DATA_CUTOFF_DATE } },
+            { addedOn: { $gte: DATA_CUTOFF_DATE } },
+            { assignedTo: currentUserId },
+            { assignedTo: validObjectId },
+            { createdBy: currentUserId },
+            { createdBy: validObjectId }
+          ]
+        });
+      }
     }
 
-    if (!hasFullAccess) {
-      query.$or = [
-        { assignedTo: req.user.id },
-        { createdBy: req.user.id }
-      ];
-    }
+    const query = { $and: andConditions };
 
     const leads = await Lead.find(query)
       .populate('assignedTo', 'firstName lastName')

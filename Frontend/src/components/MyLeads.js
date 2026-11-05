@@ -87,24 +87,98 @@ function MyLeads() {
     designationLower.includes('bde') ||
     departmentLower.includes('sales');
 
+  const leadsViewScope = useMemo(() => {
+    if (isAdmin) return 'public';
+    const roleObj = user?.role;
+    if (roleObj && Array.isArray(roleObj.permissions)) {
+      const perm = roleObj.permissions.find(p => p.module && p.module.toLowerCase() === 'leads');
+      if (perm && perm.viewScope) {
+        return perm.viewScope.toLowerCase().trim();
+      }
+    }
+    return (isSalesHead || isSalesManager) ? 'public' : 'private';
+  }, [isAdmin, user?.role, isSalesHead, isSalesManager]);
+
   const canRead = hasPermission('leads', 'read') || isSales || hasFullAccess;
   const canCreate = hasPermission('leads', 'create');
   const canUpdate = hasPermission('leads', 'update');
   const canDelete = hasPermission('leads', 'delete');
-  const canMultiAssign = hasFullAccess;
-  const canAssignLeads = hasFullAccess;
+  const canMultiAssign = hasFullAccess || leadsViewScope === 'team';
+  const canAssignLeads = hasFullAccess || leadsViewScope === 'team';
 
   // Move to Pipeline:
-  // 1. Sales Head, Sales Manager, and Admin can move ANY lead to pipeline
-  // 2. Users (including Sales Executives and regular employees) can move leads that are assigned to them (or created by them)
-  const hasGlobalMoveToPipeline = isAdmin || isSalesHead || isSalesManager;
+  // 1. Admin and public view scope can move ANY lead to pipeline
+  // 2. Team view scope can move team leads to pipeline
+  // 3. Private view scope can move assigned/created leads
+  const hasGlobalMoveToPipeline = isAdmin || (hasFullAccess && leadsViewScope === 'public');
   const canMoveToPipeline = true; // Enables bulk toolbar & selection mode for users
+
+  // ── Data ──────────────────────────────────────────────────────────────────
+  const [leads, setLeads] = useState([]);          // regular leads
+  const [metaLeads, setMetaLeads] = useState([]);  // meta leads (normalised)
+  const [employees, setEmployees] = useState([]);
+
+  // Compute team member IDs (for team viewScope)
+  const teamMemberIds = useMemo(() => {
+    const uid = String(user?._id || user?.id || '');
+    if (!uid) return new Set();
+    const idSet = new Set([uid]);
+
+    if (!Array.isArray(employees) || employees.length === 0) return idSet;
+
+    // 1. Direct reports: find all employees where assignedManager is this user
+    const directReports = employees.filter(e => {
+      const mgrId = String(e.assignedManager?._id || e.assignedManager || '');
+      return mgrId === uid;
+    });
+    directReports.forEach(e => idSet.add(String(e._id || e.id || '')));
+
+    // 2. Sub-reports (if any direct report is also a manager)
+    const directReportIds = directReports.map(e => String(e._id || e.id || ''));
+    if (directReportIds.length > 0) {
+      employees.forEach(e => {
+        const mgrId = String(e.assignedManager?._id || e.assignedManager || '');
+        if (directReportIds.includes(mgrId)) {
+          idSet.add(String(e._id || e.id || ''));
+        }
+      });
+    }
+
+    // 3. Subordinate employee fallback:
+    // If the current user is a manager or sales head (or has direct reports), their team is strictly
+    // themselves + their direct reports and sub-reports. They should NEVER pull in other peer heads / other teams!
+    // Step 3 (peers + manager) only applies if the user is a subordinate/executive with NO direct reports.
+    const isHeadOrManager = isSalesHead || isSalesManager || directReports.length > 0;
+    if (!isHeadOrManager) {
+      const currentUserEmp = employees.find(e => String(e._id || e.id || '') === uid);
+      const myMgrId = String(currentUserEmp?.assignedManager?._id || currentUserEmp?.assignedManager || user?.assignedManager?._id || user?.assignedManager || '');
+      if (myMgrId) {
+        idSet.add(myMgrId);
+        employees.forEach(e => {
+          const mgrId = String(e.assignedManager?._id || e.assignedManager || '');
+          if (mgrId === myMgrId) {
+            idSet.add(String(e._id || e.id || ''));
+          }
+        });
+      }
+    }
+
+    return idSet;
+  }, [user?._id, user?.id, user?.assignedManager, employees, isSalesHead, isSalesManager]);
 
   const canUserMoveLeadToPipeline = (lead) => {
     if (!lead || !user) return false;
     if (hasGlobalMoveToPipeline) return true;
     const uid = String(user._id || user.id || '');
     if (!uid) return false;
+
+    if (leadsViewScope === 'team') {
+      const isTeamAssigned = Array.isArray(lead.assignedTo)
+        ? lead.assignedTo.some(a => teamMemberIds.has(String(a?._id || a || '')))
+        : teamMemberIds.has(String(lead.assignedTo?._id || lead.assignedTo || ''));
+      const isTeamCreator = teamMemberIds.has(String(lead.createdBy?._id || lead.createdBy || ''));
+      return isTeamAssigned || isTeamCreator;
+    }
 
     const isAssigned = Array.isArray(lead.assignedTo)
       ? lead.assignedTo.some(a => String(a?._id || a || '') === uid)
@@ -113,11 +187,6 @@ function MyLeads() {
 
     return isAssigned || isCreator;
   };
-
-  // ── Data ──────────────────────────────────────────────────────────────────
-  const [leads, setLeads] = useState([]);          // regular leads
-  const [metaLeads, setMetaLeads] = useState([]);  // meta leads (normalised)
-  const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [serverStats, setServerStats] = useState(null);
@@ -749,8 +818,7 @@ function MyLeads() {
       }));
     let merged = [...regular, ...meta];
 
-    // Only Admin can see old leads data. Sales Head and other roles can only see new leads from cutoff date onwards.
-    // However, users MUST ALWAYS see all leads that are assigned to them or created by them!
+    // Role-based lead visibility based on viewScope ('public' | 'private' | 'team')
     if (!isAdmin) {
       const uid = String(user?._id || user?.id || '');
       merged = merged.filter(l => {
@@ -758,19 +826,30 @@ function MyLeads() {
           ? l.assignedTo.some(a => String(a?._id || a || '') === uid)
           : String(l.assignedTo?._id || l.assignedTo || '') === uid;
         const isCreator = String(l.createdBy?._id || l.createdBy || '') === uid;
+
+        if (leadsViewScope === 'private') {
+          return uid && (isAssigned || isCreator);
+        }
+
+        if (leadsViewScope === 'team') {
+          const isTeamAssigned = Array.isArray(l.assignedTo)
+            ? l.assignedTo.some(a => teamMemberIds.has(String(a?._id || a || '')))
+            : teamMemberIds.has(String(l.assignedTo?._id || l.assignedTo || ''));
+          const isTeamCreator = teamMemberIds.has(String(l.createdBy?._id || l.createdBy || ''));
+          return isTeamAssigned || isTeamCreator;
+        }
+
+        // Public viewScope: see assigned/created or any lead from cutoff date onwards
         if (uid && (isAssigned || isCreator)) {
           return true;
         }
-        if (hasFullAccess) {
-          const d = new Date(l.createdAt || l.createdTime || l.addedOn || l.leadDate || 0);
-          return !isNaN(d.getTime()) && d >= DATA_CUTOFF_DATE;
-        }
-        return false;
+        const d = new Date(l.createdAt || l.createdTime || l.addedOn || l.leadDate || 0);
+        return !isNaN(d.getTime()) && d >= DATA_CUTOFF_DATE;
       });
     }
 
     return merged;
-  }, [leads, metaLeads, isAdmin, hasFullAccess, user?._id, user?.id]);
+  }, [leads, metaLeads, isAdmin, leadsViewScope, teamMemberIds, user?._id, user?.id]);
 
   // ── Active employees strictly from SALES role (for both filter dropdown and assignment dropdowns) ──
   const salesEmployees = useMemo(() => {
@@ -810,38 +889,71 @@ function MyLeads() {
   }, [employees]);
 
   // ── Sales employees (for filtering) ────────────────────────
-  const filterEmployees = salesEmployees;
+  const filterEmployees = useMemo(() => {
+    if (isAdmin || leadsViewScope === 'public') {
+      return salesEmployees;
+    }
+    if (leadsViewScope === 'team') {
+      return salesEmployees.filter(emp => teamMemberIds.has(String(emp._id || emp.id || '')));
+    }
+    const uid = String(user?._id || user?.id || '');
+    return salesEmployees.filter(emp => String(emp._id || emp.id || '') === uid);
+  }, [salesEmployees, isAdmin, leadsViewScope, teamMemberIds, user?._id, user?.id]);
 
-  // ── Base dataset for stats: for sales and regular employees only their assigned or created leads ──────────
+  // ── Sales employees (for assigning leads, scoped to team / self based on viewScope) ──
+  const assignEmployees = useMemo(() => {
+    if (isAdmin || leadsViewScope === 'public') {
+      return salesEmployees;
+    }
+    if (leadsViewScope === 'team') {
+      return salesEmployees.filter(emp => teamMemberIds.has(String(emp._id || emp.id || '')));
+    }
+    const uid = String(user?._id || user?.id || '');
+    return salesEmployees.filter(emp => String(emp._id || emp.id || '') === uid);
+  }, [salesEmployees, isAdmin, leadsViewScope, teamMemberIds, user?._id, user?.id]);
+
+  // ── Base dataset for stats: scoped to user's permissions ──────────
   const statsLeads = useMemo(() => {
     const uid = String(user?._id || user?.id || '');
-    if (!hasFullAccess && uid) {
-      return allLeads.filter(l => {
-        const isAssigned = Array.isArray(l.assignedTo)
-          ? l.assignedTo.some(a => String(a?._id || a || '') === uid)
-          : String(l.assignedTo?._id || l.assignedTo || '') === uid;
-        const isCreator = String(l.createdBy?._id || l.createdBy || '') === uid;
-        return isAssigned || isCreator;
-      });
+    if (!isAdmin) {
+      if (leadsViewScope === 'private' && uid) {
+        return allLeads.filter(l => {
+          const isAssigned = Array.isArray(l.assignedTo)
+            ? l.assignedTo.some(a => String(a?._id || a || '') === uid)
+            : String(l.assignedTo?._id || l.assignedTo || '') === uid;
+          const isCreator = String(l.createdBy?._id || l.createdBy || '') === uid;
+          return isAssigned || isCreator;
+        });
+      }
+      if (leadsViewScope === 'team') {
+        return allLeads.filter(l => {
+          const isTeamAssigned = Array.isArray(l.assignedTo)
+            ? l.assignedTo.some(a => teamMemberIds.has(String(a?._id || a || '')))
+            : teamMemberIds.has(String(l.assignedTo?._id || l.assignedTo || ''));
+          const isTeamCreator = teamMemberIds.has(String(l.createdBy?._id || l.createdBy || ''));
+          return isTeamAssigned || isTeamCreator;
+        });
+      }
     }
     return allLeads;
-  }, [allLeads, hasFullAccess, user?._id, user?.id]);
+  }, [allLeads, isAdmin, leadsViewScope, teamMemberIds, user?._id, user?.id]);
 
-  // ── Stats from merged data ────────────────────────────────────────────────
+  // ── Stats from merged data (uses serverStats for stable KPI overview counts) ──
   const stats = useMemo(() => {
-    if (serverStats && statsLeads.length < (serverStats.total || 0)) {
+    if (serverStats) {
       return {
-        total: serverStats.total || statsLeads.length,
+        total: serverStats.total ?? 0,
         newLeads: serverStats.newLeads ?? serverStats.new ?? 0,
-        contacted: serverStats.contacted || 0,
-        converted: serverStats.converted || 0,
-        closed: serverStats.lost || 0,
-        followUp: serverStats.followUp || 0,
-        notInterested: serverStats.notInterested || 0,
-        todayLeads: serverStats.todayLeads || 0,
+        contacted: serverStats.contacted ?? 0,
+        converted: serverStats.converted ?? 0,
+        closed: serverStats.lost ?? 0,
+        followUp: serverStats.followUp ?? 0,
+        notInterested: serverStats.notInterested ?? 0,
+        todayLeads: serverStats.todayLeads ?? 0,
         sources: [...new Set(statsLeads.map(l => l.source).filter(Boolean))]
       };
     }
+
     const total = statsLeads.length;
     const newLeads = statsLeads.filter(l => l.status === 'New').length;
     const contacted = statsLeads.filter(l => l.status === 'Contacted' || l.status === 'Connected').length;
@@ -859,7 +971,7 @@ function MyLeads() {
     const todayLeads = statsLeads.filter(l => new Date(l.createdAt) >= today).length;
     const sources = [...new Set(statsLeads.map(l => l.source).filter(Boolean))];
     return { total, newLeads, contacted, converted, closed, followUp, notInterested, todayLeads, sources };
-  }, [statsLeads]);
+  }, [serverStats, statsLeads]);
 
   // ── Previous-month stats for trend comparison ─────────────────────────────
   const prevMonthStats = useMemo(() => {
@@ -1027,7 +1139,8 @@ function MyLeads() {
   }, [showFollowUpPanel]);
 
   // ── Pagination calculations ──────────────────────────────────────────────
-  const displayedTotal = totalLeadsCount || serverStats?.total || filteredLeads.length;
+  const hasFilterApplied = !!(filterStatus || filterSource || filterEmployee || filterDate || filterEndDate || debouncedSearch);
+  const displayedTotal = hasFilterApplied ? filteredLeads.length : (totalLeadsCount || serverStats?.total || filteredLeads.length);
   const totalPages = Math.max(1, Math.ceil(displayedTotal / leadsPerPage));
   const startIndex = (currentPage - 1) * leadsPerPage;
   const isServerPaginated = totalLeadsCount > 0 && filteredLeads.length < displayedTotal && filteredLeads.length <= leadsPerPage;
@@ -3458,7 +3571,11 @@ function MyLeads() {
                 position: 'relative'
               }}
               onClick={() => {
-                setFilterStatus(label === 'Total Leads' ? '' : label);
+                if (label === 'Total Leads' || filterStatus === label) {
+                  setFilterStatus('');
+                } else {
+                  setFilterStatus(label);
+                }
                 setCurrentPage(1);
               }}
               onMouseEnter={e => {
@@ -4597,7 +4714,7 @@ function MyLeads() {
                             if (lead._type === 'meta') handleMetaQuickAssign(lead._id, empId, displayStatus);
                             else handleExcelQuickAssign(lead._id, empId);
                           };
-                          const filteredSales = salesEmployees.filter(emp =>
+                          const filteredSales = assignEmployees.filter(emp =>
                             `${emp.firstName} ${emp.lastName}`.toLowerCase().includes(
                               openAssignDropdown === lead._id ? assignSearch.toLowerCase() : ''
                             )
@@ -5415,7 +5532,7 @@ function MyLeads() {
                                 style={{ opacity: selectedLead.status === 'Converted' ? 0.6 : 1, cursor: (!canUpdate || selectedLead.status === 'Converted') ? 'not-allowed' : 'pointer' }}
                               >
                                 <option value="">— Unassigned —</option>
-                                {salesEmployees.map(emp => <option key={emp._id} value={emp._id}>{emp.firstName} {emp.lastName}</option>)}
+                                {assignEmployees.map(emp => <option key={emp._id} value={emp._id}>{emp.firstName} {emp.lastName}</option>)}
                               </select>
                             ) : (
                               <div className="is-mlead-val-text">
@@ -5755,7 +5872,7 @@ function MyLeads() {
                                 style={{ opacity: metaSelected.status === 'Converted' ? 0.6 : 1, cursor: metaSelected.status === 'Converted' ? 'not-allowed' : 'pointer' }}
                               >
                                 <option value="">— Unassigned —</option>
-                                {salesEmployees.map(emp => <option key={emp._id} value={emp._id}>{emp.firstName} {emp.lastName}</option>)}
+                                {assignEmployees.map(emp => <option key={emp._id} value={emp._id}>{emp.firstName} {emp.lastName}</option>)}
                               </select>
                             ) : (
                               <div className="is-mlead-val-text">
@@ -7123,7 +7240,7 @@ function MyLeads() {
               </div>
               {/* Employee list */}
               <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: '10px', padding: '6px' }}>
-                {salesEmployees
+                {assignEmployees
                   .filter(e => `${e.firstName} ${e.lastName}`.toLowerCase().includes(multiAssignSearch.toLowerCase()))
                   .map(emp => {
                     const avatarColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444', '#06b6d4'];
@@ -7151,7 +7268,7 @@ function MyLeads() {
                       </div>
                     );
                   })}
-                {salesEmployees.filter(e => `${e.firstName} ${e.lastName}`.toLowerCase().includes(multiAssignSearch.toLowerCase())).length === 0 && (
+                {assignEmployees.filter(e => `${e.firstName} ${e.lastName}`.toLowerCase().includes(multiAssignSearch.toLowerCase())).length === 0 && (
                   <div style={{ padding: '20px', textAlign: 'center', fontSize: '12px', color: '#94a3b8' }}>No employees found</div>
                 )}
               </div>
@@ -7330,7 +7447,7 @@ function MyLeads() {
                         onChange={e => setAddLeadForm(p => ({ ...p, assignedTo: e.target.value }))}
                       >
                         <option value="">-- Select Salesperson (Optional) --</option>
-                        {salesEmployees.map(emp => (
+                        {assignEmployees.map(emp => (
                           <option key={emp._id} value={emp._id}>
                             {emp.firstName} {emp.lastName} ({emp.role?.name || 'Sales'})
                           </option>

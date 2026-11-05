@@ -2767,6 +2767,86 @@ function Pipeline() {
 
     const [deals, setDeals] = useState([]);
     const [contacts, setContacts] = useState([]);
+    const [employees, setEmployees] = useState([]);
+
+    // Compute pipeline view scope ('public' | 'team' | 'private')
+    const pipelineViewScope = useMemo(() => {
+        if (isAdmin) return 'public';
+        const roleObj = user?.role;
+        if (roleObj && Array.isArray(roleObj.permissions)) {
+            const perm = roleObj.permissions.find(p => p.module && (p.module.toLowerCase() === 'pipeline' || p.module.toLowerCase() === 'deals'));
+            if (perm && perm.viewScope) {
+                return perm.viewScope.toLowerCase().trim();
+            }
+        }
+        return (isSalesHead || isSalesManager) ? 'public' : 'private';
+    }, [isAdmin, user?.role, isSalesHead, isSalesManager]);
+
+    // Compute team member IDs (for team viewScope)
+    const teamMemberIds = useMemo(() => {
+        const uid = String(user?._id || user?.id || '');
+        if (!uid) return new Set();
+        const idSet = new Set([uid]);
+
+        if (!Array.isArray(employees) || employees.length === 0) return idSet;
+
+        // 1. Direct reports
+        const directReports = employees.filter(e => {
+            const mgrId = String(e.assignedManager?._id || e.assignedManager || '');
+            return mgrId === uid;
+        });
+        directReports.forEach(e => idSet.add(String(e._id || e.id || '')));
+
+        // 2. Sub-reports (if any direct report is also a manager)
+        const directReportIds = directReports.map(e => String(e._id || e.id || ''));
+        if (directReportIds.length > 0) {
+            employees.forEach(e => {
+                const mgrId = String(e.assignedManager?._id || e.assignedManager || '');
+                if (directReportIds.includes(mgrId)) {
+                    idSet.add(String(e._id || e.id || ''));
+                }
+            });
+        }
+
+        // 3. Subordinate employee fallback:
+        // If the current user is a manager or sales head (or has direct reports), their team is strictly
+        // themselves + their direct reports and sub-reports. They should NEVER pull in other peer heads / other teams!
+        // Step 3 (peers + manager) only applies if the user is a subordinate/executive with NO direct reports.
+        const isHeadOrManager = isSalesHead || isSalesManager || directReports.length > 0;
+        if (!isHeadOrManager) {
+            const currentUserEmp = employees.find(e => String(e._id || e.id || '') === uid);
+            const myMgrId = String(currentUserEmp?.assignedManager?._id || currentUserEmp?.assignedManager || user?.assignedManager?._id || user?.assignedManager || '');
+            if (myMgrId) {
+                idSet.add(myMgrId);
+                employees.forEach(e => {
+                    const mgrId = String(e.assignedManager?._id || e.assignedManager || '');
+                    if (mgrId === myMgrId) {
+                        idSet.add(String(e._id || e.id || ''));
+                    }
+                });
+            }
+        }
+
+        return idSet;
+    }, [user?._id, user?.id, user?.assignedManager, employees, isSalesHead, isSalesManager]);
+
+    const teamMemberNames = useMemo(() => {
+        const names = new Set();
+        const myName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim().toLowerCase();
+        if (myName) names.add(myName);
+
+        if (Array.isArray(employees)) {
+            employees.forEach(e => {
+                if (teamMemberIds.has(String(e._id || e.id || ''))) {
+                    const fn = `${e.firstName || ''} ${e.lastName || ''}`.trim().toLowerCase();
+                    if (fn) names.add(fn);
+                    if (e.email) names.add(e.email.toLowerCase().trim());
+                    if (e.officialEmail) names.add(e.officialEmail.toLowerCase().trim());
+                }
+            });
+        }
+        return names;
+    }, [user, employees, teamMemberIds]);
 
     // Ownership verification for data isolation
     const isItemOwnedByUser = useCallback((item, type = 'deal') => {
@@ -2793,7 +2873,8 @@ function Pipeline() {
         // For non-admin roles (Sales Head, Sales Manager, Executives), old pipeline items before 17 OCT 2026 are strictly hidden
         if (itemDate < DATA_CUTOFF_DATE) return false;
 
-        if (hasFullAccess) return true;
+        // Public viewScope: user can see all data from cutoff date onwards
+        if (pipelineViewScope === 'public') return true;
 
         const userId = (user._id || user.id || '').toString();
         const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
@@ -2805,6 +2886,11 @@ function Pipeline() {
 
         if (userId && (assignedId === userId || createdId === userId)) return true;
 
+        if (pipelineViewScope === 'team') {
+            if (assignedId && teamMemberIds.has(assignedId)) return true;
+            if (createdId && teamMemberIds.has(createdId)) return true;
+        }
+
         if (type === 'deal') {
             const salesOwner = (item.salesOwner || '').trim().toLowerCase();
             const addedBy = (item.addedBy || '').trim().toLowerCase();
@@ -2812,6 +2898,12 @@ function Pipeline() {
             if (userFullName && (salesOwner === userFullName || addedBy === userFullName)) return true;
             if (userEmail && (salesOwner === userEmail || addedBy === userEmail || email === userEmail)) return true;
             if (userOfficialEmail && (salesOwner === userOfficialEmail || email === userOfficialEmail)) return true;
+
+            if (pipelineViewScope === 'team') {
+                if (salesOwner && teamMemberNames.has(salesOwner)) return true;
+                if (addedBy && teamMemberNames.has(addedBy)) return true;
+                if (email && teamMemberNames.has(email)) return true;
+            }
         } else if (type === 'contact') {
             const owner = (item.owner || '').trim().toLowerCase();
             const addedBy = (item.addedBy || '').trim().toLowerCase();
@@ -2819,16 +2911,30 @@ function Pipeline() {
             if (userFullName && (owner === userFullName || addedBy === userFullName)) return true;
             if (userEmail && (owner === userEmail || addedBy === userEmail || email === userEmail)) return true;
             if (userOfficialEmail && (owner === userOfficialEmail || email === userOfficialEmail)) return true;
+
+            if (pipelineViewScope === 'team') {
+                if (owner && teamMemberNames.has(owner)) return true;
+                if (addedBy && teamMemberNames.has(addedBy)) return true;
+                if (email && teamMemberNames.has(email)) return true;
+            }
         } else if (type === 'company') {
             const owner = (item.owner || '').trim().toLowerCase();
             if (userFullName && owner === userFullName) return true;
             if (userEmail && owner === userEmail) return true;
+
+            if (pipelineViewScope === 'team') {
+                if (owner && teamMemberNames.has(owner)) return true;
+            }
         } else if (type === 'task') {
             const assignee = (item.assignee || '').trim().toLowerCase();
             if (userFullName && (assignee === userFullName || assignee === 'admin system')) return true;
             if (userEmail && assignee === userEmail) return true;
             if (userOfficialEmail && assignee === userOfficialEmail) return true;
             if (userId && (assignedId === userId || createdId === userId)) return true;
+
+            if (pipelineViewScope === 'team') {
+                if (assignee && teamMemberNames.has(assignee)) return true;
+            }
 
             // Universal Tasks: check if task is linked to a deal owned by or assigned to user
             if (item.associatedDealId) {
@@ -2840,12 +2946,10 @@ function Pipeline() {
                 const contact = contacts.find(c => String(c._id) === String(item.associatedContactId));
                 if (contact && isItemOwnedByUser(contact, 'contact')) return true;
             }
-
-            if (hasFullAccess) return true;
         }
 
         return false;
-    }, [user, hasFullAccess, isAdmin, adminDataViewMode, deals, contacts]);
+    }, [user, isAdmin, adminDataViewMode, pipelineViewScope, teamMemberIds, teamMemberNames, deals, contacts]);
 
     const RETIRED_LEGACY_TEMPLATES = useMemo(() => [
         'sales pipeline',
@@ -3000,9 +3104,8 @@ function Pipeline() {
         return PIPELINE_OPTIONS;
     });
     const [customOwners, setCustomOwners] = useState([]);
-    const [employees, setEmployees] = useState([]);
 
-    // Dynamic Deal & Contact Owner list (Only active employees with Sales role)
+    // Dynamic Deal & Contact Owner list (Only active employees with Sales role, scoped by viewScope)
     const ownerOptions = useMemo(() => {
         const list = new Set();
 
@@ -3011,6 +3114,15 @@ function Pipeline() {
             // Must be Active
             if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive') {
                 return;
+            }
+
+            const empId = String(emp._id || emp.id || '');
+            if (!isAdmin && pipelineViewScope === 'team' && !teamMemberIds.has(empId)) {
+                return;
+            }
+            if (!isAdmin && pipelineViewScope === 'private') {
+                const uid = String(user?._id || user?.id || '');
+                if (empId !== uid) return;
             }
 
             const roleName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
@@ -3034,7 +3146,7 @@ function Pipeline() {
         });
 
         return Array.from(list);
-    }, [employees]);
+    }, [employees, isAdmin, pipelineViewScope, teamMemberIds, user?._id, user?.id]);
     const [showAddPipelineInput, setShowAddPipelineInput] = useState(false);
     const [newPipelineName, setNewPipelineName] = useState('');
     const [editingPipelineId, setEditingPipelineId] = useState(null);
@@ -4014,6 +4126,7 @@ function Pipeline() {
             }
         });
         (contacts || []).forEach(c => {
+            if (!isItemOwnedByUser(c, 'contact')) return;
             if (c.owner && c.owner.trim()) {
                 const key = c.owner.trim().toLowerCase();
                 if (!ownerMap.has(key)) {
@@ -4022,7 +4135,7 @@ function Pipeline() {
             }
         });
         return Array.from(ownerMap.values()).sort((a, b) => a.localeCompare(b));
-    }, [ownerOptions, contacts]);
+    }, [ownerOptions, contacts, isItemOwnedByUser]);
 
     // Contact counts per owner for badge counts
     const contactOwnerCounts = useMemo(() => {
@@ -4296,6 +4409,7 @@ function Pipeline() {
             }
         });
         (companies || []).forEach(c => {
+            if (!isItemOwnedByUser(c, 'company')) return;
             const ownerVal = Array.isArray(c.owner) ? c.owner.join(', ') : (c.owner || '');
             if (ownerVal && ownerVal.trim()) {
                 ownerVal.split(',').map(s => s.trim()).filter(Boolean).forEach(o => {
@@ -4307,7 +4421,7 @@ function Pipeline() {
             }
         });
         return Array.from(ownerMap.values()).sort((a, b) => a.localeCompare(b));
-    }, [ownerOptions, companies]);
+    }, [ownerOptions, companies, isItemOwnedByUser]);
 
     // Company counts per owner for badge counts
     const companyOwnerCounts = useMemo(() => {
@@ -4391,14 +4505,14 @@ function Pipeline() {
         setCompanyOwnerSearchQuery('');
     };
 
-    // Ensure non-full access users (e.g. Sales role) do not have lingering owner filters active
+    // Ensure non-full access users (e.g. Sales role) or private scope do not have lingering owner filters active
     useEffect(() => {
-        if (!hasFullAccess) {
+        if (!hasFullAccess || pipelineViewScope === 'private') {
             if (ownerFilter !== 'all') setOwnerFilter('all');
             if (contactOwnerFilter !== 'all') setContactOwnerFilter('all');
             if (companyOwnerFilter !== 'all') setCompanyOwnerFilter('all');
         }
-    }, [hasFullAccess, ownerFilter, contactOwnerFilter, companyOwnerFilter]);
+    }, [hasFullAccess, pipelineViewScope, ownerFilter, contactOwnerFilter, companyOwnerFilter]);
 
     // Tasks Management State
     const [tasks, setTasks] = useState(INITIAL_SAMPLE_TASKS);
@@ -4476,6 +4590,13 @@ function Pipeline() {
 
             // Strictly only include employees with Sales, Sales Head, or Sales Manager roles
             if (!isSales) return;
+
+            const empId = String(emp._id || emp.id);
+            if (!isAdmin && pipelineViewScope === 'team' && !teamMemberIds.has(empId)) return;
+            if (!isAdmin && pipelineViewScope === 'private') {
+                const uid = String(user?._id || user?.id || '');
+                if (empId !== uid) return;
+            }
 
             const empName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || emp.email;
             let roleBadge = 'Sales';
@@ -4591,7 +4712,7 @@ function Pipeline() {
         });
 
         return options;
-    }, [employees, isAdmin, isSalesHead, isSalesManager, deals, contacts, detailedDeal, detailedContact]);
+    }, [employees, isAdmin, isSalesHead, isSalesManager, deals, contacts, detailedDeal, detailedContact, pipelineViewScope, teamMemberIds, user?._id, user?.id]);
 
     // Helper to extract strictly the contacts associated with a given deal
     const getDealAssociatedContacts = (targetDealIdOrObj) => {
@@ -4827,7 +4948,7 @@ function Pipeline() {
         //  - Reminders assigned to them (act.assignedTo === userId || act.assignedToName === user)
         //  - Reminders on deals/contacts assigned to or owned by them (entity.assignedTo === userId || entity.salesOwner/owner === user)
         const isReminderBelongingToUser = (act, entity, entityType) => {
-            if (isAdmin) return true;
+            if (isAdmin || pipelineViewScope === 'public') return true;
             if (!user) return false;
 
             // 1. Created by this user
@@ -4850,11 +4971,24 @@ function Pipeline() {
             if (userOfficialEmail && actAssignedName === userOfficialEmail) return true;
             if (username && actAssignedName === username) return true;
 
+            // Team scope checks
+            if (pipelineViewScope === 'team') {
+                if (actCreatedById && teamMemberIds.has(actCreatedById)) return true;
+                if (actAssignedId && teamMemberIds.has(actAssignedId)) return true;
+                if (author && teamMemberNames.has(author)) return true;
+                if (actAssignedName && teamMemberNames.has(actAssignedName)) return true;
+            }
+
             // 4. Deal or Contact is assigned to or owned by this user
             if (entity) {
                 const entityAssignedId = (entity.assignedTo?._id || entity.assignedTo || '').toString();
                 const entityCreatedId = (entity.createdBy?._id || entity.createdBy || '').toString();
                 if (userId && (entityAssignedId === userId || entityCreatedId === userId)) return true;
+
+                if (pipelineViewScope === 'team') {
+                    if (entityAssignedId && teamMemberIds.has(entityAssignedId)) return true;
+                    if (entityCreatedId && teamMemberIds.has(entityCreatedId)) return true;
+                }
 
                 if (entityType === 'deal') {
                     const salesOwner = (entity.salesOwner || '').trim().toLowerCase();
@@ -4863,6 +4997,12 @@ function Pipeline() {
                     if (userFullName && (salesOwner === userFullName || addedBy === userFullName)) return true;
                     if (userEmail && (salesOwner === userEmail || addedBy === userEmail || email === userEmail)) return true;
                     if (userOfficialEmail && (salesOwner === userOfficialEmail || email === userOfficialEmail)) return true;
+
+                    if (pipelineViewScope === 'team') {
+                        if (salesOwner && teamMemberNames.has(salesOwner)) return true;
+                        if (addedBy && teamMemberNames.has(addedBy)) return true;
+                        if (email && teamMemberNames.has(email)) return true;
+                    }
                 } else if (entityType === 'contact') {
                     const owner = (entity.owner || '').trim().toLowerCase();
                     const addedBy = (entity.addedBy || '').trim().toLowerCase();
@@ -4870,6 +5010,12 @@ function Pipeline() {
                     if (userFullName && (owner === userFullName || addedBy === userFullName)) return true;
                     if (userEmail && (owner === userEmail || addedBy === userEmail || email === userEmail)) return true;
                     if (userOfficialEmail && (owner === userOfficialEmail || email === userOfficialEmail)) return true;
+
+                    if (pipelineViewScope === 'team') {
+                        if (owner && teamMemberNames.has(owner)) return true;
+                        if (addedBy && teamMemberNames.has(addedBy)) return true;
+                        if (email && teamMemberNames.has(email)) return true;
+                    }
                 }
             }
 
@@ -5073,7 +5219,7 @@ function Pipeline() {
         });
 
         return list;
-    }, [deals, contacts, dealActivities, isAdmin, user, adminDataViewMode, normYMD, normTimeStr]);
+    }, [deals, contacts, dealActivities, isAdmin, user, adminDataViewMode, normYMD, normTimeStr, pipelineViewScope, teamMemberIds, teamMemberNames]);
 
     const activeRemindersCount = useMemo(() => {
         return allReminders.length;
@@ -8591,12 +8737,21 @@ function Pipeline() {
         }
     };
 
-    // Active Sales Employees for Task & Activity Assignment
+    // Active Sales Employees for Task & Activity Assignment (scoped by viewScope)
     const activeSalesEmployees = useMemo(() => {
         if (!employees || employees.length === 0) return [];
         return employees.filter(emp => {
             if (!emp) return false;
             if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive') return false;
+
+            const empId = String(emp._id || emp.id || '');
+            if (!isAdmin && pipelineViewScope === 'team' && !teamMemberIds.has(empId)) {
+                return false;
+            }
+            if (!isAdmin && pipelineViewScope === 'private') {
+                const uid = String(user?._id || user?.id || '');
+                if (empId !== uid) return false;
+            }
 
             const roleName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
             const department = (emp.department || '').toLowerCase().trim();
@@ -8614,9 +8769,9 @@ function Pipeline() {
 
             return isSales;
         });
-    }, [employees]);
+    }, [employees, isAdmin, pipelineViewScope, teamMemberIds, user?._id, user?.id]);
 
-    // Dynamic Available Employees for Deal Owner Dropdown (Active + Sales role only)
+    // Dynamic Available Employees for Deal Owner Dropdown (Active + Sales role only, scoped by viewScope)
     const availableAssignEmployees = useMemo(() => {
         let list = [];
         if (employees && employees.length > 0) {
@@ -8625,6 +8780,15 @@ function Pipeline() {
                 // Must be Active
                 if (emp.isActive === false || emp.status === 'Inactive' || emp.status === 'inactive') {
                     return false;
+                }
+
+                const empId = String(emp._id || emp.id || '');
+                if (!isAdmin && pipelineViewScope === 'team' && !teamMemberIds.has(empId)) {
+                    return false;
+                }
+                if (!isAdmin && pipelineViewScope === 'private') {
+                    const uid = String(user?._id || user?.id || '');
+                    if (empId !== uid) return false;
                 }
 
                 const roleName = (typeof emp.role === 'string' ? emp.role : (emp.role?.name || '')).toLowerCase().trim();
@@ -8909,6 +9073,7 @@ function Pipeline() {
             }
         });
         (deals || []).forEach(d => {
+            if (!isItemOwnedByUser(d, 'deal')) return;
             if (d.salesOwner && d.salesOwner.trim()) {
                 const key = d.salesOwner.trim().toLowerCase();
                 if (!ownerMap.has(key)) {
@@ -8917,7 +9082,7 @@ function Pipeline() {
             }
         });
         return Array.from(ownerMap.values()).sort((a, b) => a.localeCompare(b));
-    }, [ownerOptions, deals]);
+    }, [ownerOptions, deals, isItemOwnedByUser]);
 
     // Deal counts per owner for badge counts
     const dealOwnerCounts = useMemo(() => {
@@ -14103,7 +14268,7 @@ function Pipeline() {
                                     </div>
 
                                     {/* All Deal Owners Dropdown (Sales Head, Sales Manager, and Admin only) */}
-                                    {hasFullAccess && (
+                                    {hasFullAccess && pipelineViewScope !== 'private' && (
                                         <div className="pipeline-filter-dropdown-wrap">
                                             <button
                                                 type="button"
@@ -17545,7 +17710,7 @@ function Pipeline() {
                                     </div>
 
                                     {/* All Contact Owners Dropdown (Sales Head, Sales Manager, and Admin only) */}
-                                    {hasFullAccess && (
+                                    {hasFullAccess && pipelineViewScope !== 'private' && (
                                         <div className="pipeline-filter-dropdown-wrap">
                                             <button
                                                 type="button"
@@ -18946,7 +19111,7 @@ function Pipeline() {
                                 </div>
 
                                 {/* All Company Owners Dropdown (Sales Head, Sales Manager, and Admin only) */}
-                                {hasFullAccess && (
+                                {hasFullAccess && pipelineViewScope !== 'private' && (
                                     <div className="pipeline-filter-dropdown-wrap">
                                         <button
                                             type="button"
