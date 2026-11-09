@@ -370,7 +370,7 @@ function Projects() {
   const fetchProjects = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get("/projects");
+      const res = await api.get("/projects?module=projects");
       setProjects(res.data || []);
     } catch (err) {
       console.error("Failed to fetch projects:", err);

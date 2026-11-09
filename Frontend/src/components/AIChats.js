@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 import {
   Bot,
   Sparkles,
@@ -81,6 +82,13 @@ const STATUS_OPTIONS = [
 ];
 
 function AIChats() {
+  const { user, hasPermission } = useAuth();
+  const canUpdate = hasPermission('ai-chats', 'update');
+  const canDelete = hasPermission('ai-chats', 'delete');
+  const roleName = (typeof user?.role === 'object' && user?.role !== null ? user?.role?.name : user?.role || '').toLowerCase();
+  const isAdminUser = roleName === 'admin' || roleName === 'super admin' || roleName === 'director' || user?.isAdmin;
+  const canViewWebhook = isAdminUser || canUpdate;
+
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -108,6 +116,7 @@ function AIChats() {
 
   // Fetch webhook configuration from backend .env
   const fetchWebhookConfig = useCallback(async () => {
+    if (!canViewWebhook) return;
     try {
       setLoadingConfig(true);
       const res = await api.get('/ai-chats/webhook-config');
@@ -119,11 +128,13 @@ function AIChats() {
     } finally {
       setLoadingConfig(false);
     }
-  }, []);
+  }, [canViewWebhook]);
 
   useEffect(() => {
-    fetchWebhookConfig();
-  }, [fetchWebhookConfig]);
+    if (canViewWebhook) {
+      fetchWebhookConfig();
+    }
+  }, [canViewWebhook, fetchWebhookConfig]);
 
   const openWebhookModal = () => {
     fetchWebhookConfig();
@@ -352,28 +363,30 @@ function AIChats() {
 
         {/* Action Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button
-            onClick={openWebhookModal}
-            style={{
-              padding: '9px 16px',
-              borderRadius: 10,
-              border: '1px solid #e2e8f0',
-              background: '#ffffff',
-              color: '#334155',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 7,
-              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-              transition: 'all 0.15s ease'
-            }}
-            title="View Webhook Integration details for WordPress"
-          >
-            <Sparkles size={16} style={{ color: '#059669' }} />
-            <span>Webhook Settings</span>
-          </button>
+          {canViewWebhook && (
+            <button
+              onClick={openWebhookModal}
+              style={{
+                padding: '9px 16px',
+                borderRadius: 10,
+                border: '1px solid #e2e8f0',
+                background: '#ffffff',
+                color: '#334155',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                transition: 'all 0.15s ease'
+              }}
+              title="View Webhook Integration details for WordPress"
+            >
+              <Sparkles size={16} style={{ color: '#059669' }} />
+              <span>Webhook Settings</span>
+            </button>
+          )}
 
           <button
             onClick={fetchLeads}
@@ -672,27 +685,29 @@ function AIChats() {
                       <p style={{ fontSize: 13, color: '#64748b', margin: 0, lineHeight: 1.5 }}>
                         When visitors chat with the AI assistant on your WordPress website, inquiries will instantly appear in this table with full conversation transcripts.
                       </p>
-                      <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
-                        <button
-                          onClick={openWebhookModal}
-                          style={{
-                            padding: '8px 18px',
-                            borderRadius: 8,
-                            background: '#059669',
-                            color: '#ffffff',
-                            border: 'none',
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6
-                          }}
-                        >
-                          <Sparkles size={14} />
-                          <span>View Setup Instructions</span>
-                        </button>
-                      </div>
+                      {canViewWebhook && (
+                        <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+                          <button
+                            onClick={openWebhookModal}
+                            style={{
+                              padding: '8px 18px',
+                              borderRadius: 8,
+                              background: '#059669',
+                              color: '#ffffff',
+                              border: 'none',
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6
+                            }}
+                          >
+                            <Sparkles size={14} />
+                            <span>View Setup Instructions</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -839,59 +854,86 @@ function AIChats() {
 
                       {/* Status Dropdown */}
                       <td style={{ padding: '14px 18px' }}>
-                        <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
-                          <select
-                            value={lead.status || 'New Lead'}
-                            onChange={(e) => handleStatusChange(lead._id, e.target.value)}
-                            disabled={actionLoadingId === lead._id}
+                        {canUpdate ? (
+                          <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                            <select
+                              value={lead.status || 'New Lead'}
+                              onChange={(e) => handleStatusChange(lead._id, e.target.value)}
+                              disabled={actionLoadingId === lead._id}
+                              style={{
+                                width: '100%',
+                                padding: '6px 26px 6px 24px',
+                                borderRadius: 20,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                border: `1px solid ${statusConf.border}`,
+                                background: statusConf.bg,
+                                color: statusConf.color,
+                                cursor: 'pointer',
+                                outline: 'none',
+                                appearance: 'none',
+                                WebkitAppearance: 'none'
+                              }}
+                            >
+                              {STATUS_OPTIONS.map((opt) => (
+                                <option key={opt} value={opt} style={{ background: '#fff', color: '#0f172a' }}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+                            {/* Dot indicator */}
+                            <span
+                              style={{
+                                position: 'absolute',
+                                left: 10,
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                width: 7,
+                                height: 7,
+                                borderRadius: '50%',
+                                background: statusConf.dot,
+                                pointerEvents: 'none'
+                              }}
+                            />
+                            {/* Chevron icon */}
+                            <ChevronDown
+                              size={14}
+                              style={{
+                                position: 'absolute',
+                                right: 8,
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                color: statusConf.color,
+                                pointerEvents: 'none'
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <span
                             style={{
-                              width: '100%',
-                              padding: '6px 26px 6px 24px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '5px 12px',
                               borderRadius: 20,
                               fontSize: 12,
                               fontWeight: 600,
                               border: `1px solid ${statusConf.border}`,
                               background: statusConf.bg,
-                              color: statusConf.color,
-                              cursor: 'pointer',
-                              outline: 'none',
-                              appearance: 'none',
-                              WebkitAppearance: 'none'
+                              color: statusConf.color
                             }}
                           >
-                            {STATUS_OPTIONS.map((opt) => (
-                              <option key={opt} value={opt} style={{ background: '#fff', color: '#0f172a' }}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                          {/* Dot indicator */}
-                          <span
-                            style={{
-                              position: 'absolute',
-                              left: 10,
-                              top: '50%',
-                              transform: 'translateY(-50%)',
-                              width: 7,
-                              height: 7,
-                              borderRadius: '50%',
-                              background: statusConf.dot,
-                              pointerEvents: 'none'
-                            }}
-                          />
-                          {/* Chevron icon */}
-                          <ChevronDown
-                            size={14}
-                            style={{
-                              position: 'absolute',
-                              right: 8,
-                              top: '50%',
-                              transform: 'translateY(-50%)',
-                              color: statusConf.color,
-                              pointerEvents: 'none'
-                            }}
-                          />
-                        </div>
+                            <span
+                              style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: '50%',
+                                background: statusConf.dot
+                              }}
+                            />
+                            {lead.status || 'New Lead'}
+                          </span>
+                        )}
                       </td>
 
                       {/* View Chat Transcript Button */}
@@ -932,23 +974,27 @@ function AIChats() {
 
                       {/* Actions */}
                       <td style={{ padding: '14px 18px', textAlign: 'center' }}>
-                        <button
-                          onClick={() => handleDeleteLead(lead._id)}
-                          style={{
-                            padding: '6px',
-                            borderRadius: 6,
-                            border: 'none',
-                            background: 'transparent',
-                            color: '#94a3b8',
-                            cursor: 'pointer',
-                            transition: 'color 0.15s ease'
-                          }}
-                          title="Delete Lead"
-                          onMouseEnter={(e) => (e.currentTarget.style.color = '#ef4444')}
-                          onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {canDelete ? (
+                          <button
+                            onClick={() => handleDeleteLead(lead._id)}
+                            style={{
+                              padding: '6px',
+                              borderRadius: 6,
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#94a3b8',
+                              cursor: 'pointer',
+                              transition: 'color 0.15s ease'
+                            }}
+                            title="Delete Lead"
+                            onMouseEnter={(e) => (e.currentTarget.style.color = '#ef4444')}
+                            onMouseLeave={(e) => (e.currentTarget.style.color = '#94a3b8')}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        ) : (
+                          <span style={{ color: '#cbd5e1', fontSize: 13 }}>—</span>
+                        )}
                       </td>
                     </tr>
                   );

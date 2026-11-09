@@ -448,25 +448,6 @@ function MyLeads() {
     } finally {
       setLoading(false);
       initialFetchDoneRef.current = true;
-
-      // Background sync: Smoothly load all leads without history in background
-      // This enables instant filtering, multi-page selection, and full Excel export
-      setTimeout(() => {
-        api.get('/leads', {
-          params: {
-            includeHistory: 'false'
-          }
-        }).then(res => {
-          const data = res.data;
-          const all = Array.isArray(data) ? data : (data?.leads || []);
-          if (all.length > 50) {
-            setLeads(all);
-            setTotalLeadsCount(all.length);
-          }
-        }).catch(err => {
-          console.warn('Background sync error (page-based fallback active):', err.message);
-        });
-      }, 500);
     }
   };
 
@@ -491,7 +472,7 @@ function MyLeads() {
       fetchLeadsForPage(1, leadsPerPage);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, filterStatus, filterSource, filterEmployee, filterDate, filterEndDate, sortBy]);
+  }, [debouncedSearch, filterStatus, filterSource, filterEmployee, filterTeamMgrId, filterDate, filterEndDate, sortBy]);
 
   // Close assign dropdown on outside click
   useEffect(() => {
@@ -988,7 +969,9 @@ function MyLeads() {
         followUp: serverStats.followUp ?? 0,
         notInterested: serverStats.notInterested ?? 0,
         todayLeads: serverStats.todayLeads ?? 0,
-        sources: [...new Set(statsLeads.map(l => l.source).filter(Boolean))]
+        sources: Array.isArray(serverStats.sources) && serverStats.sources.length > 0
+          ? serverStats.sources
+          : [...new Set(statsLeads.map(l => l.source).filter(Boolean))]
       };
     }
 
@@ -1183,8 +1166,9 @@ function MyLeads() {
     : (filteredLeads.length > 0 ? filteredLeads.length : (hasFilterApplied ? 0 : (serverStats?.total || 0)));
   const totalPages = Math.max(1, Math.ceil(displayedTotal / leadsPerPage));
   const startIndex = (currentPage - 1) * leadsPerPage;
-  const isServerPaginated = totalLeadsCount > 0 && (filteredLeads.length < displayedTotal || leadsPerPage < displayedTotal);
-  const paginatedLeads = isServerPaginated ? filteredLeads : (filteredLeads.length <= leadsPerPage && startIndex === 0 ? filteredLeads : filteredLeads.slice(startIndex, startIndex + leadsPerPage));
+  const paginatedLeads = (filteredLeads.length > leadsPerPage)
+    ? filteredLeads.slice(startIndex, startIndex + leadsPerPage)
+    : filteredLeads;
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getStatusClass = (status) => ({
     'New': 'status-new', 'Contacted': 'status-contacted', 'Qualified': 'status-qualified',

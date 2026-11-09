@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const AIChatLead = require('../models/AIChatLead');
 const auth = require('../middleware/auth');
+const checkPermission = require('../middleware/checkPermission');
 
 /**
  * Helper to process incoming webhook payload
@@ -106,7 +107,7 @@ router.get('/webhook', (req, res) => {
  * GET /api/ai-chats/webhook-config
  * Fetch configured webhook URL and secret token dynamically from .env
  */
-router.get('/webhook-config', auth, async (req, res) => {
+router.get('/webhook-config', auth, checkPermission('ai-chats', 'read'), async (req, res) => {
   try {
     const webhookUrl =
       process.env.WEBHOOK_URL ||
@@ -134,7 +135,7 @@ router.get('/webhook-config', auth, async (req, res) => {
  * GET /api/ai-chats/leads
  * Fetch all leads captured from the Website AI chatbot
  */
-router.get('/leads', auth, async (req, res) => {
+router.get('/leads', auth, checkPermission('ai-chats', 'read'), async (req, res) => {
   try {
     const { search, status, page = 1, limit = 50 } = req.query;
 
@@ -215,7 +216,7 @@ router.get('/leads', auth, async (req, res) => {
  * PATCH /api/ai-chats/leads/:id/status
  * Update the status / notes of an AI chat lead
  */
-router.patch('/leads/:id/status', auth, async (req, res) => {
+router.patch('/leads/:id/status', auth, checkPermission('ai-chats', 'update'), async (req, res) => {
   try {
     const { status, notes } = req.body;
     const update = {};
@@ -243,7 +244,7 @@ router.patch('/leads/:id/status', auth, async (req, res) => {
  * DELETE /api/ai-chats/leads/:id
  * Delete an AI chat lead
  */
-router.delete('/leads/:id', auth, async (req, res) => {
+router.delete('/leads/:id', auth, checkPermission('ai-chats', 'delete'), async (req, res) => {
   try {
     const lead = await AIChatLead.findByIdAndDelete(req.params.id);
     if (!lead) {
@@ -260,7 +261,7 @@ router.delete('/leads/:id', auth, async (req, res) => {
  * POST /api/ai-chats/test-lead
  * Create a sample test lead directly from UI for testing
  */
-router.post('/test-lead', auth, async (req, res) => {
+router.post('/test-lead', auth, checkPermission('ai-chats', 'create'), async (req, res) => {
   try {
     const sample = await AIChatLead.create({
       name: req.body.name || 'Sample Client',

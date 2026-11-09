@@ -1,5 +1,6 @@
- const express = require('express');
+const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -58,25 +59,48 @@ router.get('/', auth, async (req, res) => {
   try {
     const userRole = (req.user.role ? req.user.role.name : '').trim();
     const userRoleLower = userRole.toLowerCase();
-    const isAdmin = userRoleLower === 'admin' || userRoleLower === 'super admin' || userRoleLower === 'superadmin' || userRoleLower === 'director';
+    const isAdmin = userRoleLower === 'admin' || userRoleLower === 'super admin' || userRoleLower === 'superadmin' || userRoleLower === 'director' || req.user.isAdmin;
 
-    const moduleName = req.query.module === 'accounts' ? 'accounts' : 'projects';
-    const viewScope = getModuleViewScope(req.user, moduleName);
+    let viewScope = 'private';
+    if (req.query.module) {
+      viewScope = getModuleViewScope(req.user, req.query.module);
+    } else {
+      // Determine viewScope across assignments and projects (use most permissive granted)
+      const assignScope = getModuleViewScope(req.user, 'assignments');
+      const projScope = getModuleViewScope(req.user, 'projects');
+      if (assignScope === 'public' || projScope === 'public') {
+        viewScope = 'public';
+      } else if (assignScope === 'team' || projScope === 'team') {
+        viewScope = 'team';
+      } else {
+        viewScope = 'private';
+      }
+    }
 
     let query = {};
     if (!isAdmin) {
+      const currentUserId = req.user._id || req.user.id;
+      const validObjId = mongoose.Types.ObjectId.isValid(currentUserId)
+        ? new mongoose.Types.ObjectId(currentUserId)
+        : currentUserId;
+      const userMatchIds = [currentUserId, validObjId];
+
       if (viewScope === 'private') {
-        query = { createdBy: req.user._id };
-      } else if (viewScope === 'team') {
-        const teamIds = await getTeamUserIds(req.user._id);
+        // Private: ONLY show the projects that are assigned to him
         query = {
-          $or: [
-            { createdBy: { $in: teamIds } },
-            { assignedEmployees: { $in: teamIds } }
-          ]
+          assignedEmployees: { $in: userMatchIds }
+        };
+      } else if (viewScope === 'team') {
+        const teamIds = await getTeamUserIds(currentUserId);
+        const teamObjIds = teamIds
+          .filter(id => mongoose.Types.ObjectId.isValid(id))
+          .map(id => new mongoose.Types.ObjectId(id));
+        const allTeamIds = [...new Set([...teamIds, ...teamObjIds, ...userMatchIds])];
+        query = {
+          assignedEmployees: { $in: allTeamIds }
         };
       }
-      // If viewScope === 'public', query remains {} (all projects/payments visible across organisation)
+      // If viewScope === 'public', query remains {} (all projects visible across organisation)
     }
 
     const projects = await Project.find(query)

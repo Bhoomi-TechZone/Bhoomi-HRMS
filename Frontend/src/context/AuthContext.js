@@ -302,17 +302,6 @@ export const AuthProvider = ({ children }) => {
       if (isSalesOrLeadRole) return true;
     }
 
-    // AI Chats permission: if explicitly configured in role permissions, respect it; otherwise default to true for read
-    if (targetModule === 'ai-chats' && targetAction === 'read') {
-      const modulePermission = user.role.permissions?.find(
-        p => p.module && p.module.toLowerCase().trim() === 'ai-chats'
-      );
-      if (modulePermission && Array.isArray(modulePermission.actions)) {
-        return modulePermission.actions.map(a => a.toLowerCase().trim()).includes('read');
-      }
-      return true;
-    }
-
     return false;
   }, [user]);
 

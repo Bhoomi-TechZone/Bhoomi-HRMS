@@ -1242,7 +1242,7 @@ router.get('/stats/overview', auth, async (req, res) => {
       ]
     };
 
-    const [total, newLeads, inProgress, converted, lost, followUp, notInterested, contacted, todayLeads] = await Promise.all([
+    const [total, newLeads, inProgress, converted, lost, followUp, notInterested, contacted, todayLeads, distinctSources] = await Promise.all([
       Lead.countDocuments(baseQuery),
       Lead.countDocuments({ $and: [...andConditions, { status: 'New' }] }),
       Lead.countDocuments({ $and: [...andConditions, { status: 'In Progress' }] }),
@@ -1251,7 +1251,8 @@ router.get('/stats/overview', auth, async (req, res) => {
       Lead.countDocuments({ $and: [...andConditions, followUpCondition] }),
       Lead.countDocuments({ $and: [...andConditions, { status: 'Not Interested' }] }),
       Lead.countDocuments({ $and: [...andConditions, { status: { $in: ['Contacted', 'Connected'] } }] }),
-      Lead.countDocuments({ $and: [...andConditions, { createdAt: { $gte: startOfToday } }] })
+      Lead.countDocuments({ $and: [...andConditions, { createdAt: { $gte: startOfToday } }] }),
+      Lead.distinct('source', baseQuery)
     ]);
 
     res.json({
@@ -1265,6 +1266,7 @@ router.get('/stats/overview', auth, async (req, res) => {
       notInterested,
       contacted,
       todayLeads,
+      sources: (distinctSources || []).filter(Boolean),
       conversionRate: total > 0 ? ((converted / total) * 100).toFixed(2) : 0
     });
   } catch (error) {
