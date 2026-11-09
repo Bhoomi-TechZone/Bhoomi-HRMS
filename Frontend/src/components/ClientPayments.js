@@ -263,6 +263,10 @@ function ClientPayments() {
 
       const paymentsWithData = projects.map((project, index) => {
         const baseAmount = project.projectValue || project.budget || project.totalAmount || 0;
+        const withGst = project.withGst === true || project.withGst === 'true';
+        const gstRate = parseFloat(project.gstRate !== undefined ? project.gstRate : 18) || 18;
+        const gstAmount = withGst ? (baseAmount * gstRate) / 100 : 0;
+        const totalAmount = withGst ? Math.round(baseAmount + gstAmount) : baseAmount;
         
         // Sum paid amounts from all PaymentRecords linked to this project
         const linkedRecords = allPaymentRecords.filter(r => {
@@ -282,13 +286,18 @@ function ClientPayments() {
           .filter(r => (r.paymentStatus || 'Paid').toLowerCase() === 'paid')
           .reduce((sum, r) => sum + (parseFloat(String(r.paidAmount).replace(/[^0-9.-]/g, '')) || 0), 0);
 
-        const paidAmount = recordsPaid > 0 ? recordsPaid : (project.paidAmount || 0);
+        let paidAmount = recordsPaid > 0 ? recordsPaid : (project.paidAmount || 0);
+        if (project.paymentStatus === 'Paid' && recordsPaid === 0 && paidAmount >= baseAmount) {
+          paidAmount = totalAmount;
+        }
         
         // Derive payment status
         let derivedPaymentStatus = project.paymentStatus;
-        if (baseAmount <= 0) {
+        if (project.paymentStatus === 'Paid' && paidAmount >= baseAmount) {
+          derivedPaymentStatus = 'Paid';
+        } else if (totalAmount <= 0) {
           derivedPaymentStatus = paidAmount > 0 ? 'Paid' : 'Unpaid';
-        } else if (paidAmount >= baseAmount) {
+        } else if (paidAmount >= totalAmount) {
           derivedPaymentStatus = 'Paid';
         } else if (paidAmount > 0) {
           derivedPaymentStatus = 'Partially Paid';
@@ -353,15 +362,16 @@ function ClientPayments() {
           paymentStatus: derivedPaymentStatus,
           baseAmount: baseAmount,
           rate: baseAmount,
-          totalAmount: baseAmount,
+          totalAmount: totalAmount,
+          withGst: withGst,
+          gstRate: gstRate,
           paidAmount: paidAmount,
           addedBy: addedByStr,
           addedByUser: addedByUserObj,
           description: project.description || '',
           itemDetails: project.description || '',
           hsnSac: project.hsnSac || '9975',
-          gstType: project.gstType || 'cgst_sgst',
-          gstRate: project.gstRate !== undefined ? project.gstRate : '18',
+          gstType: project.gstType || (withGst ? 'cgst_sgst' : 'none'),
           createdAt: project.createdAt || new Date().toISOString()
         };
       });
@@ -2965,9 +2975,42 @@ ${isDownload ? '' : `
                           })()}
                         </td>
                         <td style={{ padding: '11px 14px', textAlign: 'right', color: '#0f172a', fontWeight: 600, fontSize: '12px' }}>
-                          <div style={{ fontWeight: 700, color: '#0f172a' }}>
-                            ₹{Math.round(payment.totalAmount || payment.baseAmount || 0).toLocaleString()}
-                          </div>
+                          {payment.withGst ? (
+                            (() => {
+                              const base = payment.baseAmount || 0;
+                              const rate = parseFloat(payment.gstRate !== undefined ? payment.gstRate : 18) || 18;
+                              const gstAmount = (base * rate) / 100;
+                              const totalWithGst = Math.round(payment.totalAmount || (base + gstAmount));
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px', flexWrap: 'wrap' }}>
+                                    <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '12px' }}>
+                                      ₹{totalWithGst.toLocaleString('en-IN')}
+                                    </span>
+                                    <span style={{
+                                      fontSize: '9px',
+                                      color: '#166534',
+                                      background: '#dcfce7',
+                                      border: '1px solid #bbf7d0',
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      fontWeight: 700,
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      {rate}% GST
+                                    </span>
+                                  </div>
+                                  <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                                    Base: ₹{Math.round(base).toLocaleString('en-IN')}
+                                  </span>
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                              ₹{Math.round(payment.totalAmount || payment.baseAmount || 0).toLocaleString('en-IN')}
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                           <span style={{
@@ -3933,7 +3976,9 @@ ${isDownload ? '' : `
                         <span style={{ fontSize: '10px', color: '#666' }}>Project Services & Deliverables</span>
                       </td>
                       <td style={{ padding: '14px 12px', fontSize: '11px', color: '#333' }}>1</td>
-                      <td style={{ padding: '14px 12px', fontSize: '11px', textAlign: 'right', fontWeight: 600, color: '#000' }}>₹{p.totalAmount.toLocaleString('en-IN')}</td>
+                      <td style={{ padding: '14px 12px', fontSize: '11px', textAlign: 'right', fontWeight: 600, color: '#000' }}>
+                        ₹{(p.withGst ? (p.baseAmount || Math.round(p.totalAmount / (1 + (parseFloat(p.gstRate) || 18) / 100))) : p.totalAmount).toLocaleString('en-IN')}
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -3943,11 +3988,17 @@ ${isDownload ? '' : `
                   <div style={{ width: '300px', border: '2px solid #3b775e' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 16px', background: '#f8faf9', borderBottom: '1px solid #e0e0e0' }}>
                       <span style={{ fontSize: '12px', color: '#444', fontWeight: 500 }}>Subtotal:</span>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#000' }}>₹{p.totalAmount.toLocaleString('en-IN')}</span>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#000' }}>
+                        ₹{(p.withGst ? (p.baseAmount || Math.round(p.totalAmount / (1 + (parseFloat(p.gstRate) || 18) / 100))) : p.totalAmount).toLocaleString('en-IN')}
+                      </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 16px', borderBottom: '1px solid #e0e0e0' }}>
-                      <span style={{ fontSize: '12px', color: '#444', fontWeight: 500 }}>Tax (0%):</span>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#000' }}>₹0</span>
+                      <span style={{ fontSize: '12px', color: '#444', fontWeight: 500 }}>
+                        {p.withGst ? `GST (${p.gstRate || 18}%):` : 'Tax (0%):'}
+                      </span>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#000' }}>
+                        ₹{(p.withGst ? Math.round(p.totalAmount - (p.baseAmount || Math.round(p.totalAmount / (1 + (parseFloat(p.gstRate) || 18) / 100)))) : 0).toLocaleString('en-IN')}
+                      </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 16px', background: '#3b775e', color: '#fff' }}>
                       <span style={{ fontSize: '13px', fontWeight: 700 }}>Total Amount:</span>

@@ -34,9 +34,16 @@ export default function ProjectPaymentHistoryModal({
   const clientName = project?.clientName || project?.clientCompany || project?.client?.name || 'Client';
   const clientEmail = project?.clientEmail || project?.email || project?.client?.email || '';
 
-  // Calculate project values (base amount only, without GST)
-  const totalAmount = parseAmount(project?.baseAmount || project?.projectValue || project?.budget || project?.totalAmount || 0);
-  const baseValue = totalAmount;
+  // Calculate project values (with GST support)
+  const withGst = Boolean(project?.withGst === true || project?.withGst === 'true');
+  const gstRate = parseFloat(project?.gstRate !== undefined ? project?.gstRate : 18) || 18;
+  const rawBase = parseAmount(project?.baseAmount || project?.projectValue || project?.budget || 0);
+  const rawTotal = parseAmount(project?.totalAmount || 0);
+  const baseValue = rawBase > 0 ? rawBase : (withGst && rawTotal > 0 ? Math.round(rawTotal / (1 + gstRate / 100)) : rawTotal);
+  const gstAmount = withGst ? (baseValue * gstRate) / 100 : 0;
+  const totalAmount = withGst
+    ? (rawTotal > baseValue ? rawTotal : Math.round(baseValue + gstAmount))
+    : (rawTotal > 0 ? rawTotal : baseValue);
   
   // Calculate paid & pending from records dynamically (or fallback to project.paidAmount)
   const paidFromRecords = records
@@ -241,8 +248,21 @@ export default function ProjectPaymentHistoryModal({
             </div>
             <div>
               <h2 className="pipeline-milestone-modal-title">Payment History & Records</h2>
-              <p className="pipeline-milestone-modal-subtitle">
-                Project: <strong>{projectName}</strong> • Client: {clientName}
+              <p className="pipeline-milestone-modal-subtitle" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <span>Project: <strong>{projectName}</strong> • Client: {clientName}</span>
+                {withGst && (
+                  <span style={{
+                    fontSize: '10px',
+                    color: '#166534',
+                    background: '#dcfce7',
+                    border: '1px solid #bbf7d0',
+                    padding: '1.5px 7px',
+                    borderRadius: '4px',
+                    fontWeight: 700
+                  }}>
+                    Includes {gstRate}% GST
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -263,11 +283,31 @@ export default function ProjectPaymentHistoryModal({
         <div className="pipeline-milestone-modal-summary-row">
           <div className="pipeline-milestone-summary-tile">
             <div className="pipeline-milestone-summary-tile-label">Total Amount</div>
-            <div className="pipeline-milestone-summary-tile-val blue">
-              ₹{totalAmount.toLocaleString('en-IN')}
+            <div className="pipeline-milestone-summary-tile-val blue" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span>₹{totalAmount.toLocaleString('en-IN')}</span>
+              {withGst && (
+                <span style={{
+                  fontSize: '9.5px',
+                  color: '#166534',
+                  background: '#dcfce7',
+                  border: '1px solid #bbf7d0',
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  fontWeight: 700,
+                  lineHeight: '1.4'
+                }}>
+                  {gstRate}% GST
+                </span>
+              )}
             </div>
             <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
-              Base Project Value
+              {withGst ? (
+                <span>
+                  Base: <strong>₹{Math.round(baseValue).toLocaleString('en-IN')}</strong>
+                </span>
+              ) : (
+                'Base Project Value'
+              )}
             </div>
           </div>
 

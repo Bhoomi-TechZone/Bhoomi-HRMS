@@ -50,6 +50,10 @@ const projectSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  withGst: {
+    type: Boolean,
+    default: false
+  },
   gstType: {
     type: String,
     default: 'cgst_sgst'

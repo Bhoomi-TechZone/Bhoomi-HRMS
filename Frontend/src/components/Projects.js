@@ -20,6 +20,8 @@ const emptyProjectForm = {
   deadline: "",
   status: "active",
   projectValue: "",
+  withGst: false,
+  gstRate: 18,
   priority: "medium",
   country: "",
   currency: "",
@@ -692,6 +694,10 @@ function Projects() {
       formData.append('clientPhone', addForm.clientPhone.trim() || 'Not provided');
       formData.append('description', addForm.description || '');
       formData.append('projectValue', addForm.projectValue || 0);
+      formData.append('withGst', addForm.withGst ? 'true' : 'false');
+      if (addForm.withGst) {
+        formData.append('gstRate', addForm.gstRate !== undefined ? addForm.gstRate : 18);
+      }
       formData.append('priority', addForm.priority);
       formData.append('status', addForm.status);
       formData.append('country', addForm.country || '');
@@ -747,6 +753,8 @@ function Projects() {
       deadline: project.deadline ? new Date(project.deadline).toISOString().split("T")[0] : "",
       status: project.status || 'active',
       projectValue: project.projectValue || "",
+      withGst: project.withGst || false,
+      gstRate: project.gstRate !== undefined ? project.gstRate : 18,
       priority: project.priority || "medium",
       country: project.country || "",
       currency: project.currency || "",
@@ -779,6 +787,10 @@ function Projects() {
       formData.append('clientPhone', editForm.clientPhone || '');
       formData.append('description', editForm.description || '');
       formData.append('projectValue', editForm.projectValue || 0);
+      formData.append('withGst', editForm.withGst ? 'true' : 'false');
+      if (editForm.withGst) {
+        formData.append('gstRate', editForm.gstRate !== undefined ? editForm.gstRate : 18);
+      }
       formData.append('priority', editForm.priority);
       formData.append('status', editForm.status);
       formData.append('country', editForm.country || '');
@@ -959,6 +971,111 @@ function Projects() {
               style={{ flex: 1, border: "none", outline: "none", fontSize: "12px", color: "#0f172a", fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", background: "transparent", minWidth: 0 }} />
           </div>
         </label>
+
+        {/* With GST Toggle / Checkbox */}
+        <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+          <div
+            onClick={() => updateField(setForm, setErrors, "withGst", !form.withGst)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              height: "42px",
+              padding: "0 14px",
+              borderRadius: "10px",
+              border: form.withGst ? "1.5px solid #3b775e" : "1px solid #e2e8f0",
+              background: form.withGst ? "#f0fdf4" : "#fff",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+              userSelect: "none"
+            }}
+          >
+            <input
+              type="checkbox"
+              id={`withGst-${isEdit ? 'edit' : 'add'}`}
+              checked={!!form.withGst}
+              onChange={(e) => updateField(setForm, setErrors, "withGst", e.target.checked)}
+              style={{
+                width: "17px",
+                height: "17px",
+                accentColor: "#3b775e",
+                cursor: "pointer",
+                margin: 0
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+            <label
+              htmlFor={`withGst-${isEdit ? 'edit' : 'add'}`}
+              style={{
+                fontSize: "12.5px",
+                fontWeight: 700,
+                color: form.withGst ? "#166534" : "#334155",
+                cursor: "pointer",
+                margin: 0,
+                display: "flex",
+                alignItems: "center",
+                gap: "6px"
+              }}
+            >
+              <span>With GST</span>
+              <span style={{ fontSize: "11px", fontWeight: 500, color: form.withGst ? "#15803d" : "#94a3b8" }}>
+                (Tax Applicable)
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* GST Rate input and live preview (shown when With GST is selected) */}
+        {form.withGst && (
+          <div style={{
+            gridColumn: "1 / -1",
+            background: "#f0fdf4",
+            border: "1px solid #bbf7d0",
+            borderRadius: "12px",
+            padding: "12px 16px",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "16px",
+            alignItems: "center"
+          }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px", fontWeight: 700, color: "#166534" }}>
+              <span>GST Rate (%)</span>
+              <div style={{ display: "flex", alignItems: "center", height: "40px", borderRadius: "8px", border: "1px solid #86efac", padding: "0 12px", background: "#fff" }}>
+                <input
+                  type="number"
+                  value={form.gstRate !== undefined ? form.gstRate : 18}
+                  onChange={(e) => updateField(setForm, setErrors, "gstRate", e.target.value)}
+                  placeholder="18"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  style={{ flex: 1, border: "none", outline: "none", fontSize: "13px", fontWeight: 600, color: "#0f172a", fontFamily: "'Inter','Poppins','Segoe UI',sans-serif", background: "transparent" }}
+                />
+                <span style={{ color: "#166534", fontWeight: 700, fontSize: "13px", marginLeft: "6px" }}>%</span>
+              </div>
+            </label>
+
+            {/* Live calculation breakdown */}
+            {(() => {
+              const baseVal = parseFloat(form.projectValue) || 0;
+              const rate = parseFloat(form.gstRate) || 0;
+              const gstAmount = (baseVal * rate) / 100;
+              const totalWithGst = baseVal + gstAmount;
+              const sym = getCurrencySymbol(form.currency);
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "3px", paddingLeft: "12px", borderLeft: "2px solid #86efac" }}>
+                  <div style={{ fontSize: "11px", color: "#64748b" }}>
+                    GST Amount: <strong style={{ color: "#0f172a" }}>{sym}{gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
+                  </div>
+                  <div style={{ fontSize: "12.5px", color: "#166534", fontWeight: 700 }}>
+                    Total with GST: <span style={{ fontSize: "14px", color: "#15803d" }}>{sym}{totalWithGst.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         <label style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px", fontWeight: 700, color: "#334155" }}>
           Description
@@ -1426,7 +1543,33 @@ function Projects() {
                     </td>
 
                     <td style={{ padding: "9px 12px", fontSize: "11.5px", fontWeight: 700, color: "#0f172a" }}>
-                      {project.projectValue ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: project.currency || 'INR', maximumFractionDigits: 0 }).format(project.projectValue) : "-"}
+                      {project.projectValue ? (
+                        project.withGst ? (
+                          (() => {
+                            const base = parseFloat(project.projectValue) || 0;
+                            const rate = parseFloat(project.gstRate !== undefined ? project.gstRate : 18);
+                            const gstAmount = (base * rate) / 100;
+                            const totalWithGst = base + gstAmount;
+                            const cur = project.currency || 'INR';
+                            const fmt = (v) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur, maximumFractionDigits: 0 }).format(v);
+                            return (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                  <span style={{ fontWeight: 700, color: "#0f172a" }}>{fmt(totalWithGst)}</span>
+                                  <span style={{ fontSize: "9px", color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", padding: "1px 5px", borderRadius: "4px", fontWeight: 700, whiteSpace: "nowrap" }}>
+                                    {rate}% GST
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 500, whiteSpace: "nowrap" }}>
+                                  Base: {fmt(base)}
+                                </span>
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          <span>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: project.currency || 'INR', maximumFractionDigits: 0 }).format(project.projectValue)}</span>
+                        )
+                      ) : "-"}
                     </td>
                     <td style={{ padding: "9px 12px" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }} data-proj-action-menu>
@@ -1524,7 +1667,7 @@ function Projects() {
 
       {showAddModal && (
         <div onClick={closeAddModal} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", zIndex: 1000 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "680px", background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", boxShadow: "0 20px 40px rgba(15,23,42,0.18)", overflow: "hidden" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "840px", background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", boxShadow: "0 20px 40px rgba(15,23,42,0.18)", overflow: "hidden" }}>
             <div style={{ padding: "18px 22px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: "18px", fontWeight: 600, color: "#0f172a" }}>Add Project</div>
@@ -1539,7 +1682,7 @@ function Projects() {
 
       {showEditModal && editingProject && (
         <div onClick={closeEditModal} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", zIndex: 1000 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "680px", background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", boxShadow: "0 20px 40px rgba(15,23,42,0.18)", overflow: "hidden" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "840px", background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", boxShadow: "0 20px 40px rgba(15,23,42,0.18)", overflow: "hidden" }}>
             <div style={{ padding: "18px 22px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: "18px", fontWeight: 800, color: "#0f172a" }}>Edit Project</div>
@@ -1554,7 +1697,7 @@ function Projects() {
 
       {viewProject && (
         <div onClick={() => { setViewProject(null); setIsFlipped(false); }} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", zIndex: 1000, perspective: "1200px" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "680px", position: "relative", transformStyle: "preserve-3d", transition: "transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1)", transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)", display: "flex" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: "840px", position: "relative", transformStyle: "preserve-3d", transition: "transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1)", transform: isFlipped ? "rotateY(180deg)" : "rotateY(0deg)", display: "flex" }}>
             
             {/* Front Face (Details) */}
             <div style={{ width: "100%", flexShrink: 0, background: "#fff", borderRadius: "18px", border: "1px solid #e2e8f0", boxShadow: "0 20px 40px rgba(15,23,42,0.18)", display: "flex", flexDirection: "column", maxHeight: "85vh", backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden", position: isFlipped ? "absolute" : "relative", top: 0, left: 0, zIndex: isFlipped ? 0 : 1 }}>
@@ -1605,7 +1748,35 @@ function Projects() {
                         {isOverdue(viewProject) ? 'Overdue' : (viewProject.status === 'active' ? 'Progress' : viewProject.status?.replace("-", " "))}
                       </span>
                     </div>
-                    <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: 600 }}>{viewProject.projectValue ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: viewProject.currency || 'INR', maximumFractionDigits: 0 }).format(viewProject.projectValue) : "-"}</div>
+                    <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: 700 }}>
+                      {viewProject.projectValue ? (
+                        viewProject.withGst ? (
+                          (() => {
+                            const base = parseFloat(viewProject.projectValue) || 0;
+                            const rate = parseFloat(viewProject.gstRate !== undefined ? viewProject.gstRate : 18);
+                            const gst = (base * rate) / 100;
+                            const total = base + gst;
+                            const cur = viewProject.currency || 'INR';
+                            const fmt = (v) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur, maximumFractionDigits: 0 }).format(v);
+                            return (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                  <span>{fmt(total)}</span>
+                                  <span style={{ fontSize: "10.5px", color: "#166534", background: "#dcfce7", border: "1px solid #bbf7d0", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                    {rate}% GST
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: "11px", color: "#64748b", fontWeight: 500 }}>
+                                  Base: {fmt(base)} + GST: {fmt(gst)}
+                                </span>
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          new Intl.NumberFormat('en-IN', { style: 'currency', currency: viewProject.currency || 'INR', maximumFractionDigits: 0 }).format(viewProject.projectValue)
+                        )
+                      ) : "-"}
+                    </div>
                   </div>
                   <div>
                     <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", marginBottom: "4px" }}>Timeline</div>

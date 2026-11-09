@@ -128,7 +128,7 @@ router.post('/', auth, checkPermission(['projects', 'assignments'], 'create'), u
   try {
     const assignedEmployees = req.body.assignedEmployees ? JSON.parse(req.body.assignedEmployees) : [];
     const projectTypes = req.body.projectTypes ? JSON.parse(req.body.projectTypes) : [];
-    
+
     const datesMap = {};
     if (assignedEmployees.length > 0) {
       const now = new Date();
@@ -161,6 +161,13 @@ router.post('/', auth, checkPermission(['projects', 'assignments'], 'create'), u
       activities
     };
 
+    if (req.body.withGst !== undefined) {
+      projectData.withGst = req.body.withGst === 'true' || req.body.withGst === true;
+    }
+    if (req.body.gstRate !== undefined) {
+      projectData.gstRate = parseFloat(req.body.gstRate) || 0;
+    }
+
     // Add uploaded files metadata
     if (req.files && req.files.length > 0) {
       projectData.documents = req.files.map(file => ({
@@ -186,13 +193,13 @@ router.post('/', auth, checkPermission(['projects', 'assignments'], 'create'), u
     // Notifications
     try {
       const io = req.app.get('socketio');
-      
+
       // Notify assigned employees
       if (assignedEmployees.length > 0) {
         Promise.all(
           assignedEmployees
             .filter(empId => String(empId) !== String(req.user._id))
-            .map(empId => 
+            .map(empId =>
               sendNotification(io, empId, 'Project Assigned', `You have been assigned to project: ${projectData.name}`, 'Project', `/assignments?projectId=${projectData._id}`)
             )
         ).catch(err => console.error(err));
@@ -246,22 +253,29 @@ router.put('/:id', auth, checkPermission(['projects', 'assignments', 'accounts']
     if (req.body.assignedEmployees && typeof req.body.assignedEmployees === 'string') {
       updateData.assignedEmployees = JSON.parse(req.body.assignedEmployees);
     }
-    
+
     if (req.body.projectTypes && typeof req.body.projectTypes === 'string') {
       updateData.projectTypes = JSON.parse(req.body.projectTypes);
+    }
+
+    if (req.body.withGst !== undefined) {
+      updateData.withGst = req.body.withGst === 'true' || req.body.withGst === true;
+    }
+    if (req.body.gstRate !== undefined) {
+      updateData.gstRate = parseFloat(req.body.gstRate) || 0;
     }
 
     if (updateData.assignedEmployees) {
       const currentDates = oldProject.employeeAssignmentDates ? Object.fromEntries(oldProject.employeeAssignmentDates) : {};
       const newDates = { ...currentDates };
       const now = new Date();
-      
+
       updateData.assignedEmployees.forEach(id => {
         if (!newDates[id]) {
           newDates[id] = now;
         }
       });
-      
+
       updateData.employeeAssignmentDates = newDates;
     }
 
@@ -292,10 +306,10 @@ router.put('/:id', auth, checkPermission(['projects', 'assignments', 'accounts']
     if (updateData.assignedEmployees) {
       const oldAssigned = oldProject.assignedEmployees.map(id => id.toString());
       const newAssigned = updateData.assignedEmployees.map(id => id.toString());
-      
+
       const added = newAssigned.filter(id => !oldAssigned.includes(id));
       const removed = oldAssigned.filter(id => !newAssigned.includes(id));
-      
+
       added.forEach(id => {
         newActivities.push({
           action: 'Assigned',
@@ -303,7 +317,7 @@ router.put('/:id', auth, checkPermission(['projects', 'assignments', 'accounts']
           performedBy: req.user._id
         });
       });
-      
+
       removed.forEach(id => {
         newActivities.push({
           action: 'Unassigned',
@@ -340,18 +354,18 @@ router.put('/:id', auth, checkPermission(['projects', 'assignments', 'accounts']
     // Notifications
     try {
       const io = req.app.get('socketio');
-      
+
       // Notify newly assigned employees
       if (updateData.assignedEmployees) {
         const oldAssigned = oldProject.assignedEmployees.map(id => String(id));
         const newAssigned = updateData.assignedEmployees.map(id => String(id));
         const newlyAdded = newAssigned.filter(id => !oldAssigned.includes(id));
-        
+
         if (newlyAdded.length > 0) {
           Promise.all(
             newlyAdded
               .filter(empId => String(empId) !== String(req.user._id))
-              .map(empId => 
+              .map(empId =>
                 sendNotification(io, empId, 'Project Assigned', `You have been added to project: ${project.name}`, 'Project', `/assignments?projectId=${project._id}`)
               )
           ).catch(err => console.error(err));
@@ -491,15 +505,15 @@ router.post('/:id/remarks', auth, async (req, res) => {
       },
       { new: true }
     )
-    .populate({
-      path: 'assignedEmployees',
-      select: 'firstName lastName employeeId department designation email officialEmail role',
-      populate: { path: 'role', select: 'name' }
-    })
-    .populate('createdBy', 'firstName lastName')
-    .populate('documents.uploadedBy', 'firstName lastName')
-    .populate('activities.performedBy', 'firstName lastName')
-    .populate('activities.targetUser', 'firstName lastName');
+      .populate({
+        path: 'assignedEmployees',
+        select: 'firstName lastName employeeId department designation email officialEmail role',
+        populate: { path: 'role', select: 'name' }
+      })
+      .populate('createdBy', 'firstName lastName')
+      .populate('documents.uploadedBy', 'firstName lastName')
+      .populate('activities.performedBy', 'firstName lastName')
+      .populate('activities.targetUser', 'firstName lastName');
 
     if (!project) {
       return res.status(404).json({ message: 'Project not found' });
