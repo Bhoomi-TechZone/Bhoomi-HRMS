@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const { sendNotification } = require('./socketNotifier');
+const { getTeamUserIds } = require('./roleAccess');
 
 /**
  * Formats a Date object to IST timestamp string
@@ -112,22 +113,6 @@ async function sendCrmNotification(io, {
       if (u.email) userMapByEmail.set(u.email.toLowerCase().trim(), u);
     }
 
-    // Determine target recipient IDs based on actor hierarchy
-    const targetUserIds = new Set();
-
-    if (actorCategory === 'SUBORDINATE') {
-      // Subordinate action -> Goes to Admin and Sales Head
-      adminUserIds.forEach(id => targetUserIds.add(id));
-      salesHeadUserIds.forEach(id => targetUserIds.add(id));
-    } else if (actorCategory === 'SALES_HEAD') {
-      // Sales Head action -> Goes to Admin only (not subordinates, not himself)
-      adminUserIds.forEach(id => targetUserIds.add(id));
-    } else if (actorCategory === 'ADMIN') {
-      // Admin action -> Goes to Sales Heads and other Admins (not himself)
-      salesHeadUserIds.forEach(id => targetUserIds.add(id));
-      adminUserIds.forEach(id => targetUserIds.add(id));
-    }
-
     // Resolve assignee if task or deal action
     let resolvedAssigneeId = null;
     let resolvedAssigneeName = assigneeName || '';
@@ -154,10 +139,49 @@ async function sendCrmNotification(io, {
           resolvedAssigneeName = getUserDisplayName(u);
         }
       }
+    }
 
-      // If task or deal is assigned/created and has a specific assignee, notify assignee
-      if (resolvedAssigneeId && (action === 'assign' || action === 'create' || action === 'update')) {
-        targetUserIds.add(resolvedAssigneeId);
+    // Determine target recipient IDs based on actor hierarchy and strict team boundaries
+    const targetUserIds = new Set();
+
+    // 1. Admins always receive supervisory notifications for CRM activity
+    adminUserIds.forEach(id => targetUserIds.add(id));
+
+    // 2. Direct Assignee gets notified on assignment, creation, or update
+    if (resolvedAssigneeId && (action === 'assign' || action === 'create' || action === 'update')) {
+      targetUserIds.add(resolvedAssigneeId);
+    }
+
+    // 3. Sales Heads: STRICT TEAM BOUNDARY ISOLATION
+    // One Sales Head must NEVER receive notifications for another Sales Head or their team.
+    // A Sales Head is ONLY notified if:
+    //  a) The actor belongs to their own team, OR
+    //  b) The assignee belongs to their own team.
+    if (salesHeadUserIds.length > 0) {
+      for (const shId of salesHeadUserIds) {
+        // Resolve this specific Sales Head's team members
+        const shTeamIds = await getTeamUserIds(shId);
+        const shTeamIdStrings = new Set(shTeamIds.map(id => id.toString()));
+
+        const isActorInTeam = actorIdStr && shTeamIdStrings.has(actorIdStr);
+        const isAssigneeInTeam = resolvedAssigneeId && shTeamIdStrings.has(resolvedAssigneeId);
+
+        if (actorCategory === 'SALES_HEAD') {
+          // Actor is a Sales Head. Peer Sales Heads are NEVER notified unless the item was assigned to their team
+          if (shId !== actorIdStr && isAssigneeInTeam) {
+            targetUserIds.add(shId);
+          }
+        } else if (actorCategory === 'SUBORDINATE') {
+          // Actor is a subordinate. Only notify the Sales Head who actually manages this subordinate or assignee
+          if (isActorInTeam || isAssigneeInTeam) {
+            targetUserIds.add(shId);
+          }
+        } else if (actorCategory === 'ADMIN') {
+          // Actor is Admin. Only notify the Sales Head whose team member is assigned
+          if (isAssigneeInTeam) {
+            targetUserIds.add(shId);
+          }
+        }
       }
     }
 

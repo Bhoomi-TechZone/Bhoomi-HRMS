@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Bell, Check, BellRing, Trash2, Megaphone, Briefcase, 
-  Target, Umbrella, Info, Circle, DollarSign, Users, Building, CheckSquare, UserCheck, Calendar
+  Target, Umbrella, Info, Circle, DollarSign, Users, Building, CheckSquare, UserCheck, Calendar, Cake
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 
 const getIconForType = (type, title = '') => {
+  if (type === 'Birthday' || (title && title.toLowerCase().includes('birthday'))) {
+    return <Cake size={16} color="#ffffff" />;
+  }
   if (type === 'Follow-up' || type === 'Followup' || (title && (title.includes('Follow-up') || title.includes('Followup')))) {
     return <Calendar size={16} color="#0284c7" />;
   }
@@ -20,6 +23,7 @@ const getIconForType = (type, title = '') => {
     case 'Payment': return <DollarSign size={16} color="#10b981" />;
     case 'Contact': return <UserCheck size={16} color="#06b6d4" />;
     case 'Company': return <Building size={16} color="#8b5cf6" />;
+    case 'Birthday': return <Cake size={16} color="#ffffff" />;
     case 'Lead':
     case 'CRM':
     case 'Client': return <Briefcase size={16} color="#3b82f6" />;
@@ -215,67 +219,103 @@ function NotificationBell({ filterType, filterTypes }) {
                 <span>You're all caught up!</span>
               </div>
             ) : (
-              notifications.map((notif) => (
-                <div 
-                  key={notif._id}
-                  onClick={() => handleNotificationClick(notif)}
-                  style={{
-                    padding: '14px 18px',
-                    borderBottom: '1px solid #f1f5f9',
-                    cursor: 'pointer',
-                    background: notif.isRead ? '#ffffff' : '#f8fafc',
-                    transition: 'all 0.2s ease',
-                    display: 'flex',
-                    gap: '14px',
-                    alignItems: 'flex-start',
-                    position: 'relative'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = notif.isRead ? '#ffffff' : '#f8fafc'}
-                >
-                  {/* Unread dot indicator */}
-                  {!notif.isRead && (
-                    <div style={{ position: 'absolute', left: '6px', top: '24px' }}>
-                      <Circle size={6} fill="#3b82f6" color="#3b82f6" />
-                    </div>
-                  )}
+              notifications.map((notif) => {
+                const isBirthday = notif.type === 'Birthday' || (notif.title && notif.title.toLowerCase().includes('birthday'));
+                const isWish = isBirthday && (notif.title && (notif.title.toLowerCase().includes('happy birthday') || notif.title.toLowerCase().includes('wish')));
 
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '10px',
-                    background: notif.isRead ? '#f1f5f9' : '#eff6ff',
-                    flexShrink: 0
-                  }}>
-                    {getIconForType(notif.type, notif.title)}
-                  </div>
-                  
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
-                      <span style={{ 
-                        fontSize: '13.5px', 
-                        fontWeight: notif.isRead ? '500' : '600', 
-                        color: notif.isRead ? '#334155' : '#0f172a', 
-                        whiteSpace: 'nowrap', 
-                        overflow: 'hidden', 
-                        textOverflow: 'ellipsis', 
-                        paddingRight: '8px' 
-                      }}>
-                        {notif.title ? notif.title.replace(/[📅⏰]/g, '').trim() : ''}
-                      </span>
-                      <span style={{ fontSize: '11px', color: notif.isRead ? '#94a3b8' : '#64748b', whiteSpace: 'nowrap', fontWeight: '500', marginTop: '2px' }}>
-                        {new Date(notif.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </span>
+                const rowBg = isBirthday
+                  ? (notif.isRead ? 'linear-gradient(135deg, #fff5f8 0%, #ffffff 100%)' : 'linear-gradient(135deg, #fff0f5 0%, #fdf2f8 100%)')
+                  : (notif.isRead ? '#ffffff' : '#f8fafc');
+
+                const hoverBg = isBirthday
+                  ? 'linear-gradient(135deg, #ffe4e9 0%, #fce7f3 100%)'
+                  : '#f1f5f9';
+
+                const iconBg = isBirthday
+                  ? 'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)'
+                  : (notif.isRead ? '#f1f5f9' : '#eff6ff');
+
+                return (
+                  <div 
+                    key={notif._id}
+                    onClick={() => handleNotificationClick(notif)}
+                    style={{
+                      padding: '14px 18px',
+                      borderBottom: isBirthday ? '1px solid #fce7f3' : '1px solid #f1f5f9',
+                      cursor: 'pointer',
+                      background: rowBg,
+                      transition: 'all 0.2s ease',
+                      display: 'flex',
+                      gap: '14px',
+                      alignItems: 'flex-start',
+                      position: 'relative'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = hoverBg}
+                    onMouseLeave={(e) => e.currentTarget.style.background = rowBg}
+                  >
+                    {/* Unread dot indicator */}
+                    {!notif.isRead && (
+                      <div style={{ position: 'absolute', left: '6px', top: '24px' }}>
+                        <Circle size={6} fill={isBirthday ? '#ec4899' : '#3b82f6'} color={isBirthday ? '#ec4899' : '#3b82f6'} />
+                      </div>
+                    )}
+
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '10px',
+                      background: iconBg,
+                      boxShadow: isBirthday ? '0 2px 8px rgba(236, 72, 153, 0.3)' : 'none',
+                      flexShrink: 0
+                    }}>
+                      {getIconForType(notif.type, notif.title)}
                     </div>
-                    <p style={{ margin: 0, fontSize: '13px', color: '#475569', lineHeight: '1.45', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {notif.message ? notif.message.replace(/[📅⏰]/g, '').replace(/\s*\|\s*Notes:\s*/i, ' — Notes: ').trim() : ''}
-                    </p>
+                    
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, paddingRight: '6px' }}>
+                          <span style={{ 
+                            fontSize: '13.5px', 
+                            fontWeight: notif.isRead ? '500' : '600', 
+                            color: isBirthday ? '#831843' : (notif.isRead ? '#334155' : '#0f172a'), 
+                            whiteSpace: 'nowrap', 
+                            overflow: 'hidden', 
+                            textOverflow: 'ellipsis'
+                          }}>
+                            {notif.title ? notif.title.replace(/[📅⏰]/g, '').trim() : ''}
+                          </span>
+                          {isBirthday && (
+                            <span style={{ 
+                              background: isWish 
+                                ? 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)' 
+                                : 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)', 
+                              color: '#fff', 
+                              fontSize: '9.5px', 
+                              fontWeight: 700, 
+                              padding: '1px 6px', 
+                              borderRadius: '999px', 
+                              marginLeft: '6px', 
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0
+                            }}>
+                              {isWish ? '🎂 Wish' : '🎈 Alert'}
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: '11px', color: isBirthday ? '#be185d' : (notif.isRead ? '#94a3b8' : '#64748b'), whiteSpace: 'nowrap', fontWeight: '500', marginTop: '2px' }}>
+                          {new Date(notif.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '13px', color: isBirthday ? (notif.isRead ? '#831843' : '#4c0519') : '#475569', lineHeight: '1.45', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {notif.message ? notif.message.replace(/[📅⏰]/g, '').replace(/\s*\|\s*Notes:\s*/i, ' — Notes: ').trim() : ''}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
           

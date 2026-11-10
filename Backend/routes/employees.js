@@ -147,7 +147,7 @@ router.get('/stats', auth, checkPermission('employees', 'read'), async (req, res
 router.get('/list', auth, async (req, res) => {
   try {
     const employees = await User.find({ isActive: true })
-      .select('firstName lastName employeeId designation role isActive email phone department officialEmail joiningDate isManager assignedManager')
+      .select('firstName lastName employeeId designation role isActive email phone department officialEmail joiningDate dateOfBirth dob isManager assignedManager')
       .populate('role', 'name')
       .populate('assignedManager', 'firstName lastName employeeId')
       .sort({ firstName: 1 });
@@ -178,7 +178,7 @@ router.get('/', auth, async (req, res) => {
     // For other roles (e.g. Sales Team, Team Leader, Sales Head, Manager) who need employee list for assignment dropdowns
     // return sanitized active employee list without sensitive HR/salary/banking data
     const employees = await User.find({ isActive: true })
-      .select('firstName lastName employeeId designation role isActive email phone department officialEmail joiningDate isManager assignedManager')
+      .select('firstName lastName employeeId designation role isActive email phone department officialEmail joiningDate dateOfBirth dob isManager assignedManager')
       .populate('role', 'name')
       .populate('assignedManager', 'firstName lastName employeeId')
       .sort({ firstName: 1 });

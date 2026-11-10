@@ -131,7 +131,15 @@ export const AuthProvider = ({ children }) => {
 
       // Listen for notifications globally
       const handleNewNotification = (notification) => {
-        setNotifications((prev) => [notification, ...prev]);
+        if (!notification || !notification._id) return;
+
+        setNotifications((prev) => {
+          // Prevent duplicates in React state
+          if ((prev || []).some(n => n._id === notification._id || (n.title === notification.title && n.message === notification.message))) {
+            return prev;
+          }
+          return [notification, ...(prev || [])];
+        });
         setActiveToast(notification);
 
         // Play notification sound
@@ -175,10 +183,20 @@ export const AuthProvider = ({ children }) => {
       api.get('/notifications')
         .then(res => {
           const fetchedNotifications = res.data || [];
+          // Deduplicate fetched list by unique _id to ensure clean rendering
+          const uniqueFetched = [];
+          const seenFetchIds = new Set();
+          for (const item of fetchedNotifications) {
+            if (item && item._id && !seenFetchIds.has(item._id)) {
+              seenFetchIds.add(item._id);
+              uniqueFetched.push(item);
+            }
+          }
+
           setNotifications(prev => {
             // Check if there are newly arrived unread notifications that were not in prev
             const prevIds = new Set((prev || []).map(p => p._id));
-            const brandNew = fetchedNotifications.filter(n => !n.isRead && !prevIds.has(n._id));
+            const brandNew = uniqueFetched.filter(n => !n.isRead && !prevIds.has(n._id));
             if (initialLoadRef.current && brandNew.length > 0) {
               setActiveToast(brandNew[0]);
               const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.toUpperCase().indexOf('MAC') >= 0;
@@ -186,7 +204,7 @@ export const AuthProvider = ({ children }) => {
               const audio = new Audio(soundUrl);
               audio.play().catch(err => console.log('Browser blocked audio playback:', err));
             }
-            return fetchedNotifications;
+            return uniqueFetched;
           });
 
           if (!initialLoadRef.current) {

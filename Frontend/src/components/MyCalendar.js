@@ -18,6 +18,7 @@ const CalendarToolbar = ({ date, onNavigate, selectedFilter, onFilterChange }) =
         meeting: 'Meeting',
         deadline: 'Deadline',
         event: 'Event',
+        birthday: 'Birthday',
     };
 
     useEffect(() => {
@@ -91,6 +92,7 @@ const MyCalendar = () => {
         const [rowsPerPage, setRowsPerPage] = useState(10);
     const { user, hasPermission } = useAuth();
     const [events, setEvents] = useState([]);
+    const [employeesList, setEmployeesList] = useState([]);
     const [selectedFilter, setSelectedFilter] = useState('all');
     const [hoverCard, setHoverCard] = useState(null);
     const [showCalendar, setShowCalendar] = useState(true);
@@ -98,12 +100,15 @@ const MyCalendar = () => {
     const [currentView, setCurrentView] = useState('month');
     const [showModal, setShowModal] = useState(false);
     const [viewEvent, setViewEvent] = useState(null);
+    const [showOccasionModal, setShowOccasionModal] = useState(false);
+    const [occasionData, setOccasionData] = useState({ date: null, events: [] });
+    const justClickedOccasionRef = useRef(false);
     const [newEvent, setNewEvent] = useState({
         title: '',
         description: '',
         start: new Date(),
         end: new Date(),
-        type: 'event', // event, holiday, meeting, deadline
+        type: 'event', // event, holiday, meeting, deadline, birthday
         isAllDay: false
     });
     const [editMode, setEditMode] = useState(false);
@@ -111,18 +116,73 @@ const MyCalendar = () => {
     const [successPopup, setSuccessPopup] = useState(null);
 
     // Permission checks
-    const isAdmin = user?.role?.name === 'Admin' || user?.role?.name === 'HR';
     const canCreate = hasPermission('calendar', 'create');
     const canUpdate = hasPermission('calendar', 'update');
     const canDelete = hasPermission('calendar', 'delete');
     const canRead = hasPermission('calendar', 'read');
+
+    // Helper to open Add Event card for a specific date (e.g. when clicking white area cell)
+    const openAddEventForDate = (date) => {
+        if (justClickedOccasionRef.current) return;
+        const d = date ? new Date(date) : new Date();
+        const start = new Date(d);
+        start.setHours(9, 0, 0, 0);
+        const end = new Date(d);
+        end.setHours(10, 0, 0, 0);
+
+        setNewEvent({
+            title: '',
+            description: '',
+            start,
+            end,
+            type: 'event',
+            isAllDay: false
+        });
+        setEditMode(false);
+        setViewEvent(null);
+        setShowOccasionModal(false);
+        setHoverCard(null);
+        setShowModal(true);
+    };
+
+    // Helper to open the Occasion modal for a specific day
+    const handleOpenOccasion = (date, dayEvents) => {
+        justClickedOccasionRef.current = true;
+        setOccasionData({
+            date: new Date(date),
+            events: dayEvents || []
+        });
+        setShowModal(false);
+        setShowOccasionModal(true);
+        setHoverCard(null);
+        setTimeout(() => {
+            justClickedOccasionRef.current = false;
+        }, 500);
+    };
+
+    // Native capture listener to prevent react-big-calendar from intercepting badge/date clicks as slot selection
+    const attachOccasionStop = (el) => {
+        if (el && !el._stopBound) {
+            el._stopBound = true;
+            const stopHandler = (e) => {
+                justClickedOccasionRef.current = true;
+                e.stopPropagation();
+                if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                setTimeout(() => {
+                    justClickedOccasionRef.current = false;
+                }, 500);
+            };
+            el.addEventListener('mousedown', stopHandler, true);
+            el.addEventListener('touchstart', stopHandler, true);
+            el.addEventListener('mouseup', stopHandler, true);
+        }
+    };
 
     // Success popup function
     const showSuccessPopup = (message, type = 'success') => {
         setSuccessPopup({ message, type });
         setTimeout(() => setSuccessPopup(null), 2000);
     };
-
 
     useEffect(() => {
         setLoading(true);
@@ -131,11 +191,12 @@ const MyCalendar = () => {
 
     const fetchData = async () => {
         try {
-            const [holidaysRes, eventsRes, projectsRes, leavesRes] = await Promise.all([
+            const [holidaysRes, eventsRes, projectsRes, leavesRes, employeesRes] = await Promise.all([
                 canRead ? api.get('/holidays') : Promise.resolve({ data: [] }),
                 canRead ? api.get('/events') : Promise.resolve({ data: [] }),
                 hasPermission('projects', 'read') ? api.get('/projects') : Promise.resolve({ data: [] }),
-                hasPermission('leaves', 'read') ? api.get('/leaves') : Promise.resolve({ data: [] })
+                hasPermission('leaves', 'read') ? api.get('/leaves') : Promise.resolve({ data: [] }),
+                api.get('/employees').catch(() => api.get('/employees/list').catch(() => ({ data: [] })))
             ]);
 
             const holidays = holidaysRes.data.map(h => ({
@@ -153,8 +214,8 @@ const MyCalendar = () => {
                 title: e.title,
                 start: new Date(e.start),
                 end: new Date(e.end),
-                allDay: e.type === 'holiday' || e.type === 'deadline',
-                type: e.type, // meeting, event, etc.
+                allDay: e.type === 'holiday' || e.type === 'deadline' || e.type === 'birthday',
+                type: e.type, // meeting, event, birthday, etc.
                 desc: e.description
             }));
 
@@ -183,6 +244,7 @@ const MyCalendar = () => {
                     desc: l.reason
                 }));
 
+            setEmployeesList(Array.isArray(employeesRes.data) ? employeesRes.data : []);
             setEvents([...holidays, ...calendarEvents, ...projectDeadlines, ...leaves]);
 
         } catch (error) {
@@ -191,10 +253,12 @@ const MyCalendar = () => {
     };
 
     const handleSelectSlot = ({ start, end }) => {
-        // Allow past dates
-        setNewEvent({ ...newEvent, start, end });
-        setShowModal(true);
-        setViewEvent(null);
+        if (justClickedOccasionRef.current) {
+            justClickedOccasionRef.current = false;
+            return;
+        }
+        // Clicking on the white area cell of a date opens the Add Event card for that date
+        openAddEventForDate(start);
     };
 
     const handleSelectEvent = (event) => {
@@ -343,6 +407,71 @@ const MyCalendar = () => {
         }
     };
 
+    const birthdayEvents = React.useMemo(() => {
+        const role = (user?.role?.name || (typeof user?.role === 'string' ? user.role : '') || '').toString().trim().toLowerCase();
+        const hrOrAdmin = ['admin', 'director', 'hr', 'hr manager', 'super admin'].some(r => role === r || role.includes(r)) || user?.isSuperAdmin;
+
+        const currentUserId = (user?._id || user?.id || '').toString();
+        const currentUserEmpId = (user?.employeeId || '').toString().trim().toLowerCase();
+        const currentUserEmail = (user?.email || user?.officialEmail || '').toString().trim().toLowerCase();
+
+        // 1. Only active employees
+        const activeEmployees = employeesList.filter(emp => emp.isActive !== false && (emp.status || '').toLowerCase() !== 'inactive');
+
+        // 2. HR & Admin see all active employee birthdays; regular users see only their respective birthday
+        let targetEmployees = [];
+        if (hrOrAdmin) {
+            targetEmployees = activeEmployees;
+        } else {
+            targetEmployees = activeEmployees.filter(emp => {
+                const empId = (emp._id || emp.id || '').toString();
+                const empCode = (emp.employeeId || '').toString().trim().toLowerCase();
+                const empMail = (emp.email || emp.officialEmail || '').toString().trim().toLowerCase();
+                return (currentUserId && empId === currentUserId) ||
+                       (currentUserEmpId && empCode === currentUserEmpId) ||
+                       (currentUserEmail && empMail === currentUserEmail);
+            });
+
+            if (targetEmployees.length === 0 && (user?.dateOfBirth || user?.dob)) {
+                targetEmployees = [user];
+            }
+        }
+
+        if (!targetEmployees.length) return [];
+
+        const viewYear = moment(currentDate).year();
+        const years = [viewYear - 2, viewYear - 1, viewYear, viewYear + 1, viewYear + 2];
+        const bEvents = [];
+
+        targetEmployees.forEach(emp => {
+            const rawDob = emp.dateOfBirth || emp.dob || emp.personalDetails?.dob;
+            if (!rawDob) return;
+            const mDob = moment(rawDob);
+            if (!mDob.isValid()) return;
+            const birthMonth = mDob.month();
+            const birthDay = mDob.date();
+            const empName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || 'Employee';
+
+            years.forEach(yr => {
+                const bDate = new Date(yr, birthMonth, birthDay);
+                bEvents.push({
+                    id: `birthday-${emp._id || emp.id || emp.employeeId || 'self'}-${yr}`,
+                    title: `🎂 ${empName}'s Birthday`,
+                    employeeName: empName,
+                    start: bDate,
+                    end: bDate,
+                    allDay: true,
+                    type: 'birthday',
+                    desc: `Happy Birthday to ${empName}!${emp.designation ? ` (${emp.designation})` : ''}${emp.department ? ` • ${emp.department}` : ''}`,
+                    employee: emp
+                });
+            });
+        });
+        return bEvents;
+    }, [employeesList, currentDate, user]);
+
+    const allEvents = React.useMemo(() => [...events, ...birthdayEvents], [events, birthdayEvents]);
+
     const eventPropGetter = (event) => {
         let className = '';
         switch (event.type) {
@@ -350,14 +479,15 @@ const MyCalendar = () => {
             case 'meeting': className = 'event-meeting'; break;
             case 'deadline': className = 'event-deadline'; break;
             case 'leave': className = 'event-leave'; break;
+            case 'birthday': className = 'event-birthday'; break;
             default: className = 'event-task'; break;
         }
         return { className };
     };
 
     const visibleEvents = selectedFilter === 'all'
-        ? events
-        : events.filter((ev) => (ev.type || 'event') === selectedFilter);
+        ? allEvents
+        : allEvents.filter((ev) => (ev.type || 'event') === selectedFilter);
 
     // Pagination logic
     const totalRows = visibleEvents.length;
@@ -411,17 +541,104 @@ const MyCalendar = () => {
             const end = moment(ev.end).endOf('day');
             return dayMoment.isBetween(start, end, 'day', '[]');
         });
-        // Only show hover card if this cell is being hovered
-        const isHovered = hoverCard && hoverCard.dateLabel === dayMoment.format('ddd, MMM D, YYYY');
+        const birthdayEvents = dayEvents.filter(ev => ev.type === 'birthday');
+        const hasBirthday = birthdayEvents.length > 0;
+
+        let dateClass = 'calendar-date-number';
+        if (isToday && hasBirthday) {
+            dateClass = 'calendar-date-today calendar-date-today-birthday';
+        } else if (isToday) {
+            dateClass = 'calendar-date-today';
+        } else if (hasBirthday) {
+            dateClass = 'calendar-date-birthday';
+        }
+
+        // When user clicks the badge, date badge, or occasion dots -> show occasion modal
+        const handleBadgeOrDateClick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.nativeEvent) {
+                e.nativeEvent.stopImmediatePropagation();
+            }
+            justClickedOccasionRef.current = true;
+            closeHoverCard();
+
+            if (dayEvents && dayEvents.length > 0) {
+                handleOpenOccasion(date, dayEvents);
+            } else {
+                openAddEventForDate(date);
+            }
+        };
+
         return (
             <div
-                className="calendar-date-cell-head"
+                className={`calendar-date-cell-head${hasBirthday ? ' calendar-date-cell-has-birthday' : ''}`}
                 onMouseEnter={(e) => openHoverCard(e, dayMoment, dayEvents)}
                 onMouseMove={(e) => openHoverCard(e, dayMoment, dayEvents)}
                 onMouseLeave={closeHoverCard}
             >
-                <span className={isToday ? 'calendar-date-today' : ''}>{label}</span>
-                <span className="calendar-date-dots">
+                <div 
+                    className="calendar-date-header-inner"
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', width: '100%', minHeight: '26px' }}
+                >
+                    {hasBirthday && (
+                        <span
+                            ref={attachOccasionStop}
+                            className="calendar-birthday-badge"
+                            title="Click to view occasion of this day"
+                            onMouseDown={(e) => {
+                                justClickedOccasionRef.current = true;
+                                e.stopPropagation();
+                            }}
+                            onTouchStart={(e) => {
+                                justClickedOccasionRef.current = true;
+                                e.stopPropagation();
+                            }}
+                            onClick={handleBadgeOrDateClick}
+                            style={{ cursor: 'pointer' }}
+                        >
+                            🎂 {birthdayEvents.length === 1 
+                                ? (birthdayEvents[0].employeeName || 'Birthday')
+                                : `${birthdayEvents.length} Birthdays`}
+                        </span>
+                    )}
+                    <span 
+                        ref={attachOccasionStop}
+                        className={dateClass} 
+                        title={dayEvents.length > 0 ? "Click to view occasion of this day" : "Click to add event"}
+                        onMouseDown={(e) => {
+                            if (dayEvents && dayEvents.length > 0) {
+                                justClickedOccasionRef.current = true;
+                                e.stopPropagation();
+                            }
+                        }}
+                        onTouchStart={(e) => {
+                            if (dayEvents && dayEvents.length > 0) {
+                                justClickedOccasionRef.current = true;
+                                e.stopPropagation();
+                            }
+                        }}
+                        onClick={handleBadgeOrDateClick}
+                        style={{ cursor: 'pointer' }}
+                    >
+                        {label}
+                    </span>
+                </div>
+                <span 
+                    ref={attachOccasionStop}
+                    className="calendar-date-dots"
+                    onMouseDown={(e) => {
+                        justClickedOccasionRef.current = true;
+                        e.stopPropagation();
+                    }}
+                    onTouchStart={(e) => {
+                        justClickedOccasionRef.current = true;
+                        e.stopPropagation();
+                    }}
+                    onClick={handleBadgeOrDateClick}
+                    style={{ cursor: 'pointer' }}
+                    title={dayEvents.length > 0 ? "Click to view occasion of this day" : undefined}
+                >
                     {dayEvents.map((ev, idx) => (
                         <span
                             key={`${ev.id || ev.title}-${idx}-${dayMoment.format('YYYY-MM-DD')}`}
@@ -475,6 +692,7 @@ const MyCalendar = () => {
                     <div className="legend-item"><div className="legend-color event-meeting"></div> Meeting</div>
                     <div className="legend-item"><div className="legend-color event-deadline"></div> Deadline</div>
                     <div className="legend-item"><div className="legend-color event-task"></div> Event</div>
+                    <div className="legend-item"><div className="legend-color event-birthday"></div> Birthday</div>
                 </div>
                 <button
                     type="button"
@@ -522,7 +740,7 @@ const MyCalendar = () => {
                             endAccessor="end"
                             style={{ height: '100%' }}
                             eventPropGetter={eventPropGetter}
-                            selectable={canCreate}
+                            selectable={true}
                             onNavigate={(date) => setCurrentDate(date)}
                             onView={(view) => setCurrentView(view)}
                             onSelectSlot={handleSelectSlot}
@@ -603,10 +821,11 @@ const MyCalendar = () => {
                                 ) : (
                                     pagedEvents.map((ev, index) => {
                                         const typeBadge = {
-                                            holiday: { color: '#166534', bg: '#dcfce7', border: '#bbf7d0' },
+                                            holiday:  { color: '#166534', bg: '#dcfce7', border: '#bbf7d0' },
                                             meeting:  { color: '#1d4ed8', bg: '#dbeafe', border: '#bfdbfe' },
                                             deadline: { color: '#be123c', bg: '#ffe4e6', border: '#fecdd3' },
                                             event:    { color: '#6b21a8', bg: '#f3e8ff', border: '#e9d5ff' },
+                                            birthday: { color: '#be185d', bg: '#fdf2f8', border: '#fbcfe8' },
                                         }[ev.type] || { color: '#334155', bg: '#f1f5f9', border: '#e2e8f0' };
                                         return (
                                             <tr
@@ -630,37 +849,43 @@ const MyCalendar = () => {
                                                 </td>
                                                 {(canUpdate || canDelete) && (
                                                     <td style={{ padding: '10px 14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                                                            {canUpdate && (
-                                                                <button
-                                                                    onClick={(e) => { e.stopPropagation(); handleEditEvent(ev); }}
-                                                                    style={{ padding: '4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'background 0.2s' }}
-                                                                    title="Edit Event"
-                                                                    onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
-                                                                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                                                                >
-                                                                    <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-                                                                        <path d="M3 17h2.586l9.293-9.293a1 1 0 0 0 0-1.414l-2.172-2.172a1 1 0 0 0-1.414 0L3 13.586V17z" stroke="#3b775e" strokeWidth="1.5"/>
-                                                                        <path d="M14.293 5.707l-2-2" stroke="#3b775e" strokeWidth="1.5"/>
-                                                                    </svg>
-                                                                </button>
-                                                            )}
-                                                            {canDelete && (
-                                                                <button
-                                                                    onClick={(e) => { e.stopPropagation(); handleDeleteEvent(ev); }}
-                                                                    style={{ padding: '4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'background 0.2s' }}
-                                                                    title="Delete Event"
-                                                                    onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
-                                                                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                                                                >
-                                                                    <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
-                                                                        <rect x="5" y="7" width="10" height="8" rx="2" stroke="#e11d48" strokeWidth="1.5"/>
-                                                                        <path d="M8 9v4M12 9v4" stroke="#e11d48" strokeWidth="1.5"/>
-                                                                        <path d="M7 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" stroke="#e11d48" strokeWidth="1.5"/>
-                                                                    </svg>
-                                                                </button>
-                                                            )}
-                                                        </div>
+                                                        {ev.type === 'birthday' ? (
+                                                            <span style={{ fontSize: '10px', color: '#be185d', background: '#fdf2f8', border: '1px solid #fbcfe8', padding: '2px 8px', borderRadius: '999px', fontWeight: 600 }}>
+                                                                🎂 Birthday
+                                                            </span>
+                                                        ) : (
+                                                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                                                {canUpdate && (
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); handleEditEvent(ev); }}
+                                                                        style={{ padding: '4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'background 0.2s' }}
+                                                                        title="Edit Event"
+                                                                        onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                                                                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                                                    >
+                                                                        <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+                                                                            <path d="M3 17h2.586l9.293-9.293a1 1 0 0 0 0-1.414l-2.172-2.172a1 1 0 0 0-1.414 0L3 13.586V17z" stroke="#3b775e" strokeWidth="1.5"/>
+                                                                            <path d="M14.293 5.707l-2-2" stroke="#3b775e" strokeWidth="1.5"/>
+                                                                        </svg>
+                                                                    </button>
+                                                                )}
+                                                                {canDelete && (
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); handleDeleteEvent(ev); }}
+                                                                        style={{ padding: '4px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'background 0.2s' }}
+                                                                        title="Delete Event"
+                                                                        onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                                                                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                                                    >
+                                                                        <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+                                                                            <rect x="5" y="7" width="10" height="8" rx="2" stroke="#e11d48" strokeWidth="1.5"/>
+                                                                            <path d="M8 9v4M12 9v4" stroke="#e11d48" strokeWidth="1.5"/>
+                                                                            <path d="M7 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" stroke="#e11d48" strokeWidth="1.5"/>
+                                                                        </svg>
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                 )}
                                             </tr>
@@ -756,7 +981,7 @@ const MyCalendar = () => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div className="calendar-hover-card-date">{hoverCard.dateLabel}</div>
                         <div style={{ display: 'flex', gap: 6 }}>
-                            {canUpdate && (
+                            {canUpdate && hoverCard.events.some(ev => ev.type !== 'birthday') && (
                                 <button
                                     className="calendar-hover-edit-btn"
                                     title="Edit Event"
@@ -769,7 +994,7 @@ const MyCalendar = () => {
                                     </svg>
                                 </button>
                             )}
-                            {canDelete && (
+                            {canDelete && hoverCard.events.some(ev => ev.type !== 'birthday') && (
                                 <button
                                     className="calendar-hover-delete-btn"
                                     title="Delete Event"
@@ -790,7 +1015,7 @@ const MyCalendar = () => {
                             <div style={{ padding: '6px 12px', fontWeight: 600, fontSize: 13, color: '#3b775e' }}>
                                 Select event to {actionDropdown.type}
                             </div>
-                            {hoverCard.events.map((ev, idx) => (
+                            {hoverCard.events.filter(ev => ev.type !== 'birthday').map((ev, idx) => (
                                 <button
                                     key={ev.id || ev.title}
                                     style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px', background: 'none', border: 'none', fontSize: 13, cursor: 'pointer', color: '#222' }}
@@ -820,9 +1045,502 @@ const MyCalendar = () => {
                 </div>
             )}
 
+            {/* Day Occasions Modal (shown when clicking badge or date badge with occasions) */}
+            {showOccasionModal && occasionData.date && (
+                <div className="modal-overlay" onClick={() => setShowOccasionModal(false)}>
+                    <div 
+                        className="cal-modal occasion-modal" 
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ 
+                            width: '94%',
+                            maxWidth: '650px', 
+                            borderRadius: '18px', 
+                            overflow: 'hidden', 
+                            border: '1px solid #e2e8f0',
+                            boxShadow: '0 24px 50px rgba(0, 0, 0, 0.16), 0 4px 16px rgba(0, 0, 0, 0.08)'
+                        }}
+                    >
+                        {/* ── Occasion Header ── */}
+                        <div 
+                            className="cal-modal-hd"
+                            style={{
+                                background: occasionData.events.some(ev => ev.type === 'birthday')
+                                    ? 'linear-gradient(135deg, #fff1f2 0%, #fdf2f8 50%, #fce7f3 100%)'
+                                    : '#f8fafc',
+                                borderBottom: occasionData.events.some(ev => ev.type === 'birthday')
+                                    ? '1.5px solid #fbcfe8'
+                                    : '1px solid #e2e8f0',
+                                padding: '22px 28px 20px'
+                            }}
+                        >
+                            <div 
+                                className="cal-modal-hd-icon"
+                                style={{
+                                    background: occasionData.events.some(ev => ev.type === 'birthday')
+                                        ? 'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)'
+                                        : 'rgba(59, 119, 94, 0.12)',
+                                    color: occasionData.events.some(ev => ev.type === 'birthday') ? '#ffffff' : '#3b775e',
+                                    width: '44px',
+                                    height: '44px',
+                                    borderRadius: '12px',
+                                    boxShadow: occasionData.events.some(ev => ev.type === 'birthday')
+                                        ? '0 4px 14px rgba(236, 72, 153, 0.35)'
+                                        : 'none',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0
+                                }}
+                            >
+                                {occasionData.events.some(ev => ev.type === 'birthday') ? (
+                                    <span style={{ fontSize: '20px', lineHeight: 1 }}>🎂</span>
+                                ) : (
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                        <rect x="3" y="4" width="18" height="18" rx="3" stroke="#3b775e" strokeWidth="1.8" fill="none"/>
+                                        <line x1="16" y1="2" x2="16" y2="6" stroke="#3b775e" strokeWidth="1.8" strokeLinecap="round"/>
+                                        <line x1="8" y1="2" x2="8" y2="6" stroke="#3b775e" strokeWidth="1.8" strokeLinecap="round"/>
+                                        <line x1="3" y1="10" x2="21" y2="10" stroke="#3b775e" strokeWidth="1.3"/>
+                                        <circle cx="12" cy="15" r="2" fill="#3b775e" />
+                                    </svg>
+                                )}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div 
+                                    className="cal-modal-title"
+                                    style={{ 
+                                        fontSize: '17px', 
+                                        fontWeight: 800, 
+                                        color: occasionData.events.some(ev => ev.type === 'birthday') ? '#831843' : '#0f172a'
+                                    }}
+                                >
+                                    Occasions of the Day
+                                </div>
+                                <div 
+                                    className="cal-modal-sub"
+                                    style={{
+                                        fontSize: '13px',
+                                        color: occasionData.events.some(ev => ev.type === 'birthday') ? '#9d174d' : '#64748b',
+                                        marginTop: '3px',
+                                        fontWeight: 500
+                                    }}
+                                >
+                                    {moment(occasionData.date).format('dddd, MMMM D, YYYY')} • {occasionData.events.length} {occasionData.events.length === 1 ? 'Occasion' : 'Occasions'}
+                                </div>
+                            </div>
+                            <button 
+                                className="cal-close-btn" 
+                                onClick={() => setShowOccasionModal(false)}
+                                style={{ background: '#f1f5f9', cursor: 'pointer', width: '32px', height: '32px' }}
+                            >
+                                <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                                    <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* ── Occasions Body ── */}
+                        <div 
+                            className="cal-modal-body" 
+                            style={{ 
+                                padding: '24px 28px', 
+                                display: 'flex', 
+                                flexDirection: 'column', 
+                                gap: '16px', 
+                                maxHeight: '64vh', 
+                                overflowY: 'auto' 
+                            }}
+                        >
+                            {occasionData.events.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '36px 16px', color: '#94a3b8' }}>
+                                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>📅</div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', color: '#475569', fontWeight: 600 }}>No occasions scheduled</h4>
+                                    <p style={{ margin: '6px 0 16px', fontSize: '13px' }}>There are no special occasions, birthdays, or meetings on this date.</p>
+                                    <button
+                                        type="button"
+                                        className="cal-btn-primary"
+                                        style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                                        onClick={() => {
+                                            setShowOccasionModal(false);
+                                            openAddEventForDate(occasionData.date);
+                                        }}
+                                    >
+                                        + Add Event
+                                    </button>
+                                </div>
+                            ) : (
+                                occasionData.events.map((ev, idx) => {
+                                    if (ev.type === 'birthday') {
+                                        const emp = ev.employee || {};
+                                        const empName = ev.employeeName || ev.title.replace(/🎂|'s Birthday/g, '').trim();
+                                        const initials = empName ? empName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : '🎂';
+                                        return (
+                                            <div 
+                                                key={ev.id || `bday-${idx}`}
+                                                style={{
+                                                    background: 'linear-gradient(135deg, #fff5f8 0%, #fdf2f8 50%, #fce7f3 100%)',
+                                                    border: '1.5px solid #fbcfe8',
+                                                    borderRadius: '16px',
+                                                    padding: '20px 24px',
+                                                    boxShadow: '0 4px 16px rgba(236, 72, 153, 0.09)'
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                                                    <span style={{
+                                                        background: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
+                                                        color: '#ffffff',
+                                                        fontSize: '11.5px',
+                                                        fontWeight: 700,
+                                                        padding: '4px 12px',
+                                                        borderRadius: '999px',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '5px',
+                                                        boxShadow: '0 2px 8px rgba(236, 72, 153, 0.35)'
+                                                    }}>
+                                                        🎂 Birthday Celebration
+                                                    </span>
+                                                    <span style={{ fontSize: '12px', color: '#be185d', fontWeight: 600 }}>All Day</span>
+                                                </div>
+
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '14px' }}>
+                                                    <div style={{
+                                                        width: '56px',
+                                                        height: '56px',
+                                                        borderRadius: '50%',
+                                                        background: 'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)',
+                                                        color: '#ffffff',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        fontSize: '20px',
+                                                        fontWeight: 700,
+                                                        flexShrink: 0,
+                                                        boxShadow: '0 4px 12px rgba(236, 72, 153, 0.35)'
+                                                    }}>
+                                                        {initials}
+                                                    </div>
+                                                    <div>
+                                                        <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#831843' }}>
+                                                            {empName}
+                                                        </h3>
+                                                        <div style={{ fontSize: '13.5px', color: '#9d174d', marginTop: '3px', fontWeight: 500 }}>
+                                                            {emp.designation || (emp.role?.name) || 'Bhoomi Techzone Team Member'}
+                                                            {emp.department ? ` • ${emp.department}` : ''}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div style={{
+                                                    background: 'rgba(255, 255, 255, 0.88)',
+                                                    border: '1.5px dashed #f472b6',
+                                                    borderRadius: '12px',
+                                                    padding: '13px 16px',
+                                                    fontSize: '13.5px',
+                                                    color: '#701a75',
+                                                    lineHeight: 1.55
+                                                }}>
+                                                    🎉 <strong>Warm Birthday Wishes:</strong> Wishing {empName} a very Happy Birthday! May your day be filled with celebration, joy, and inspiring success in the year ahead! 🎂🎈
+                                                </div>
+
+                                                {(emp.email || emp.officialEmail || emp.phone || emp.mobile) && (
+                                                    <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', marginTop: '12px', fontSize: '12.5px', color: '#9d174d', fontWeight: 500 }}>
+                                                        {(emp.email || emp.officialEmail) && (
+                                                            <span>📧 {emp.email || emp.officialEmail}</span>
+                                                        )}
+                                                        {(emp.phone || emp.mobile) && (
+                                                            <span>📞 {emp.phone || emp.mobile}</span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    }
+
+                                    if (ev.type === 'holiday') {
+                                        return (
+                                            <div 
+                                                key={ev.id || `holiday-${idx}`}
+                                                style={{
+                                                    background: '#f0fdf4',
+                                                    border: '1.5px solid #bbf7d0',
+                                                    borderRadius: '14px',
+                                                    padding: '16px 18px'
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                                    <span style={{
+                                                        background: '#10b981',
+                                                        color: '#fff',
+                                                        fontSize: '11px',
+                                                        fontWeight: 700,
+                                                        padding: '3px 10px',
+                                                        borderRadius: '999px',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '4px'
+                                                    }}>
+                                                        🌴 Public Holiday
+                                                    </span>
+                                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                                        {canUpdate && (
+                                                            <button 
+                                                                onClick={() => { setShowOccasionModal(false); handleEditEvent(ev); }}
+                                                                style={{ background: 'white', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '3px 8px', fontSize: '11.5px', color: '#16a34a', cursor: 'pointer', fontWeight: 600 }}
+                                                            >
+                                                                Edit
+                                                            </button>
+                                                        )}
+                                                        {canDelete && (
+                                                            <button 
+                                                                onClick={() => { setShowOccasionModal(false); handleDeleteEvent(ev); }}
+                                                                style={{ background: 'white', border: '1px solid #fecaca', borderRadius: '6px', padding: '3px 8px', fontSize: '11.5px', color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <h4 style={{ margin: '0 0 4px', fontSize: '15.5px', color: '#14532d', fontWeight: 700 }}>
+                                                    {ev.title}
+                                                </h4>
+                                                <p style={{ margin: 0, fontSize: '13px', color: '#166534', lineHeight: 1.45 }}>
+                                                    {ev.desc || 'Public holiday scheduled for the office.'}
+                                                </p>
+                                            </div>
+                                        );
+                                    }
+
+                                    if (ev.type === 'meeting') {
+                                        return (
+                                            <div 
+                                                key={ev.id || `meeting-${idx}`}
+                                                style={{
+                                                    background: '#eff6ff',
+                                                    border: '1.5px solid #bfdbfe',
+                                                    borderRadius: '14px',
+                                                    padding: '16px 18px'
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                                    <span style={{
+                                                        background: '#3b82f6',
+                                                        color: '#fff',
+                                                        fontSize: '11px',
+                                                        fontWeight: 700,
+                                                        padding: '3px 10px',
+                                                        borderRadius: '999px',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '4px'
+                                                    }}>
+                                                        👥 Meeting
+                                                    </span>
+                                                    <span style={{ fontSize: '11.5px', color: '#2563eb', fontWeight: 600 }}>
+                                                        {moment(ev.start).format('h:mm A')} – {moment(ev.end).format('h:mm A')}
+                                                    </span>
+                                                </div>
+                                                <h4 style={{ margin: '0 0 4px', fontSize: '15.5px', color: '#1e3a8a', fontWeight: 700 }}>
+                                                    {ev.title}
+                                                </h4>
+                                                {ev.desc && (
+                                                    <p style={{ margin: 0, fontSize: '13px', color: '#1e40af', lineHeight: 1.45 }}>
+                                                        {ev.desc}
+                                                    </p>
+                                                )}
+                                                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                                                    {canUpdate && (
+                                                        <button 
+                                                            onClick={() => { setShowOccasionModal(false); handleEditEvent(ev); }}
+                                                            style={{ background: 'white', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '3px 8px', fontSize: '11.5px', color: '#2563eb', cursor: 'pointer', fontWeight: 600 }}
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                    )}
+                                                    {canDelete && (
+                                                        <button 
+                                                            onClick={() => { setShowOccasionModal(false); handleDeleteEvent(ev); }}
+                                                            style={{ background: 'white', border: '1px solid #fecaca', borderRadius: '6px', padding: '3px 8px', fontSize: '11.5px', color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+
+                                    if (ev.type === 'deadline') {
+                                        return (
+                                            <div 
+                                                key={ev.id || `deadline-${idx}`}
+                                                style={{
+                                                    background: '#fef2f2',
+                                                    border: '1.5px solid #fecaca',
+                                                    borderRadius: '14px',
+                                                    padding: '16px 18px'
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                                    <span style={{
+                                                        background: '#ef4444',
+                                                        color: '#fff',
+                                                        fontSize: '11px',
+                                                        fontWeight: 700,
+                                                        padding: '3px 10px',
+                                                        borderRadius: '999px',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '4px'
+                                                    }}>
+                                                        ⏰ Project Deadline
+                                                    </span>
+                                                    <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 600 }}>Due Today</span>
+                                                </div>
+                                                <h4 style={{ margin: '0 0 4px', fontSize: '15.5px', color: '#7f1d1d', fontWeight: 700 }}>
+                                                    {ev.title}
+                                                </h4>
+                                                {ev.desc && (
+                                                    <p style={{ margin: 0, fontSize: '13px', color: '#991b1b', lineHeight: 1.45 }}>
+                                                        {ev.desc}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        );
+                                    }
+
+                                    return (
+                                        <div 
+                                            key={ev.id || `event-${idx}`}
+                                            style={{
+                                                background: ev.type === 'leave' ? '#fffbeb' : '#f5f3ff',
+                                                border: `1.5px solid ${ev.type === 'leave' ? '#fde68a' : '#ddd6fe'}`,
+                                                borderRadius: '14px',
+                                                padding: '16px 18px'
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                                <span style={{
+                                                    background: ev.type === 'leave' ? '#f59e0b' : '#8b5cf6',
+                                                    color: '#fff',
+                                                    fontSize: '11px',
+                                                    fontWeight: 700,
+                                                    padding: '3px 10px',
+                                                    borderRadius: '999px',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '4px'
+                                                }}>
+                                                    {ev.type === 'leave' ? '🏖️ Leave' : '📌 Event'}
+                                                </span>
+                                                {!ev.allDay && (
+                                                    <span style={{ fontSize: '11.5px', color: ev.type === 'leave' ? '#d97706' : '#7c3aed', fontWeight: 600 }}>
+                                                        {moment(ev.start).format('h:mm A')}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <h4 style={{ margin: '0 0 4px', fontSize: '15.5px', color: ev.type === 'leave' ? '#78350f' : '#4c1d95', fontWeight: 700 }}>
+                                                {ev.title}
+                                            </h4>
+                                            {ev.desc && (
+                                                <p style={{ margin: 0, fontSize: '13px', color: ev.type === 'leave' ? '#92400e' : '#5b21b6', lineHeight: 1.45 }}>
+                                                    {ev.desc}
+                                                </p>
+                                            )}
+                                            {ev.type !== 'leave' && (
+                                                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                                                    {canUpdate && (
+                                                        <button 
+                                                            onClick={() => { setShowOccasionModal(false); handleEditEvent(ev); }}
+                                                            style={{ background: 'white', border: '1px solid #ddd6fe', borderRadius: '6px', padding: '3px 8px', fontSize: '11.5px', color: '#7c3aed', cursor: 'pointer', fontWeight: 600 }}
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                    )}
+                                                    {canDelete && (
+                                                        <button 
+                                                            onClick={() => { setShowOccasionModal(false); handleDeleteEvent(ev); }}
+                                                            style={{ background: 'white', border: '1px solid #fecaca', borderRadius: '6px', padding: '3px 8px', fontSize: '11.5px', color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        {/* ── Occasions Footer ── */}
+                        <div 
+                            className="cal-footer" 
+                            style={{ 
+                                display: 'flex', 
+                                justifyContent: 'space-between', 
+                                alignItems: 'center', 
+                                borderTop: '1px solid #f1f5f9', 
+                                padding: '14px 20px', 
+                                background: '#fafafa' 
+                            }}
+                        >
+                            <button
+                                type="button"
+                                style={{ 
+                                    display: 'inline-flex', 
+                                    alignItems: 'center', 
+                                    gap: '8px', 
+                                    fontSize: '13.5px', 
+                                    padding: '10px 22px', 
+                                    background: '#3b775e', 
+                                    color: '#ffffff', 
+                                    borderRadius: '10px', 
+                                    border: 'none', 
+                                    cursor: 'pointer', 
+                                    fontWeight: 600,
+                                    transition: 'background 0.15s ease'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#2f6350'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#3b775e'}
+                                onClick={() => {
+                                    setShowOccasionModal(false);
+                                    openAddEventForDate(occasionData.date);
+                                }}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                    <line x1="7" y1="1" x2="7" y2="13" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+                                    <line x1="1" y1="7" x2="13" y2="7" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+                                </svg>
+                                Add Event for this Day
+                            </button>
+                            <button
+                                type="button"
+                                className="cal-btn-ghost"
+                                style={{ 
+                                    padding: '10px 22px', 
+                                    background: '#f1f5f9', 
+                                    color: '#475569', 
+                                    borderRadius: '10px', 
+                                    border: 'none', 
+                                    cursor: 'pointer', 
+                                    fontWeight: 600,
+                                    fontSize: '13.5px',
+                                    transition: 'background 0.15s ease'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#e2e8f0'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#f1f5f9'}
+                                onClick={() => setShowOccasionModal(false)}
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {showModal && (
-                <div className="modal-overlay">
-                    <div className="cal-modal">
+                <div className="modal-overlay" onClick={() => { setShowModal(false); setEditMode(false); }}>
+                    <div className="cal-modal" onClick={(e) => e.stopPropagation()} style={{ width: '94%', maxWidth: '620px', borderRadius: '18px' }}>
                         {/* ── Header ── */}
                         <div className="cal-modal-hd">
                             <div className="cal-modal-hd-icon">
@@ -842,7 +1560,7 @@ const MyCalendar = () => {
                                     {editMode
                                         ? `${newEvent.type} · ${moment(newEvent.start).format('MMM D, YYYY')}`
                                         : viewEvent
-                                            ? `${viewEvent.type} · ${moment(viewEvent.start).format('MMM D, YYYY')}`
+                                            ? `${viewEvent.type === 'birthday' ? '🎂 Birthday' : viewEvent.type} · ${moment(viewEvent.start).format('MMM D, YYYY')}`
                                             : 'Fill in the details to schedule'}
                                 </div>
                             </div>
@@ -862,7 +1580,8 @@ const MyCalendar = () => {
                                             { v: 'event', l: 'Event' }, 
                                             { v: 'meeting', l: 'Meeting' }, 
                                             { v: 'deadline', l: 'Deadline' },
-                                            { v: 'holiday', l: 'Holiday' }
+                                            { v: 'holiday', l: 'Holiday' },
+                                            { v: 'birthday', l: 'Birthday' }
                                         ].map(opt => (
                                             <button
                                                 key={opt.v}
@@ -942,7 +1661,9 @@ const MyCalendar = () => {
                                 <div>
                                     <div className="cal-detail-row">
                                         <span className="cal-detail-lbl">Type</span>
-                                        <span className="cal-detail-val" style={{ textTransform: 'capitalize' }}>{viewEvent.type}</span>
+                                        <span className="cal-detail-val" style={{ textTransform: 'capitalize', color: viewEvent.type === 'birthday' ? '#be185d' : 'inherit', fontWeight: viewEvent.type === 'birthday' ? 700 : 'inherit' }}>
+                                            {viewEvent.type === 'birthday' ? '🎂 Birthday' : viewEvent.type}
+                                        </span>
                                     </div>
                                     <div className="cal-detail-row">
                                         <span className="cal-detail-lbl">Start</span>

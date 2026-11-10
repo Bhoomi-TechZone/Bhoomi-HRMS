@@ -225,6 +225,12 @@ mongoose
       console.error("[Worker] Follow-up reminder worker error:", err.message);
     }
 
+    try {
+      require("./cron/birthdayNotificationWorker")(io);
+    } catch (err) {
+      console.error("[Worker] Birthday notification worker error:", err.message);
+    }
+
     /* ================= LISTEN ================= */
     server.listen(PORT, () => {
       console.log(`\n======================================================`);

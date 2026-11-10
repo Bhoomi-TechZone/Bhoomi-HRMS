@@ -3,11 +3,14 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import { 
   Bell, Check, BellRing, Megaphone, Briefcase, 
-  Target, Umbrella, Info, DollarSign, UserCheck, Building, CheckSquare, Calendar
+  Target, Umbrella, Info, DollarSign, UserCheck, Building, CheckSquare, Calendar, Cake
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const getNotificationIcon = (type, title = '') => {
+  if (type === 'Birthday' || (title && title.toLowerCase().includes('birthday'))) {
+    return <Cake size={18} color="#ffffff" />;
+  }
   if (type === 'Follow-up' || type === 'Followup' || (title && (title.includes('Follow-up') || title.includes('Followup')))) {
     return <Calendar size={18} color="#0284c7" />;
   }
@@ -19,6 +22,7 @@ const getNotificationIcon = (type, title = '') => {
     case 'Deal': return <DollarSign size={18} />;
     case 'Contact': return <UserCheck size={18} />;
     case 'Company': return <Building size={18} />;
+    case 'Birthday': return <Cake size={18} color="#ffffff" />;
     case 'CRM':
     case 'Client': return <Briefcase size={18} />;
     default: return <Bell size={18} />;
@@ -112,55 +116,117 @@ function Notifications() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', overflowY: 'auto', flex: 1 }}>
-            {notifications.map((notification) => (
-              <div 
-                key={notification._id}
-                onClick={() => handleNotificationClick(notification)}
-                style={{
-                  padding: '16px 24px',
-                  borderBottom: '1px solid #f1f5f9',
-                  background: notification.isRead ? 'transparent' : '#f0f9ff',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '16px',
-                  transition: 'background 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  if (notification.isRead) e.currentTarget.style.background = '#f8fafc';
-                  else e.currentTarget.style.background = '#e0f2fe';
-                }}
-                onMouseLeave={(e) => {
-                  if (notification.isRead) e.currentTarget.style.background = 'transparent';
-                  else e.currentTarget.style.background = '#f0f9ff';
-                }}
-              >
-                <div style={{ 
-                  background: notification.isRead ? '#f1f5f9' : '#dbeafe', 
-                  color: notification.isRead ? '#64748b' : '#3b82f6', 
-                  padding: '10px', 
-                  borderRadius: '10px' 
-                }}>
-                  {getNotificationIcon(notification.type, notification.title)}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <h4 style={{ margin: 0, fontSize: '15px', color: '#0f172a', fontWeight: notification.isRead ? 500 : 700 }}>
-                      {notification.title ? notification.title.replace(/[📅⏰]/g, '').trim() : ''}
-                    </h4>
-                    <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>
-                      {formatTime(notification.createdAt)}
-                    </span>
+            {notifications.map((notification) => {
+              const isBirthday = notification.type === 'Birthday' || (notification.title && notification.title.toLowerCase().includes('birthday'));
+              const isWish = isBirthday && (notification.title && (notification.title.toLowerCase().includes('happy birthday') || notification.title.toLowerCase().includes('wish')));
+
+              let rowBg = notification.isRead ? 'transparent' : '#f0f9ff';
+              let hoverBg = notification.isRead ? '#f8fafc' : '#e0f2fe';
+              let borderStyle = '1px solid #f1f5f9';
+              let iconBg = notification.isRead ? '#f1f5f9' : '#dbeafe';
+              let iconColor = notification.isRead ? '#64748b' : '#3b82f6';
+              let titleColor = '#0f172a';
+              let messageColor = notification.isRead ? '#64748b' : '#334155';
+              let dotBg = '#3b82f6';
+
+              if (isBirthday) {
+                rowBg = notification.isRead 
+                  ? 'linear-gradient(135deg, #fff5f8 0%, #fdf4f9 100%)' 
+                  : 'linear-gradient(135deg, #fff0f5 0%, #fdf2f8 50%, #fce7f3 100%)';
+                hoverBg = 'linear-gradient(135deg, #ffe4e9 0%, #fce7f3 100%)';
+                borderStyle = notification.isRead ? '1px solid #fce7f3' : '1.5px solid #fbcfe8';
+                iconBg = 'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)';
+                iconColor = '#ffffff';
+                titleColor = '#831843';
+                messageColor = notification.isRead ? '#831843' : '#4c0519';
+                dotBg = '#ec4899';
+              }
+
+              return (
+                <div 
+                  key={notification._id}
+                  onClick={() => handleNotificationClick(notification)}
+                  style={{
+                    padding: '16px 24px',
+                    borderBottom: isBirthday ? 'none' : borderStyle,
+                    background: rowBg,
+                    border: isBirthday ? borderStyle : undefined,
+                    borderRadius: isBirthday ? '12px' : 0,
+                    margin: isBirthday ? '8px 14px' : 0,
+                    boxShadow: isBirthday && !notification.isRead ? '0 4px 14px rgba(236, 72, 153, 0.12)' : 'none',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '16px',
+                    transition: 'all 0.25s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = hoverBg;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = rowBg;
+                  }}
+                >
+                  <div style={{ 
+                    background: iconBg, 
+                    color: iconColor, 
+                    padding: '10px', 
+                    borderRadius: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    boxShadow: isBirthday ? '0 4px 12px rgba(236, 72, 153, 0.25)' : 'none'
+                  }}>
+                    {getNotificationIcon(notification.type, notification.title)}
                   </div>
-                  <p style={{ margin: 0, fontSize: '14px', color: notification.isRead ? '#64748b' : '#334155', lineHeight: '1.5' }}>
-                    {notification.message ? notification.message.replace(/[📅⏰]/g, '').trim() : ''}
-                  </p>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '8px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <h4 style={{ margin: 0, fontSize: '15px', color: titleColor, fontWeight: notification.isRead ? 600 : 700 }}>
+                          {notification.title ? notification.title.replace(/[📅⏰]/g, '').trim() : ''}
+                        </h4>
+                        {isBirthday && (
+                          <span style={{ 
+                            background: isWish 
+                              ? 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)' 
+                              : 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)', 
+                            color: '#ffffff', 
+                            fontSize: '11px', 
+                            fontWeight: 700, 
+                            padding: '2px 9px', 
+                            borderRadius: '999px',
+                            letterSpacing: '0.3px',
+                            boxShadow: isWish 
+                              ? '0 2px 6px rgba(236, 72, 153, 0.3)' 
+                              : '0 2px 6px rgba(244, 63, 94, 0.3)'
+                          }}>
+                            {isWish ? '🎂 Birthday Wish' : '🎈 Birthday Alert'}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '12px', color: isBirthday ? '#be185d' : '#94a3b8', fontWeight: 500 }}>
+                        {formatTime(notification.createdAt)}
+                      </span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '14px', color: messageColor, lineHeight: '1.5' }}>
+                      {notification.message ? notification.message.replace(/[📅⏰]/g, '').trim() : ''}
+                    </p>
+                  </div>
+                  {!notification.isRead && (
+                    <div style={{ 
+                      width: '8px', 
+                      height: '8px', 
+                      background: dotBg, 
+                      borderRadius: '50%', 
+                      marginTop: '6px',
+                      boxShadow: isBirthday ? '0 0 10px rgba(236, 72, 153, 0.7)' : 'none',
+                      flexShrink: 0
+                    }} />
+                  )}
                 </div>
-                {!notification.isRead && (
-                  <div style={{ width: '8px', height: '8px', background: '#3b82f6', borderRadius: '50%', marginTop: '6px' }} />
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
