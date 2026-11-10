@@ -11,7 +11,7 @@ import {
   Hourglass, Umbrella, ClipboardList, BarChart2, Building2, Pin,
   FileText, RefreshCw, Loader2, AlertTriangle, Lightbulb, LogIn,
   Circle, CheckCheck, Users, TrendingUp, CalendarDays, Camera,
-  Coffee, Utensils
+  Coffee, Utensils, ChevronLeft, ChevronRight, Minimize2, LogOut
 } from 'lucide-react';
 
 // Load Inter & Poppins fonts for professional typography
@@ -124,17 +124,163 @@ const BreakDropdown = ({ value, onChange, disabledOptions = [] }) => {
   );
 };
 
+
+const WeatherIllustration = ({ iconType, isDay }) => {
+  if (iconType === 'rain' || iconType === 'storm') {
+    return (
+      <svg width="36" height="36" viewBox="0 0 40 40" fill="none" style={{ filter: 'drop-shadow(0 2px 4px rgba(99,102,241,0.15))' }}>
+        <path d="M22 6C20.5 8.5 20.8 11.5 22.5 13.5C24.2 15.5 27 16.2 29.5 15.2C28.5 18.5 25 21 21 21C16 21 12 17 12 12C12 8.5 14 5.5 17 4.2C15.8 4.8 22 6 22 6Z" fill="#8b5cf6" opacity="0.95" />
+        <path d="M11 23C9 23 7 21.2 7 19C7 16.9 8.6 15.2 10.7 15C11.5 11.8 14.4 9.5 18 9.5C21.9 9.5 25.1 12.2 25.6 16C27.6 16.3 29 18 29 20.2C29 22.6 27.1 24.5 24.7 24.5L11 24.5" fill="#ffffff" stroke="#334155" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        <line x1="13" y1="28" x2="11" y2="33" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round" />
+        <line x1="19" y1="28" x2="17" y2="34" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round" />
+        <line x1="25" y1="28" x2="23" y2="33" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (iconType === 'cloudy-night' || !isDay) {
+    return (
+      <svg width="36" height="36" viewBox="0 0 40 40" fill="none" style={{ filter: 'drop-shadow(0 2px 4px rgba(99,102,241,0.15))' }}>
+        <path d="M24 6C22.2 8.8 22.5 12.2 24.5 14.5C26.5 16.8 29.8 17.5 32.5 16.5C31.5 20.5 27.5 23.5 22.8 23.5C17.2 23.5 12.5 18.8 12.5 13C12.5 9 14.8 5.5 18.2 4.2C16.8 4.8 24 6 24 6Z" fill="#8b5cf6" opacity="0.95" />
+        <path d="M10 24C8 24 6 22.2 6 20C6 17.9 7.6 16.2 9.7 16C10.5 12.8 13.4 10.5 17 10.5C20.9 10.5 24.1 13.2 24.6 17C26.6 17.3 28 19 28 21.2C28 23.6 26.1 25.5 23.7 25.5L10 25.5" fill="#ffffff" stroke="#334155" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="10" cy="8" r="1" fill="#c084fc" />
+        <circle cx="31" cy="8" r="1.2" fill="#c084fc" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg width="36" height="36" viewBox="0 0 40 40" fill="none" style={{ filter: 'drop-shadow(0 2px 4px rgba(245,158,11,0.2))' }}>
+      <circle cx="25" cy="13" r="7" fill="#fbbf24" />
+      <path d="M25 3V5M25 21V23M15 13H17M33 13H35M18 6L19.5 7.5M30.5 18.5L32 20M18 20L19.5 18.5M30.5 7.5L32 6" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" />
+      <path d="M10 24C8 24 6 22.2 6 20C6 17.9 7.6 16.2 9.7 16C10.5 12.8 13.4 10.5 17 10.5C20.9 10.5 24.1 13.2 24.6 17C26.6 17.3 28 19 28 21.2C28 23.6 26.1 25.5 23.7 25.5L10 25.5" fill="#ffffff" stroke="#334155" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+};
+
 function Dashboard() {
+  // Calendar & Weather Card States
+  const [cardCalDate, setCardCalDate] = useState(new Date());
+  const [liveClock, setLiveClock] = useState(new Date());
+  const [weatherInfo, setWeatherInfo] = useState({
+    temp: 28,
+    condition: 'Partly Cloudy',
+    city: 'Noida',
+    isDay: new Date().getHours() >= 6 && new Date().getHours() < 18,
+    iconType: new Date().getHours() >= 6 && new Date().getHours() < 18 ? 'cloudy-day' : 'cloudy-night'
+  });
+
+  // Live clock ticker (updates every second)
+  useEffect(() => {
+    const clockTimer = setInterval(() => {
+      setLiveClock(new Date());
+    }, 1000);
+    return () => clearInterval(clockTimer);
+  }, []);
+
+  // Weather data fetch (Open-Meteo)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchWeather = async () => {
+      try {
+        const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=28.5355&longitude=77.3910&current_weather=true');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.current_weather && isMounted) {
+            const tempC = Math.round(data.current_weather.temperature);
+            const weatherCode = data.current_weather.weathercode;
+            const isDay = data.current_weather.is_day === 1;
+
+            let condition = 'Clear Sky';
+            let iconType = isDay ? 'sunny' : 'night';
+            if (weatherCode === 1 || weatherCode === 2 || weatherCode === 3) {
+              condition = 'Partly Cloudy';
+              iconType = isDay ? 'cloudy-day' : 'cloudy-night';
+            } else if (weatherCode >= 45 && weatherCode <= 48) {
+              condition = 'Foggy';
+              iconType = 'fog';
+            } else if (weatherCode >= 51 && weatherCode <= 67) {
+              condition = 'Rainy';
+              iconType = 'rain';
+            } else if (weatherCode >= 80 && weatherCode <= 82) {
+              condition = 'Showers';
+              iconType = 'rain';
+            } else if (weatherCode >= 95) {
+              condition = 'Thunderstorm';
+              iconType = 'storm';
+            }
+
+            setWeatherInfo({
+              temp: tempC,
+              condition,
+              city: 'Noida',
+              isDay,
+              iconType
+            });
+          }
+        }
+      } catch (err) {
+        // Fallback default
+      }
+    };
+
+    fetchWeather();
+    const weatherTimer = setInterval(fetchWeather, 30 * 60 * 1000);
+    return () => {
+      isMounted = false;
+      clearInterval(weatherTimer);
+    };
+  }, []);
+
+  const getCardCalendarCells = (viewDate) => {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const firstDayOfWeek = new Date(year, month, 1).getDay();
+    const daysInCurrentMonth = new Date(year, month + 1, 0).getDate();
+    const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+    const cells = [];
+    for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+      cells.push({
+        day: daysInPrevMonth - i,
+        month: month === 0 ? 11 : month - 1,
+        year: month === 0 ? year - 1 : year,
+        isCurrentMonth: false
+      });
+    }
+
+    for (let i = 1; i <= daysInCurrentMonth; i++) {
+      cells.push({
+        day: i,
+        month,
+        year,
+        isCurrentMonth: true
+      });
+    }
+
+    const totalTarget = cells.length > 35 ? 42 : 35;
+    const remaining = totalTarget - cells.length;
+    for (let i = 1; i <= remaining; i++) {
+      cells.push({
+        day: i,
+        month: month === 11 ? 0 : month + 1,
+        year: month === 11 ? year + 1 : year,
+        isCurrentMonth: false
+      });
+    }
+
+    return cells;
+  };
+
   // Timer for check-in (only active when checked in during this session)
   const [checkInTimer, setCheckInTimer] = useState(0);
   const checkInIntervalRef = useRef(null);
   const checkedInThisSession = useRef(false);
   const { user, setActiveToast } = useAuth();
-  const roleName = user?.role?.name?.toLowerCase().trim() || '';
+  const roleName = (user?.role?.name || (typeof user?.role === 'string' ? user?.role : '') || '').toLowerCase().trim();
   const isSalesRole = roleName === 'sales' || roleName === 'sales head' || roleName === 'saleshead' || roleName === 'head of sales';
-  const isAdmin = user?.role?.permissions?.some(
-    p => p.module === 'employees' && p.actions.includes('update')
-  );
+  // Common dashboard for all users except actual Admin
+  const isAdmin = roleName === 'admin' || user?.role?.name === 'Admin';
   const [stats, setStats] = useState({
     broadcasts: 0,
     goals: 0,
@@ -214,7 +360,7 @@ function Dashboard() {
   const [errorToast, setErrorToast] = useState(null);
   const [successToast, setSuccessToast] = useState(null);
   const [shiftConfig, setShiftConfig] = useState(null);
-  
+
   // Selfie state
   const [showSelfieModal, setShowSelfieModal] = useState(false);
   const [selfieType, setSelfieType] = useState('checkin'); // 'checkin' or 'checkout'
@@ -279,7 +425,7 @@ function Dashboard() {
         setCameraError("Camera access is not supported in this browser or environment (requires HTTPS or localhost).");
         return;
       }
-      
+
       navigator.mediaDevices.getUserMedia({ video: true })
         .then(stream => {
           if (videoRef.current) {
@@ -293,7 +439,7 @@ function Dashboard() {
     } else if (!showSelfieModal && videoRef.current?.srcObject) {
       videoRef.current.srcObject.getTracks().forEach(track => track.stop());
     }
-    
+
     return () => {
       if (videoRef.current?.srcObject) {
         videoRef.current.srcObject.getTracks().forEach(track => track.stop());
@@ -334,7 +480,7 @@ function Dashboard() {
     api.get('/attendance/break-limits').then(res => {
       if (res.data) setBreakLimits(res.data);
     }).catch(() => { });
-    
+
     // Fetch user shift config for break schedules
     const type = user?.shiftType || 'morning';
     api.get(`/shift-configs/${type}`).then(res => {
@@ -430,7 +576,7 @@ function Dashboard() {
       const hrs = Math.floor(netSecs / 3600);
       const mins = Math.floor((netSecs % 3600) / 60);
       const secs = netSecs % 60;
-      setCurrentWorkingHours(`${hrs}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`);
+      setCurrentWorkingHours(`${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`);
     };
 
     updateWorkingHours();
@@ -551,9 +697,7 @@ function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const isAdmin = user?.role?.permissions?.some(
-        p => p.module === 'employees' && p.actions.includes('update')
-      );
+      const isAdmin = (user?.role?.name || (typeof user?.role === 'string' ? user?.role : '') || '').toLowerCase().trim() === 'admin';
 
       if (isAdmin) {
         await Promise.all([
@@ -620,9 +764,7 @@ function Dashboard() {
   }, [weeklyAnalytics]);
 
   useEffect(() => {
-    const isAdmin = user?.role?.permissions?.some(
-      p => p.module === 'employees' && p.actions.includes('update')
-    );
+    const isAdmin = (user?.role?.name || (typeof user?.role === 'string' ? user?.role : '') || '').toLowerCase().trim() === 'admin';
 
     if (!isAdmin && !loading) {
       renderPersonalAttendanceChart();
@@ -632,7 +774,7 @@ function Dashboard() {
         personalAttendanceChartInstance.current.destroy();
       }
     };
-  }, [personalAttendance, loading]);
+  }, [personalAttendance, loading, refreshing]);
 
   const fetchTodayAttendance = async () => {
     try {
@@ -679,7 +821,7 @@ function Dashboard() {
       let [hours, minutes] = time.split(':').map(Number);
       if (period === 'PM' && hours !== 12) hours += 12;
       if (period === 'AM' && hours === 12) hours = 0;
-      
+
       const windowBefore = breakLimits?.checkinWindowBefore !== undefined ? breakLimits.checkinWindowBefore : 15;
 
       const now = new Date();
@@ -689,7 +831,7 @@ function Dashboard() {
       let currentHour = parseInt(parts.find(p => p.type === 'hour').value, 10);
       let currentMinute = parseInt(parts.find(p => p.type === 'minute').value, 10);
       if (currentHour === 24) currentHour = 0;
-      
+
       const currentTotalMins = currentHour * 60 + currentMinute;
       const windowOpenTotalMins = (hours * 60 + (minutes || 0)) - windowBefore;
 
@@ -698,7 +840,7 @@ function Dashboard() {
       let [eHours, eMinutes] = eTime.split(':').map(Number);
       if (ePeriod === 'PM' && eHours !== 12) eHours += 12;
       if (ePeriod === 'AM' && eHours === 12) eHours = 0;
-      
+
       const shiftStartTotalMins = hours * 60 + (minutes || 0);
       const shiftEndTotalMins = eHours * 60 + (eMinutes || 0);
       const isOvernightShift = shiftStartTotalMins > shiftEndTotalMins;
@@ -726,7 +868,7 @@ function Dashboard() {
       let [hours, minutes] = time.split(':').map(Number);
       if (period === 'PM' && hours !== 12) hours += 12;
       if (period === 'AM' && hours === 12) hours = 0;
-      
+
       const markLateAfterHrs = breakLimits?.markLateAfter !== undefined ? breakLimits.markLateAfter : 0.25;
       const markLateAfterMins = Math.round(markLateAfterHrs * 60);
 
@@ -737,7 +879,7 @@ function Dashboard() {
       let currentHour = parseInt(parts.find(p => p.type === 'hour').value, 10);
       let currentMinute = parseInt(parts.find(p => p.type === 'minute').value, 10);
       if (currentHour === 24) currentHour = 0;
-      
+
       const currentTotalMins = currentHour * 60 + currentMinute;
       const shiftStartTotalMins = hours * 60 + (minutes || 0);
       const markPresentTillMins = shiftStartTotalMins + markLateAfterMins;
@@ -796,7 +938,7 @@ function Dashboard() {
           setCheckInTimer(prev => prev + 1);
         }, 1000);
       }
-      const attendanceData = { 
+      const attendanceData = {
         method: 'self-checkin',
         lateReason: currentReason ? currentReason.trim() : null
       };
@@ -961,7 +1103,7 @@ function Dashboard() {
     if (takenBreakTypes.includes('1st Refreshment Break')) disabledBreakOptions.push('1st Refreshment Break');
     if (takenBreakTypes.includes('2nd Refreshment Break')) disabledBreakOptions.push('2nd Refreshment Break');
     if (takenBreakTypes.includes('Lunch Break')) disabledBreakOptions.push('Lunch Break');
-    
+
     const refCount = takenBreakTypes.filter(t => t === 'Tea Break' || t === 'Refreshment Break' || t === '1st Refreshment Break' || t === '2nd Refreshment Break').length;
     if (refCount >= 2) {
       if (!disabledBreakOptions.includes('1st Refreshment Break')) disabledBreakOptions.push('1st Refreshment Break');
@@ -1306,6 +1448,18 @@ function Dashboard() {
     }
 
     if (window.Chart) {
+      // Create rich purple gradient fill
+      let purpleGradient = 'rgba(139, 92, 246, 0.16)';
+      try {
+        const gradient = ctx.createLinearGradient(0, 0, 0, 220);
+        gradient.addColorStop(0, 'rgba(139, 92, 246, 0.45)');   // rich vivid purple at top
+        gradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.18)'); // soft violet mid
+        gradient.addColorStop(1, 'rgba(147, 51, 234, 0.00)');   // smooth transparent baseline
+        purpleGradient = gradient;
+      } catch (e) {
+        // Fallback
+      }
+
       personalAttendanceChartInstance.current = new window.Chart(ctx, {
         type: 'line',
         data: {
@@ -1319,16 +1473,19 @@ function Dashboard() {
                 personalAttendance.halfDays,
                 personalAttendance.lateMarks
               ],
-              borderColor: '#a8e63d',
-              backgroundColor: 'rgba(168, 230, 61, 0.15)',
-              borderWidth: 3,
-              tension: 0.4,
+              borderColor: '#8b5cf6',
+              backgroundColor: purpleGradient,
+              borderWidth: 3.2,
+              tension: 0.42,
               fill: true,
-              pointBackgroundColor: ['#166534', '#15803d', '#16a34a', '#4ade80'],
-              pointBorderColor: '#fff',
-              pointBorderWidth: 2,
-              pointRadius: 8,
-              pointHoverRadius: 10
+              pointBackgroundColor: ['#6366f1', '#8b5cf6', '#a855f7', '#7c3aed'],
+              pointBorderColor: '#ffffff',
+              pointBorderWidth: 2.5,
+              pointRadius: 7,
+              pointHoverRadius: 9,
+              pointHoverBackgroundColor: '#7c3aed',
+              pointHoverBorderColor: '#ffffff',
+              pointHoverBorderWidth: 3
             }
           ]
         },
@@ -1340,10 +1497,10 @@ function Dashboard() {
               display: false
             },
             tooltip: {
-              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              backgroundColor: 'rgba(15, 23, 42, 0.88)',
               padding: 12,
               titleFont: {
-                size: 14,
+                size: 13,
                 weight: '600'
               },
               bodyFont: {
@@ -1643,9 +1800,7 @@ function Dashboard() {
       const activeEmployees = employees.data.filter(emp => emp.isActive === true || emp.status === 'active');
 
       // Check if user is admin
-      const isAdmin = user?.role?.permissions?.some(
-        p => p.module === 'employees' && p.actions.includes('update')
-      );
+      const isAdmin = (user?.role?.name || (typeof user?.role === 'string' ? user?.role : '') || '').toLowerCase().trim() === 'admin';
 
       // Filter active projects based on user role
       let activeProjects;
@@ -1672,13 +1827,36 @@ function Dashboard() {
         ...requests.data.filter(r => r.status === 'pending')
       ];
 
+      const currentUserId = String(user?._id || user?.id || '');
+
+      // User's own leaves (scoped strictly to current logged-in user)
+      const userLeaves = Array.isArray(leaves.data)
+        ? leaves.data.filter(l => {
+            const empId = String(l.employee?._id || l.employee || '');
+            return Boolean(empId && currentUserId && empId === currentUserId);
+          })
+        : [];
+
+      // User-specific leave counts for dashboard snapshot cards
+      const userApprovedLeaves = userLeaves.filter(l => (l.status || '').toLowerCase() === 'approved').length;
+      const userPendingLeaves = userLeaves.filter(l => (l.status || '').toLowerCase() === 'pending').length;
+      const userRejectedLeaves = userLeaves.filter(l => (l.status || '').toLowerCase() === 'rejected').length;
+
+      // Overall company leave counts (for admin view if applicable)
+      const allApprovedLeaves = (leaves.data || []).filter(l => (l.status || '').toLowerCase() === 'approved').length;
+      const allPendingLeaves = (leaves.data || []).filter(l => (l.status || '').toLowerCase() === 'pending').length;
+      const allRejectedLeaves = (leaves.data || []).filter(l => (l.status || '').toLowerCase() === 'rejected').length;
+
       setStats({
         broadcasts: broadcasts.data.length || 0,
         goals: goals.data.length || 0,
         assets: assets.data.length || 0,
-        pendingLeaves: leaves.data.filter(l => l.status === 'pending').length || 0,
-        rejectedLeaves: leaves.data.filter(l => l.status === 'rejected').length || 0,
-        approvedLeaves: leaves.data.filter(l => l.status === 'approved').length || 0,
+        pendingLeaves: isAdmin ? allPendingLeaves : userPendingLeaves,
+        rejectedLeaves: isAdmin ? allRejectedLeaves : userRejectedLeaves,
+        approvedLeaves: isAdmin ? allApprovedLeaves : userApprovedLeaves,
+        userApprovedLeaves,
+        userPendingLeaves,
+        userRejectedLeaves,
         totalEmployees: employees.data.length || 0,
         activeEmployees: activeEmployees.length || 0,
         activeProjects: activeProjects.length || 0,
@@ -1701,17 +1879,15 @@ function Dashboard() {
         todayLeads: todayLeadsCount
       });
 
-      // Get recent 5 leaves sorted by date
-      const sortedLeaves = [...leaves.data].sort((a, b) => new Date(b.createdAt || b.startDate) - new Date(a.createdAt || a.startDate));
+      // Get recent 5 leaves sorted by date (show user's own leaves for non-admin)
+      const leavesForRecent = isAdmin ? [...(leaves.data || [])] : [...userLeaves];
+      const sortedLeaves = leavesForRecent.sort((a, b) => new Date(b.createdAt || b.startDate) - new Date(a.createdAt || a.startDate));
       setRecentLeaves(sortedLeaves.slice(0, 5));
 
       // Get recent 5 goals sorted by date
       // Flatten individual tasks from all goal documents
       // Non-admin employees only see their own goals
-      const currentUserId = user?._id;
-      const isAdminUser = user?.role?.permissions?.some(
-        p => p.module === 'employees' && p.actions.includes('update')
-      );
+      const isAdminUser = (user?.role?.name || (typeof user?.role === 'string' ? user?.role : '') || '').toLowerCase().trim() === 'admin';
       const flatTasks = [];
       goals.data.forEach(goalDoc => {
         // For non-admin: only include goals where createdBy matches the current user
@@ -1761,6 +1937,97 @@ function Dashboard() {
       : (todayAttendance.status === 'late-checkin' ? 'Late Check-in' : todayAttendance.status === 'early-checkin' ? 'Early Check-in' : 'Checked In'))
     : 'Not Logged In';
   const userInitials = `${user?.firstName?.charAt(0) || ''}${user?.lastName?.charAt(0) || ''}`.toUpperCase() || 'EM';
+  
+  // Professional Request & Activity Status resolver
+  const getActivityStatusInfo = (activity) => {
+    let rawStatus = activity.status;
+    let cleanDesc = activity.description || '';
+
+    // If status is not directly provided in activity, detect from description
+    if (!rawStatus) {
+      const lower = cleanDesc.toLowerCase();
+      if (lower.includes('status: approved') || lower.includes('status:approved') || lower.includes('(approved)') || lower.includes('is approved')) {
+        rawStatus = 'approved';
+      } else if (lower.includes('status: rejected') || lower.includes('status:rejected') || lower.includes('(rejected)') || lower.includes('is rejected')) {
+        rawStatus = 'rejected';
+      } else if (lower.includes('status: pending') || lower.includes('status:pending') || lower.includes('(pending)') || lower.includes('is pending')) {
+        rawStatus = 'pending';
+      } else if (lower.includes('completed')) {
+        rawStatus = 'completed';
+      }
+    }
+
+    // Clean up description text so it doesn't display raw awkward strings
+    cleanDesc = cleanDesc
+      .replace(/\s*-\s*status:\s*\w+/i, '')
+      .replace(/\s*\(\s*(approved|pending|rejected)\s*\)/i, '')
+      .replace(/\s+is\s+(approved|pending|rejected)/i, '')
+      .trim();
+
+    if (!cleanDesc) cleanDesc = activity.title || 'Request Activity';
+
+    const status = (rawStatus || '').toLowerCase();
+
+    if (status === 'approved' || status === 'completed') {
+      return {
+        status: 'approved',
+        badgeLabel: 'Approved',
+        badgeBg: '#ecfdf5',
+        badgeColor: '#15803d',
+        badgeBorder: '#bbf7d0',
+        iconBg: '#f0fdf4',
+        iconColor: '#16a34a',
+        iconBorder: '#bbf7d0',
+        IconComponent: CheckCircle2,
+        cleanDesc
+      };
+    }
+
+    if (status === 'pending') {
+      return {
+        status: 'pending',
+        badgeLabel: 'Pending',
+        badgeBg: '#fffbeb',
+        badgeColor: '#b45309',
+        badgeBorder: '#fde68a',
+        iconBg: '#fffbeb',
+        iconColor: '#d97706',
+        iconBorder: '#fde68a',
+        IconComponent: Hourglass,
+        cleanDesc
+      };
+    }
+
+    if (status === 'rejected') {
+      return {
+        status: 'rejected',
+        badgeLabel: 'Rejected',
+        badgeBg: '#fef2f2',
+        badgeColor: '#b91c1c',
+        badgeBorder: '#fecaca',
+        iconBg: '#fef2f2',
+        iconColor: '#dc2626',
+        iconBorder: '#fecaca',
+        IconComponent: XCircle,
+        cleanDesc
+      };
+    }
+
+    const meta = getActivityMeta(activity.type);
+    return {
+      status: null,
+      badgeLabel: null,
+      badgeBg: null,
+      badgeColor: null,
+      badgeBorder: null,
+      iconBg: `${meta.color}15`,
+      iconColor: meta.color,
+      iconBorder: `${meta.color}25`,
+      IconComponent: meta.Icon,
+      cleanDesc
+    };
+  };
+
   const employeeRecentActivities = recentActivities.slice(0, 4);
   const employeeRecentLeaves = recentLeaves.slice(0, 4);
 
@@ -1807,7 +2074,7 @@ function Dashboard() {
     {
       label: 'Total Present',
       value: monthlyStats.currentMonth.present || 0,
-      icon: CheckCheck,
+      icon: CheckCircle2,
       tone: 'emerald',
       sub: 'this month',
       trend: presentChange,
@@ -1823,24 +2090,6 @@ function Dashboard() {
       isUp: absentTrend
     },
     {
-      label: 'Assigned Projects',
-      value: monthlyStats.currentMonth.assignedProjects || 0,
-      icon: FolderOpen,
-      tone: 'sky',
-      sub: 'active',
-      trend: projectsChange,
-      isUp: projectsTrend
-    },
-    {
-      label: 'Completed Projects',
-      value: monthlyStats.currentMonth.completedProjects || 0,
-      icon: CheckCircle2,
-      tone: 'violet',
-      sub: 'this month',
-      trend: completedChange,
-      isUp: completedTrend
-    },
-    {
       label: 'Total Leaves',
       value: monthlyStats.currentMonth.totalLeaves || 0,
       icon: Umbrella,
@@ -1851,9 +2100,9 @@ function Dashboard() {
     },
   ];
   const employeeSupportStats = [
-    { label: 'Approved Leaves', value: stats.approvedLeaves || 0, icon: Hourglass, tone: 'emerald' },
-    { label: 'Pending Leaves', value: stats.pendingLeaves || 0, icon: Umbrella, tone: 'violet' },
-    { label: 'Rejected Leaves', value: stats.rejectedLeaves || 0, icon: XCircle, tone: 'rose' },
+    { label: 'Approved Leaves', value: stats.userApprovedLeaves ?? stats.approvedLeaves ?? 0, icon: Hourglass, tone: 'emerald' },
+    { label: 'Pending Leaves', value: stats.userPendingLeaves ?? stats.pendingLeaves ?? 0, icon: Umbrella, tone: 'violet' },
+    { label: 'Rejected Leaves', value: stats.userRejectedLeaves ?? stats.rejectedLeaves ?? 0, icon: XCircle, tone: 'rose' },
   ];
   const formatActivityDate = (timestamp) => {
     if (!timestamp) return 'No timestamp';
@@ -1870,134 +2119,295 @@ function Dashboard() {
     const activeStatus = calculateActiveBreakStatus(activeBreak, shiftConfig, breakTimer);
     const breakTitle = activeBreak.breakType || activeBreak.type || 'Break';
     const displayType = breakTitle === 'Tea Break' ? 'Refreshment Break' : breakTitle;
+    const isExceeded = Boolean(activeStatus?.isExceeded);
 
-    return (
-      <div style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 999999,
-        background: 'rgba(15, 23, 42, 0.65)',
-        backdropFilter: 'blur(14px)',
-        WebkitBackdropFilter: 'blur(14px)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        animation: 'fadeIn 0.3s ease',
-        padding: '20px'
-      }}>
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '24px',
-          padding: '36px 44px',
-          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.3)',
-          textAlign: 'center',
-          maxWidth: '520px',
-          width: '100%',
-          border: activeStatus?.isExceeded ? '2px solid #ef4444' : '1px solid #e2e8f0'
-        }}>
-          <div style={{ marginBottom: '16px', display: 'inline-flex', padding: '14px', borderRadius: '50%', background: activeStatus?.isExceeded ? '#fee2e2' : '#fef3c7' }}>
-            <Clock size={36} color={activeStatus?.isExceeded ? '#dc2626' : '#d97706'} strokeWidth={2} />
+    return createPortal(
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100vw',
+          height: '100vh',
+          zIndex: 99999999,
+          background: 'rgba(15, 23, 42, 0.68)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px',
+          boxSizing: 'border-box',
+          animation: 'fadeIn 0.25s ease-out'
+        }}
+      >
+        <div
+          style={{
+            background: '#ffffff',
+            borderRadius: '24px',
+            padding: '36px 36px 32px',
+            boxShadow: isExceeded
+              ? '0 25px 60px -12px rgba(239, 68, 68, 0.25), 0 0 0 1px rgba(254, 202, 202, 0.8), 0 10px 30px rgba(15, 23, 42, 0.12)'
+              : '0 25px 60px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(226, 232, 240, 0.9), 0 10px 30px rgba(15, 23, 42, 0.08)',
+            textAlign: 'center',
+            maxWidth: '480px',
+            width: '100%',
+            position: 'relative',
+            boxSizing: 'border-box',
+            overflow: 'hidden'
+          }}
+        >
+          {/* Top color highlight accent bar */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '5px',
+              background: isExceeded
+                ? 'linear-gradient(90deg, #ef4444 0%, #dc2626 100%)'
+                : 'linear-gradient(90deg, #f59e0b 0%, #d97706 100%)'
+            }}
+          />
+
+          {/* Icon Badge */}
+          <div
+            style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '20px',
+              margin: '0 auto 16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: isExceeded ? '#fef2f2' : '#fffbeb',
+              border: `1.5px solid ${isExceeded ? '#fecaca' : '#fde68a'}`,
+              boxShadow: isExceeded
+                ? '0 4px 16px rgba(239, 68, 68, 0.16)'
+                : '0 4px 16px rgba(245, 158, 11, 0.14)'
+            }}
+          >
+            {isExceeded ? (
+              <AlertTriangle size={30} color="#dc2626" strokeWidth={2.2} />
+            ) : (
+              <Clock size={30} color="#d97706" strokeWidth={2.2} />
+            )}
           </div>
 
-          <h2 style={{ fontSize: '24px', color: '#0f172a', margin: '0 0 6px 0', fontWeight: 700 }}>
+          {/* Overline & Title */}
+          <span
+            style={{
+              fontSize: '11px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: isExceeded ? '#dc2626' : '#64748b',
+              display: 'block',
+              marginBottom: '4px'
+            }}
+          >
+            {isExceeded ? 'Break Limit Exceeded' : 'Active Break Session'}
+          </span>
+          <h2
+            style={{
+              fontSize: '23px',
+              color: '#0f172a',
+              margin: '0 0 8px 0',
+              fontWeight: 800,
+              letterSpacing: '-0.02em',
+              lineHeight: 1.25
+            }}
+          >
             On Break: {displayType}
           </h2>
 
+          {/* Schedule Window Pill */}
           {activeStatus?.scheduledStartTime && activeStatus?.scheduledEndTime && (
-            <p style={{ fontSize: '13.5px', color: '#64748b', margin: '0 0 16px 0', fontWeight: 500 }}>
-              Window: <strong>{activeStatus.scheduledStartTime} – {activeStatus.scheduledEndTime}</strong>
-              {activeStatus.allowedDurationMins ? ` • Allowed: ${activeStatus.allowedDurationMins} mins` : ''}
-            </p>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 12px',
+                borderRadius: '999px',
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                fontSize: '12px',
+                color: '#475569',
+                fontWeight: 500,
+                margin: '0 auto 16px'
+              }}
+            >
+              <span>Window: <strong>{activeStatus.scheduledStartTime} – {activeStatus.scheduledEndTime}</strong></span>
+              {activeStatus.allowedDurationMins ? (
+                <>
+                  <span style={{ color: '#cbd5e1' }}>•</span>
+                  <span>Allowed: <strong>{activeStatus.allowedDurationMins}m</strong></span>
+                </>
+              ) : null}
+            </div>
           )}
 
-          <div style={{
-            fontSize: '56px',
-            fontWeight: '300',
-            color: activeStatus?.isExceeded ? '#dc2626' : '#0f172a',
-            fontVariantNumeric: 'tabular-nums',
-            margin: '12px 0 20px 0',
-            letterSpacing: '-1px',
-            fontFamily: "'Inter', monospace"
-          }}>
-            {new Date(breakTimer * 1000).toISOString().substr(11, 8)}
+          {/* High-End Timer Display Box */}
+          <div
+            style={{
+              background: isExceeded ? '#fef2f2' : '#f8fafc',
+              border: `1.5px solid ${isExceeded ? '#fecaca' : '#e2e8f0'}`,
+              borderRadius: '16px',
+              padding: '16px 20px',
+              margin: '0 0 18px',
+              textAlign: 'center'
+            }}
+          >
+            <div
+              style={{
+                fontSize: '48px',
+                fontWeight: 700,
+                color: isExceeded ? '#dc2626' : '#0f172a',
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '-0.5px',
+                fontFamily: "'Inter', monospace",
+                lineHeight: 1
+              }}
+            >
+              {new Date(breakTimer * 1000).toISOString().substr(11, 8)}
+            </div>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                color: isExceeded ? '#b91c1c' : '#94a3b8',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                marginTop: '6px',
+                display: 'block'
+              }}
+            >
+              Elapsed Break Time
+            </span>
           </div>
 
+          {/* Status Message Box */}
           {activeStatus && (
-            <div style={{ marginBottom: '28px' }}>
+            <div style={{ marginBottom: '22px' }}>
               {activeStatus.isExceeded ? (
-                <div style={{
-                  background: '#fef2f2',
-                  border: '1px solid #fecaca',
-                  color: '#b91c1c',
-                  padding: '12px 18px',
-                  borderRadius: '12px',
-                  fontSize: '13.5px',
-                  fontWeight: 700,
-                  lineHeight: '1.45'
-                }}>
-                  ⚠️ EXCEEDED BY {activeStatus.exceededMinutes} MIN!<br />
-                  <span style={{ fontSize: '12px', fontWeight: 500, color: '#991b1b' }}>
-                    This extra time is being deducted from your working hours.
+                <div
+                  style={{
+                    background: '#fef2f2',
+                    border: '1px solid #fca5a5',
+                    color: '#b91c1c',
+                    padding: '12px 16px',
+                    borderRadius: '12px',
+                    fontSize: '13px',
+                    lineHeight: '1.45',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontWeight: 800 }}>
+                    <AlertTriangle size={15} color="#dc2626" />
+                    <span>EXCEEDED BY {activeStatus.exceededMinutes} MIN!</span>
+                  </div>
+                  <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#991b1b', marginTop: '3px', display: 'block' }}>
+                    This extra time is automatically deducted from your working hours.
                   </span>
                 </div>
               ) : (
-                <div style={{
-                  background: '#ecfdf5',
-                  border: '1px solid #a7f3d0',
-                  color: '#047857',
-                  padding: '10px 16px',
-                  borderRadius: '20px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  display: 'inline-block'
-                }}>
-                  ⏳ Time Remaining: {formatDurationHMS(activeStatus.remainingSecs)}
+                <div
+                  style={{
+                    background: '#ecfdf5',
+                    border: '1px solid #a7f3d0',
+                    color: '#047857',
+                    padding: '8px 16px',
+                    borderRadius: '999px',
+                    fontSize: '12.5px',
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Clock size={13} color="#059669" />
+                  <span>Time Remaining: <strong>{formatDurationHMS(activeStatus.remainingSecs)}</strong></span>
                 </div>
               )}
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+          {/* Action Buttons */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '10px' }}>
             <button
+              type="button"
               onClick={handleBreakEnd}
               style={{
-                padding: '12px 32px',
-                background: '#ef4444',
-                color: 'white',
+                height: '44px',
+                padding: '0 20px',
+                background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                color: '#ffffff',
                 border: 'none',
                 borderRadius: '12px',
-                fontSize: '15px',
+                fontSize: '14px',
                 fontWeight: 700,
                 cursor: 'pointer',
-                boxShadow: '0 4px 14px rgba(239, 68, 68, 0.3)',
-                transition: 'all 0.2s ease'
+                boxShadow: '0 4px 14px rgba(239, 68, 68, 0.35)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                transition: 'all 0.15s ease'
               }}
-              onMouseEnter={e => e.currentTarget.style.background = '#dc2626'}
-              onMouseLeave={e => e.currentTarget.style.background = '#ef4444'}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
             >
-              End Break Now
+              <LogOut size={16} />
+              <span>End Break Now</span>
             </button>
+
             <button
+              type="button"
               onClick={() => setHideBreakScreen(true)}
               style={{
-                padding: '12px 24px',
-                background: '#f1f5f9',
+                height: '44px',
+                padding: '0 16px',
+                background: '#ffffff',
                 color: '#475569',
-                border: '1px solid #e2e8f0',
+                border: '1.5px solid #cbd5e1',
                 borderRadius: '12px',
-                fontSize: '14px',
+                fontSize: '13.5px',
                 fontWeight: 600,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease'
               }}
-              onMouseEnter={e => e.currentTarget.style.background = '#e2e8f0'}
-              onMouseLeave={e => e.currentTarget.style.background = '#f1f5f9'}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = '#f8fafc';
+                e.currentTarget.style.borderColor = '#94a3b8';
+                e.currentTarget.style.color = '#1e293b';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = '#ffffff';
+                e.currentTarget.style.borderColor = '#cbd5e1';
+                e.currentTarget.style.color = '#475569';
+              }}
             >
-              Minimize
+              <Minimize2 size={15} />
+              <span>Minimize</span>
             </button>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   };
 
@@ -2021,7 +2431,7 @@ function Dashboard() {
     if (takenBreakTypes.includes('1st Refreshment Break')) disabledBreakOptions.push('1st Refreshment Break');
     if (takenBreakTypes.includes('2nd Refreshment Break')) disabledBreakOptions.push('2nd Refreshment Break');
     if (takenBreakTypes.includes('Lunch Break')) disabledBreakOptions.push('Lunch Break');
-    
+
     const refCount = takenBreakTypes.filter(t => t === 'Tea Break' || t === 'Refreshment Break' || t === '1st Refreshment Break' || t === '2nd Refreshment Break').length;
     if (refCount >= 2) {
       if (!disabledBreakOptions.includes('1st Refreshment Break')) disabledBreakOptions.push('1st Refreshment Break');
@@ -2032,9 +2442,29 @@ function Dashboard() {
 
     const availableType = ['1st Refreshment Break', 'Lunch Break', '2nd Refreshment Break', 'Briefing/Meeting'].find(opt => !disabledBreakOptions.includes(opt)) || 'Briefing/Meeting';
 
-    return (
-      <div style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px', boxShadow: '0 16px 48px rgba(15,23,42,0.18)', padding: '28px', width: '520px', maxWidth: '92vw' }}>
+    return createPortal(
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100vw',
+          height: '100vh',
+          zIndex: 99999999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          padding: '20px',
+          boxSizing: 'border-box',
+          animation: 'fadeIn 0.2s ease-out'
+        }}
+      >
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '18px', boxShadow: '0 25px 60px -12px rgba(15, 23, 42, 0.3)', padding: '28px', width: '520px', maxWidth: '92vw', boxSizing: 'border-box' }}>
           <h3 style={{ margin: '0 0 20px', fontSize: '20px', fontWeight: 700, color: '#0f172a' }}>Take a Break</h3>
 
           {breakForm.type !== 'Other' && breakForm.type !== 'Briefing/Meeting' && breakForm.type !== 'Breifing/Meeting' && isLimitExceeded && (
@@ -2056,49 +2486,57 @@ function Dashboard() {
             />
           </div>
 
+          <div style={{ marginBottom: '24px' }}>
+            <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>
+              Reason <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 400 }}>(Optional)</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Lunch with team, Quick refreshment"
+              value={breakForm.reason}
+              onChange={e => setBreakForm({ ...breakForm, reason: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '11px 14px',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '10px',
+                fontSize: '14px',
+                outline: 'none',
+                boxSizing: 'border-box',
+                transition: 'border 0.2s ease',
+                fontFamily: 'inherit'
+              }}
+              onFocus={e => e.target.style.borderColor = '#f59e0b'}
+              onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+            />
+          </div>
+
+          {/* Schedule status helper text */}
           {(() => {
-            const winStatus = getBreakWindowStatus(breakForm.type, shiftConfig);
-            if (!winStatus || !winStatus.info) return null;
-            if (winStatus.windowStatus === 'ended') {
+            const currentType = breakForm.type;
+            const ws = getBreakWindowStatus(currentType, shiftConfig);
+            if (!ws) return null;
+            if (ws.isAnytime) {
               return (
-                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px', fontSize: '13px', color: '#b91c1c' }}>
-                  <strong>⛔ Break Window Closed</strong><br />
-                  {winStatus.message}
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#166534', marginBottom: '16px' }}>
+                  ⚡ This break can be taken anytime during your shift. Allowed: {ws.allowedDurationMins} mins.
                 </div>
               );
             }
-            if (winStatus.windowStatus === 'early') {
+            if (ws.canStart) {
               return (
-                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px', fontSize: '13px', color: '#92400e' }}>
-                  <strong>🔒 Break Window Not Started</strong><br />
-                  {winStatus.message}
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#166534', marginBottom: '16px' }}>
+                  ✓ Scheduled Window: {ws.startTime} – {ws.endTime} ({ws.allowedDurationMins} mins allowed).
                 </div>
               );
             }
             return (
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px', fontSize: '13px', color: '#166534' }}>
-                <div style={{ fontWeight: 700, marginBottom: '3px' }}>
-                  ⏰ Shift Window: {winStatus.info.startStr} – {winStatus.info.endStr}
-                </div>
-                <div style={{ fontSize: '12.5px', color: '#15803d' }}>
-                  {winStatus.message}
-                </div>
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#991b1b', marginBottom: '16px' }}>
+                ⚠️ Outside scheduled window ({ws.startTime} – {ws.endTime}). You cannot start this break right now.
               </div>
             );
           })()}
-          {(breakForm.type === 'Briefing/Meeting' || breakForm.type === 'Breifing/Meeting' || breakForm.type === 'Other') && (
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>Reason <span style={{ color: '#ef4444' }}>*</span></label>
-              <textarea
-                value={breakForm.reason}
-                onChange={e => setBreakForm({ ...breakForm, reason: e.target.value })}
-                placeholder="Enter briefing agenda / meeting details..."
-                rows="3"
-                style={{ width: '100%', padding: '12px 14px', fontSize: '14px', border: '1px solid #e2e8f0', borderRadius: '10px', outline: 'none', resize: 'vertical' }}
-                required
-              />
-            </div>
-          )}
+
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '28px' }}>
             <button
               onClick={() => { setShowBreakModal(false); setBreakForm({ type: availableType, reason: '' }); }}
@@ -2132,7 +2570,8 @@ function Dashboard() {
             })()}
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   };
 
@@ -2181,122 +2620,178 @@ function Dashboard() {
         ? `${shiftConfig.refreshment2StartTime} - ${shiftConfig.refreshment2EndTime}`
         : 'N/A');
 
-    return (
-      <div style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px', boxShadow: '0 16px 48px rgba(15,23,42,0.18)', padding: '26px', width: '840px', maxWidth: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Clock size={19} strokeWidth={2} />
+    return createPortal(
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100vw',
+          height: '100vh',
+          zIndex: 99999999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(15, 23, 42, 0.68)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          padding: '20px',
+          boxSizing: 'border-box',
+          animation: 'fadeIn 0.25s ease-out'
+        }}
+      >
+        <div
+          style={{
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
+            borderRadius: '22px',
+            boxShadow: '0 25px 60px -12px rgba(15, 23, 42, 0.35)',
+            padding: '28px 32px',
+            width: '800px',
+            maxWidth: '95vw',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxSizing: 'border-box'
+          }}
+        >
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #a7f3d0' }}>
+                <Clock size={22} strokeWidth={2.2} />
               </div>
-              <h3 style={{ margin: '0', fontSize: '19px', fontWeight: 700, color: '#0f172a' }}>Break Details</h3>
+              <div>
+                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b', display: 'block' }}>Attendance Insights</span>
+                <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Break Details & Schedule</h3>
+              </div>
             </div>
-            <button onClick={() => setBreakDetailsModal({ visible: false, type: '', breaks: [] })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', display: 'flex', alignItems: 'center' }}>
-              <XCircle size={22} />
+            <button
+              onClick={() => setBreakDetailsModal({ visible: false, type: '', breaks: [] })}
+              style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '50%',
+                width: '34px',
+                height: '34px',
+                cursor: 'pointer',
+                color: '#64748b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#0f172a'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
+            >
+              <XCircle size={18} />
             </button>
           </div>
 
           {/* Time Remaining & Taken Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px', padding: '16px 20px', background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px', padding: '16px 20px', background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
             <div>
-              <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Time Remaining</div>
-              <div style={{ fontSize: '26px', color: remainingSecs === 0 ? '#ef4444' : '#0f172a', fontWeight: 800, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.5px' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Time Remaining</div>
+              <div style={{ fontSize: '28px', color: remainingSecs === 0 ? '#ef4444' : '#0f172a', fontWeight: 800, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.5px' }}>
                 {formatDurationHMS(remainingSecs)}
               </div>
-              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>Limit: {limitMins} mins total</div>
+              <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px', fontWeight: 500 }}>Limit: {limitMins} mins total allowed</div>
             </div>
             <div style={{ borderLeft: '1px solid #e2e8f0', paddingLeft: '20px' }}>
-              <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Time Taken</div>
-              <div style={{ fontSize: '26px', color: '#059669', fontWeight: 800, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.5px' }}>
+              <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Total Time Taken</div>
+              <div style={{ fontSize: '28px', color: '#059669', fontWeight: 800, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.5px' }}>
                 {formatDurationHMS(totalBreakSecs)}
               </div>
-              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>Format: HH:MM:SS</div>
+              <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px', fontWeight: 500 }}>Format: HH:MM:SS</div>
             </div>
           </div>
-          
+
           {/* Shift Break Schedule Pill Badges */}
           <div style={{ marginBottom: '18px' }}>
-            <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: '8px' }}>
+            <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
               Shift Break Schedule & Allowed Timelines
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', padding: '4px 8px', background: '#fffbeb', borderRadius: '9999px', border: '1px solid #fde68a', boxShadow: '0 1px 2px rgba(245,158,11,0.05)', minWidth: 0 }}>
-                <Coffee size={12} strokeWidth={2} style={{ color: '#d97706', flexShrink: 0 }} />
-                <span style={{ fontSize: '10.5px', color: '#92400e', fontWeight: 600, letterSpacing: '0.2px', flexShrink: 0 }}>1st Ref:</span>
-                <span style={{ fontSize: '11px', color: '#b45309', fontWeight: 500, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ref1Schedule}</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '6px 10px', background: '#fffbeb', borderRadius: '10px', border: '1px solid #fde68a', boxShadow: '0 1px 2px rgba(245,158,11,0.05)', minWidth: 0 }}>
+                <Coffee size={13} strokeWidth={2} style={{ color: '#d97706', flexShrink: 0 }} />
+                <span style={{ fontSize: '11px', color: '#92400e', fontWeight: 700, flexShrink: 0 }}>1st Ref:</span>
+                <span style={{ fontSize: '11.5px', color: '#b45309', fontWeight: 600, fontFamily: "'Inter', sans-serif", fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ref1Schedule}</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', padding: '4px 8px', background: '#eff6ff', borderRadius: '9999px', border: '1px solid #bfdbfe', boxShadow: '0 1px 2px rgba(59,130,246,0.05)', minWidth: 0 }}>
-                <Utensils size={12} strokeWidth={2} style={{ color: '#2563eb', flexShrink: 0 }} />
-                <span style={{ fontSize: '10.5px', color: '#1e40af', fontWeight: 600, letterSpacing: '0.2px', flexShrink: 0 }}>Lunch:</span>
-                <span style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 500, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lunchSchedule}</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '6px 10px', background: '#eff6ff', borderRadius: '10px', border: '1px solid #bfdbfe', boxShadow: '0 1px 2px rgba(59,130,246,0.05)', minWidth: 0 }}>
+                <Utensils size={13} strokeWidth={2} style={{ color: '#2563eb', flexShrink: 0 }} />
+                <span style={{ fontSize: '11px', color: '#1e40af', fontWeight: 700, flexShrink: 0 }}>Lunch:</span>
+                <span style={{ fontSize: '11.5px', color: '#1d4ed8', fontWeight: 600, fontFamily: "'Inter', sans-serif", fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lunchSchedule}</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', padding: '4px 8px', background: '#faf5ff', borderRadius: '9999px', border: '1px solid #e9d5ff', boxShadow: '0 1px 2px rgba(168,85,247,0.05)', minWidth: 0 }}>
-                <Coffee size={12} strokeWidth={2} style={{ color: '#9333ea', flexShrink: 0 }} />
-                <span style={{ fontSize: '10.5px', color: '#6b21a8', fontWeight: 600, letterSpacing: '0.2px', flexShrink: 0 }}>2nd Ref:</span>
-                <span style={{ fontSize: '11px', color: '#7e22ce', fontWeight: 500, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ref2Schedule}</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '6px 10px', background: '#faf5ff', borderRadius: '10px', border: '1px solid #e9d5ff', boxShadow: '0 1px 2px rgba(168,85,247,0.05)', minWidth: 0 }}>
+                <Coffee size={13} strokeWidth={2} style={{ color: '#9333ea', flexShrink: 0 }} />
+                <span style={{ fontSize: '11px', color: '#6b21a8', fontWeight: 700, flexShrink: 0 }}>2nd Ref:</span>
+                <span style={{ fontSize: '11.5px', color: '#7e22ce', fontWeight: 600, fontFamily: "'Inter', sans-serif", fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ref2Schedule}</span>
               </div>
             </div>
           </div>
 
           {/* Break History List */}
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>
               Today's Taken Breaks ({breaks?.length || 0})
             </div>
-                {(() => {
-                  const bList = breakDetailsModal?.breaks || todayAttendance?.breaks || [];
-                  const penaltyList = [];
-                  let totalSecs = 0;
-                  bList.forEach(b => {
-                    const excSecs = getBreakExceededSeconds(b, typeof shiftConfig !== 'undefined' ? shiftConfig : null);
-                    if (excSecs > 0) {
-                      totalSecs += excSecs;
-                      penaltyList.push({
-                        type: b.breakType === 'Tea Break' ? 'Refreshment Break' : (b.breakType || 'Break'),
-                        excSecs,
-                        formatted: formatExceededTime(excSecs)
-                      });
-                    }
+            {(() => {
+              const bList = breakDetailsModal?.breaks || todayAttendance?.breaks || [];
+              const penaltyList = [];
+              let totalSecs = 0;
+              bList.forEach(b => {
+                const excSecs = getBreakExceededSeconds(b, typeof shiftConfig !== 'undefined' ? shiftConfig : null);
+                if (excSecs > 0) {
+                  totalSecs += excSecs;
+                  penaltyList.push({
+                    type: b.breakType === 'Tea Break' ? 'Refreshment Break' : (b.breakType || 'Break'),
+                    excSecs,
+                    formatted: formatExceededTime(excSecs)
                   });
-                  if (totalSecs <= 0) return null;
-                  return (
-                    <div style={{
-                      padding: '12px 14px',
-                      background: '#fef2f2',
-                      border: '1px solid #fecaca',
-                      borderRadius: '10px',
-                      marginBottom: '12px'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: penaltyList.length > 0 ? '8px' : '0' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#991b1b', fontSize: '12.5px', fontWeight: 700 }}>
-                          <span style={{ fontSize: '14px' }}>⚠️</span>
-                          <span>Break Penalties Breakdown</span>
-                        </div>
-                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#dc2626' }}>
-                          Total Deducted: -{formatExceededTime(totalSecs)}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {penaltyList.map((p, idx) => (
-                          <div key={idx} style={{
-                            fontSize: '11px',
-                            background: '#ffffff',
-                            border: '1px solid #fca5a5',
-                            borderRadius: '6px',
-                            padding: '3px 8px',
-                            color: '#991b1b',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px'
-                          }}>
-                            <span style={{ fontWeight: 600 }}>{p.type}:</span>
-                            <span style={{ fontWeight: 800, color: '#dc2626' }}>Exceeded {p.formatted}</span>
-                          </div>
-                        ))}
-                      </div>
+                }
+              });
+              if (totalSecs <= 0) return null;
+              return (
+                <div style={{
+                  padding: '12px 16px',
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  borderRadius: '12px',
+                  marginBottom: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: penaltyList.length > 0 ? '8px' : '0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#991b1b', fontSize: '12.5px', fontWeight: 700 }}>
+                      <AlertTriangle size={15} color="#dc2626" />
+                      <span>Break Penalties Breakdown</span>
                     </div>
-                  );
-                })()}
+                    <div style={{ fontSize: '13px', fontWeight: 800, color: '#dc2626' }}>
+                      Total Deducted: -{formatExceededTime(totalSecs)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {penaltyList.map((p, idx) => (
+                      <div key={idx} style={{
+                        fontSize: '11px',
+                        background: '#ffffff',
+                        border: '1px solid #fca5a5',
+                        borderRadius: '6px',
+                        padding: '3px 8px',
+                        color: '#991b1b',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        <span style={{ fontWeight: 600 }}>{p.type}:</span>
+                        <span style={{ fontWeight: 800, color: '#dc2626' }}>Exceeded {p.formatted}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {breaks && breaks.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '235px', overflowY: 'auto', paddingRight: '6px' }}>
                 {breaks.map((b, idx) => {
@@ -2307,31 +2802,22 @@ function Dashboard() {
                   const isOngoing = !b.endTime;
 
                   return (
-                    <div key={idx} style={{ padding: '14px 16px', background: isOngoing ? '#f0fdf4' : '#fff', borderRadius: '12px', border: isOngoing ? '1px solid #86efac' : '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 5px rgba(15,23,42,0.03)' }}>
+                    <div key={idx} style={{ padding: '12px 16px', background: isOngoing ? '#f0fdf4' : '#ffffff', borderRadius: '12px', border: isOngoing ? '1px solid #86efac' : '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 1px 3px rgba(15,23,42,0.03)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: isOngoing ? '#22c55e' : '#94a3b8', flexShrink: 0, boxShadow: isOngoing ? '0 0 0 3px rgba(34,197,94,0.2)' : 'none' }}></div>
+                        <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: isOngoing ? '#dcfce7' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isOngoing ? '#16a34a' : '#64748b' }}>
+                          <Clock size={16} />
+                        </div>
                         <div>
-                          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span>{displayType}</span>
-                            {isOngoing && (
-                              <span style={{ fontSize: '10px', background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, textTransform: 'uppercase' }}>Active</span>
-                            )}
+                          <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#0f172a' }}>{displayType}</div>
+                          <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                            {new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {b.endTime ? ` – ${new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' – Active Now'}
                           </div>
-                          <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums' }}>
-                            <Hourglass size={12} style={{ color: '#94a3b8' }} />
-                            <span>{new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                            <span>→</span>
-                            <span>{b.endTime ? new Date(b.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Ongoing'}</span>
-                          </div>
-                          {b.reason && (
-                            <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '4px', fontStyle: 'italic' }}>
-                              Reason: "{b.reason}"
-                            </div>
-                          )}
                         </div>
                       </div>
+
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '15px', fontWeight: 800, color: '#0f172a', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums' }}>
+                        <div style={{ fontSize: '13.5px', fontWeight: 800, color: isOngoing ? '#16a34a' : '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
                           {formatDurationHMS(durSecs)}
                         </div>
                         {(() => {
@@ -2357,10 +2843,22 @@ function Dashboard() {
             )}
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+          {/* Footer Close */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
             <button
               onClick={() => setBreakDetailsModal({ visible: false, type: '', breaks: [] })}
-              style={{ padding: '9px 24px', border: 'none', background: '#10b981', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: '13.5px', boxShadow: '0 2px 8px rgba(16,185,129,0.25)', transition: 'all 0.2s ease' }}
+              style={{
+                padding: '9px 24px',
+                border: 'none',
+                background: '#10b981',
+                borderRadius: '10px',
+                color: '#fff',
+                cursor: 'pointer',
+                fontWeight: 700,
+                fontSize: '13.5px',
+                boxShadow: '0 2px 8px rgba(16,185,129,0.25)',
+                transition: 'all 0.15s ease'
+              }}
               onMouseEnter={e => { e.currentTarget.style.background = '#059669'; }}
               onMouseLeave={e => { e.currentTarget.style.background = '#10b981'; }}
             >
@@ -2368,11 +2866,11 @@ function Dashboard() {
             </button>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   };
-
-  const getTotalBreakDurationString = () => {
+const getTotalBreakDurationString = () => {
     let totalSecs = 0;
     if (todayAttendance?.breaks) {
       todayAttendance.breaks.forEach(b => {
@@ -2394,13 +2892,10 @@ function Dashboard() {
     const hrs = Math.floor(totalSecs / 3600);
     const mins = Math.floor((totalSecs % 3600) / 60);
     const secs = totalSecs % 60;
-    return `${hrs}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+    return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  // Sales role users get a dedicated sales dashboard
-  if (isSalesRole) {
-    return <SalesDashboard />;
-  }
+  // Sales, Marketing, HR and Employees all use the common dashboard
 
   if (!isAdmin) {
     return (
@@ -2408,7 +2903,7 @@ function Dashboard() {
         <div className="employee-dashboard-frame">
           <div className="employee-dashboard-grid">
             <aside className="employee-dashboard-sidebar">
-              {loading ? (
+              {(loading || refreshing) ? (
                 <>
                   <section className="employee-profile-card employee-skeleton-panel">
                     <div className="employee-profile-top">
@@ -2437,17 +2932,29 @@ function Dashboard() {
                   </section>
 
                   {/* Activity skeleton */}
-                  <div className="employee-skeleton-card" style={{ borderRadius: 14, padding: '18px 20px', background: '#fff', border: '1px solid #e2e8f0', flex: 1 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-                      <div><div className="employee-skeleton employee-skeleton-line xs" style={{ width: 60 }} /><div className="employee-skeleton employee-skeleton-line md" style={{ marginTop: 8 }} /></div>
-                      <div className="employee-skeleton" style={{ width: 50, height: 22, borderRadius: 999 }} />
+                  <div className="employee-skeleton-card-shell" style={{ borderRadius: 14, padding: '16px 18px', background: '#fff', border: '1px solid #e2e8f0', flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+                      <div>
+                        <div className="employee-skeleton" style={{ width: 55, height: 10, borderRadius: 3, marginBottom: 5 }} />
+                        <div className="employee-skeleton" style={{ width: 95, height: 16, borderRadius: 4 }} />
+                      </div>
+                      <div className="employee-skeleton" style={{ width: 48, height: 20, borderRadius: 999 }} />
                     </div>
                     {[1, 2, 3, 4].map(r => (
-                      <div key={r} style={{ display: 'grid', gridTemplateColumns: '34px 1fr', gap: 12, marginBottom: 12 }}>
-                        <div className="employee-skeleton" style={{ width: 34, height: 34, borderRadius: 10 }} />
-                        <div>
-                          <div className="employee-skeleton employee-skeleton-line sm" />
-                          <div className="employee-skeleton employee-skeleton-line md" style={{ marginTop: 6 }} />
+                      <div key={r} style={{
+                        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px',
+                        marginBottom: 8, borderRadius: 12, background: '#fff', border: '1px solid #f1f5f9'
+                      }}>
+                        <div className="employee-skeleton" style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                            <div className="employee-skeleton" style={{ width: '45%', height: 13, borderRadius: 3 }} />
+                            <div className="employee-skeleton" style={{ width: 44, height: 16, borderRadius: 999 }} />
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <div className="employee-skeleton" style={{ width: '55%', height: 11, borderRadius: 3 }} />
+                            <div className="employee-skeleton" style={{ width: 60, height: 10, borderRadius: 3 }} />
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -2619,35 +3126,85 @@ function Dashboard() {
                     <div className="employee-activity-list" style={{ flex: 1, overflowY: 'auto', paddingRight: '2px' }}>
                       {employeeRecentActivities.length > 0 ? (
                         employeeRecentActivities.map((activity, index) => {
-                          const { Icon, color, bg } = getActivityMeta(activity.type);
+                          const info = getActivityStatusInfo(activity);
+                          const ItemIcon = info.IconComponent;
                           return (
-                            <div key={index} style={{
-                              display: 'flex', alignItems: 'flex-start', gap: '10px',
-                              padding: '9px 11px', marginBottom: '7px',
-                              borderRadius: '9px', background: bg,
-                              border: `1px solid ${color}22`,
-                              borderLeft: `3px solid ${color}`
-                            }}>
-                              <div style={{
-                                width: '30px', height: '30px', borderRadius: '7px',
-                                background: `${color}15`, border: `1px solid ${color}28`,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                flexShrink: 0, marginTop: '1px'
-                              }}>
-                                <Icon size={14} color={color} strokeWidth={2} />
+                            <div
+                              key={index}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                padding: '11px 13px',
+                                marginBottom: '8px',
+                                borderRadius: '12px',
+                                background: '#ffffff',
+                                border: '1px solid #e2e8f0',
+                                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)',
+                                transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                                cursor: 'default'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.06)';
+                                e.currentTarget.style.borderColor = '#cbd5e1';
+                                e.currentTarget.style.transform = 'translateY(-1px)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.02)';
+                                e.currentTarget.style.borderColor = '#e2e8f0';
+                                e.currentTarget.style.transform = 'translateY(0)';
+                              }}
+                            >
+                              {/* Status-tinted Icon Box */}
+                              <div
+                                style={{
+                                  width: '36px',
+                                  height: '36px',
+                                  borderRadius: '10px',
+                                  background: info.iconBg,
+                                  border: `1px solid ${info.iconBorder}`,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  flexShrink: 0
+                                }}
+                              >
+                                <ItemIcon size={16} color={info.iconColor} strokeWidth={2.2} />
                               </div>
+
+                              {/* Title, description, badge & date */}
                               <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', marginBottom: '2px' }}>
-                                  <span style={{ fontSize: '12px', fontWeight: '600', color: '#0f172a', fontFamily: "'Inter', sans-serif", letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {activity.title || 'Activity'}
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '3px' }}>
+                                  <span style={{ fontSize: '13px', fontWeight: '600', color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {activity.title || 'Leave Request'}
                                   </span>
-                                  <span style={{ fontSize: '10px', color: '#94a3b8', flexShrink: 0, fontFamily: "'Inter', sans-serif", fontWeight: '500' }}>
+                                  {info.badgeLabel && (
+                                    <span
+                                      style={{
+                                        fontSize: '10px',
+                                        fontWeight: 700,
+                                        color: info.badgeColor,
+                                        background: info.badgeBg,
+                                        border: `1px solid ${info.badgeBorder}`,
+                                        padding: '2px 8px',
+                                        borderRadius: '999px',
+                                        lineHeight: 1.3,
+                                        letterSpacing: '0.02em',
+                                        flexShrink: 0
+                                      }}
+                                    >
+                                      {info.badgeLabel}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                                  <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {info.cleanDesc}
+                                  </span>
+                                  <span style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 500, flexShrink: 0 }}>
                                     {formatActivityDate(activity.timestamp)}
                                   </span>
                                 </div>
-                                <p style={{ margin: 0, fontSize: '11px', color: '#64748b', lineHeight: '1.4', fontFamily: "'Inter', sans-serif", wordBreak: 'break-word' }}>
-                                  {activity.description || ''}
-                                </p>
                               </div>
                             </div>
                           );
@@ -2667,26 +3224,50 @@ function Dashboard() {
 
             <main className="employee-dashboard-main">
               <section className="employee-topbar-card">
-                <div>
+                <div className="employee-topbar-header">
+                  <div className="employee-topbar-user-copy">
+                    {loading ? (
+                      <>
+                        <div className="employee-skeleton employee-skeleton-line xs" />
+                        <div className="employee-skeleton employee-skeleton-line md" style={{ marginTop: '6px', height: '22px', width: '130px' }} />
+                      </>
+                    ) : (
+                      <>
+                        <span className="employee-overline dark" style={{ display: 'block', fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.08em', color: '#64748b', textTransform: 'uppercase' }}>
+                          Welcome,
+                        </span>
+                        <h2 className="employee-topbar-user-name">
+                          {`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Employee'}
+                        </h2>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Compact Mobile-Only Refresh Pill */}
                   {loading ? (
-                    <>
-                      <div className="employee-skeleton employee-skeleton-line xs" />
-                      <div className="employee-skeleton employee-skeleton-line md" style={{ marginTop: '8px', height: '30px' }} />
-                    </>
+                    <div className="employee-skeleton employee-mobile-refresh-skeleton" />
                   ) : (
-                    <>
-                      <span className="employee-overline dark">Welcome, </span>
-                      <h2>{`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Employee'}</h2>
-                    </>
+                    <button
+                      type="button"
+                      className="employee-mobile-refresh-btn"
+                      onClick={handleRefresh}
+                      disabled={refreshing || loading}
+                      title="Refresh dashboard data"
+                    >
+                      {refreshing ? <Loader2 size={12} className="spin-animation" /> : <RefreshCw size={12} />}
+                      <span>{refreshing ? 'Refreshing' : 'Refresh'}</span>
+                    </button>
                   )}
                 </div>
-                <div className="employee-topbar-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+
+                <div className="employee-topbar-actions">
                   {loading ? (
-                    <div className="employee-skeleton employee-skeleton-button" />
+                    <div className="employee-skeleton" style={{ width: '100%', height: '38px', borderRadius: '10px' }} />
                   ) : (
                     <>
                       {/* Upload Selfie Button */}
-                      <div
+                      <button
+                        type="button"
                         onClick={() => {
                           if (isCheckInSelfieUploaded && isCheckOutSelfieUploaded) {
                             setShowSelfieModal(true);
@@ -2708,10 +3289,10 @@ function Dashboard() {
                             const dLat = (OFFICE_LAT - cachedLocation.latitude) * Math.PI / 180;
                             const dLon = (OFFICE_LNG - cachedLocation.longitude) * Math.PI / 180;
                             const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                                      Math.cos(cachedLocation.latitude * Math.PI / 180) * Math.cos(OFFICE_LAT * Math.PI / 180) *
-                                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+                              Math.cos(cachedLocation.latitude * Math.PI / 180) * Math.cos(OFFICE_LAT * Math.PI / 180) *
+                              Math.sin(dLon / 2) * Math.sin(dLon / 2);
                             const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                            
+
                             if (distance > 50) {
                               setErrorToast(`Selfie upload is only allowed from the office. You are ${Math.round(distance)}m away.`);
                               return;
@@ -2728,143 +3309,80 @@ function Dashboard() {
                           }
                           setShowSelfieModal(true);
                         }}
-                        style={{
-                          background: (isCheckInSelfieUploaded && isCheckOutSelfieUploaded) ? '#dcfce7' : '#e0f2fe', 
-                          color: (isCheckInSelfieUploaded && isCheckOutSelfieUploaded) ? '#166534' : '#0284c7', 
-                          padding: '0 12px', height: '32px', borderRadius: '999px',
-                          fontSize: '12.5px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                          border: 'none', boxSizing: 'border-box', 
-                          cursor: 'pointer', gap: '4px'
-                        }}
+                        className={`employee-topbar-btn employee-topbar-btn-selfie ${
+                          (isCheckInSelfieUploaded && isCheckOutSelfieUploaded) ? 'selfie-completed' : 'selfie-pending'
+                        }`}
                       >
                         {(isCheckInSelfieUploaded && isCheckOutSelfieUploaded) ? (
                           <>
-                            <CheckCircle2 size={14} /> Selfies Uploaded
+                            <CheckCircle2 size={15} />
+                            <span>Selfies Uploaded</span>
                           </>
                         ) : !isCheckInSelfieUploaded ? (
                           <>
-                            <Camera size={14} /> Upload Check-in Selfie
+                            <Camera size={15} />
+                            <span>Upload Check-in Selfie</span>
                           </>
                         ) : (
                           <>
-                            <Camera size={14} /> Upload Check-out Selfie
+                            <Camera size={15} />
+                            <span>Upload Check-out Selfie</span>
                           </>
                         )}
-                      </div>
+                      </button>
+
                       {/* Break history badges */}
                       {(() => {
                         if (!todayAttendance || !todayAttendance.loginTime || todayAttendance.logoutTime) return null;
                         return (
-                          <div
+                          <button
+                            type="button"
                             onClick={() => setBreakDetailsModal({ visible: true, type: 'All Breaks', breaks: todayAttendance.breaks || [] })}
-                            style={{
-                              background: '#e0e7ff', color: '#4338ca', padding: '0 12px', height: '32px', borderRadius: '999px',
-                              fontSize: '12.5px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', boxSizing: 'border-box', cursor: 'pointer', gap: '4px'
-                            }}
+                            className="employee-topbar-btn employee-topbar-btn-breakdetails"
                           >
-                            <ClipboardList size={14} /> Break Details
-                          </div>
+                            <ClipboardList size={15} />
+                            <span>Break Details</span>
+                          </button>
                         );
                       })()}
+
                       {/* Break buttons */}
                       {todayAttendance && !todayAttendance.logoutTime && todayAttendance.loginTime && (
                         activeBreak ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <div style={{
-                              background: '#fef3c7',
-                              color: '#d97706',
-                              padding: '0 12px',
-                              height: '32px',
-                              borderRadius: '999px',
-                              fontSize: '12.5px',
-                              fontWeight: 600,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: '6px',
-                              border: '1px solid #fde68a',
-                              boxSizing: 'border-box',
-                              fontVariantNumeric: 'tabular-nums'
-                            }}>
-                              <Clock size={14} /> {new Date(breakTimer * 1000).toISOString().substr(11, 8)}
+                          <div className="employee-topbar-active-break-group">
+                            <div className="employee-topbar-break-timer">
+                              <Clock size={14} />
+                              <span>{new Date(breakTimer * 1000).toISOString().substr(11, 8)}</span>
                             </div>
                             <button
+                              type="button"
                               onClick={handleBreakEnd}
-                              className="employee-refresh-btn"
-                              style={{
-                                background: '#ef4444',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '999px',
-                                padding: '0 12px',
-                                height: '32px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '6px',
-                                transition: 'all 0.2s ease',
-                                cursor: 'pointer',
-                                boxSizing: 'border-box'
-                              }}
-                              onMouseEnter={e => { e.currentTarget.style.background = '#dc2626'; }}
-                              onMouseLeave={e => { e.currentTarget.style.background = '#ef4444'; }}
+                              className="employee-topbar-btn employee-topbar-btn-stopbreak"
                             >
-                              Stop
+                              Stop Break
                             </button>
                           </div>
                         ) : (
                           <button
+                            type="button"
                             onClick={handleOpenBreakModal}
-                            style={{
-                              background: '#ffedd5',
-                              color: '#c2410c',
-                              border: 'none',
-                              borderRadius: '999px',
-                              padding: '0 14px',
-                              height: '32px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '12.5px',
-                              fontWeight: 600,
-                              transition: 'all 0.2s ease',
-                              cursor: 'pointer',
-                              boxSizing: 'border-box'
-                            }}
-                            onMouseEnter={e => {
-                              e.currentTarget.style.background = '#fdba74';
-                              e.currentTarget.style.color = '#9a3412';
-                            }}
-                            onMouseLeave={e => {
-                              e.currentTarget.style.background = '#ffedd5';
-                              e.currentTarget.style.color = '#c2410c';
-                            }}
+                            className="employee-topbar-btn employee-topbar-btn-takebreak"
                           >
-                            Take Break
+                            <Coffee size={15} />
+                            <span>Take Break</span>
                           </button>
                         )
                       )}
+
+                      {/* Desktop-Only Refresh Button */}
                       <button
                         type="button"
-                        className="employee-refresh-btn"
+                        className="employee-topbar-btn employee-topbar-btn-refresh employee-refresh-desktop-only"
                         onClick={handleRefresh}
                         disabled={refreshing || loading}
-                        style={{
-                          borderRadius: '999px',
-                          padding: '0 12px',
-                          height: '28px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px',
-                          cursor: (refreshing || loading) ? 'not-allowed' : 'pointer',
-                          boxSizing: 'border-box',
-                          fontSize: '11px',
-                          fontWeight: 600
-                        }}
                       >
-                        {refreshing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={12} />}
-                        {refreshing ? 'Refreshing...' : 'Refresh'}
+                        {refreshing ? <Loader2 size={13} className="spin-animation" /> : <RefreshCw size={13} />}
+                        <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
                       </button>
                     </>
                   )}
@@ -2873,8 +3391,8 @@ function Dashboard() {
 
               {/* Inline Selfie Section */}
               {showSelfieModal && (
-                <section style={{ 
-                  background: 'white', borderRadius: '16px', padding: '24px', marginBottom: '24px', 
+                <section style={{
+                  background: 'white', borderRadius: '16px', padding: '24px', marginBottom: '24px',
                   boxShadow: '0 4px 20px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0',
                   animation: 'employeeModalFadeIn 0.3s ease'
                 }}>
@@ -2902,7 +3420,7 @@ function Dashboard() {
                       <XCircle size={20} />
                     </button>
                   </div>
-                  
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', justifyItems: 'center', width: '100%' }}>
                     {/* LEFT COLUMN: Check-in */}
                     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -2912,7 +3430,7 @@ function Dashboard() {
                             <img src={checkInSelfie} alt="Check-in Selfie" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           </div>
                           <span style={{ fontSize: '14px', fontWeight: 600, color: '#475569', textAlign: 'center' }}>
-                            Check-in Selfie <br/>
+                            Check-in Selfie <br />
                             <span style={{ fontSize: '12px', color: '#94a3b8' }}>
                               {checkInTime ? new Date(checkInTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'Uploaded'}
                             </span>
@@ -2958,7 +3476,7 @@ function Dashboard() {
                               <img src={selfieImage} alt="Captured Selfie" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                             </div>
                           )}
-                          
+
                           {selfieImage && (
                             <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center', gap: '12px' }}>
                               <button
@@ -3023,7 +3541,7 @@ function Dashboard() {
                             <img src={checkOutSelfie} alt="Check-out Selfie" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           </div>
                           <span style={{ fontSize: '14px', fontWeight: 600, color: '#475569', textAlign: 'center' }}>
-                            Check-out Selfie <br/>
+                            Check-out Selfie <br />
                             <span style={{ fontSize: '12px', color: '#94a3b8' }}>
                               {checkOutTime ? new Date(checkOutTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'Uploaded'}
                             </span>
@@ -3069,7 +3587,7 @@ function Dashboard() {
                               <img src={selfieImage} alt="Captured Selfie" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                             </div>
                           )}
-                          
+
                           {selfieImage && (
                             <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'center', gap: '12px' }}>
                               <button
@@ -3220,73 +3738,206 @@ function Dashboard() {
                 </div>
               )}
 
-              {loading && (
+              {/* Professional Shimmer Skeleton Body — accurately matches all respective cards */}
+              {(loading || refreshing) && (
                 <>
-                  {/* KPI cards skeleton */}
-                  <section className="employee-kpi-grid employee-skeleton-grid">
-                    {[1, 2, 3, 4, 5].map((item) => (
-                      <article className="employee-kpi-card employee-skeleton-card" key={`kpi-skeleton-${item}`}>
-                        <div className="employee-skeleton employee-skeleton-icon" />
-                        <div className="employee-skeleton employee-skeleton-line sm" />
-                        <div className="employee-skeleton employee-skeleton-line lg" />
-                        <div className="employee-skeleton employee-skeleton-line xs" />
-                      </article>
-                    ))}
-                  </section>
-
-                  {/* Work Snapshot skeleton */}
-                  <section style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '14px', marginBottom: '14px' }}>
-                    <div className="employee-skeleton-card" style={{ borderRadius: 10, padding: '12px 16px', background: '#fff', border: '1px solid #e2e8f0' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <div><div className="employee-skeleton employee-skeleton-line xs" style={{ width: 70 }} /><div className="employee-skeleton employee-skeleton-line sm" style={{ marginTop: 6, width: 110 }} /></div>
-                        <div className="employee-skeleton" style={{ width: 44, height: 18, borderRadius: 999 }} />
+                  {/* Row 1 & Row 2 KPI Grid Skeleton */}
+                  <section className="employee-kpi-grid">
+                    {/* Skeleton Card 1: Total Present */}
+                    <div
+                      className="employee-kpi-item employee-skeleton-card-shell"
+                      style={{
+                        padding: '16px 18px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        minHeight: '136px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                        <div className="employee-skeleton" style={{ width: '85px', height: '14px', borderRadius: '4px' }} />
+                        <div className="employee-skeleton" style={{ width: '22px', height: '22px', borderRadius: '50%' }} />
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
-                        {[1, 2, 3].map(i => (
-                          <div key={i} style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 12px', border: '1px solid #f1f5f9' }}>
-                            <div className="employee-skeleton" style={{ width: 22, height: 22, borderRadius: 6, marginBottom: 8 }} />
-                            <div className="employee-skeleton employee-skeleton-line xs" style={{ width: '60%', marginBottom: 6 }} />
-                            <div className="employee-skeleton employee-skeleton-line lg" style={{ width: '40%' }} />
+                      <div className="employee-skeleton" style={{ width: '48px', height: '30px', borderRadius: '6px', marginBottom: '12px' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div className="employee-skeleton" style={{ width: '36px', height: '13px', borderRadius: '4px' }} />
+                        <div className="employee-skeleton" style={{ width: '80px', height: '12px', borderRadius: '4px' }} />
+                      </div>
+                    </div>
+
+                    {/* Skeleton Card 2: Total Absent */}
+                    <div
+                      className="employee-kpi-item employee-skeleton-card-shell"
+                      style={{
+                        padding: '16px 18px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        minHeight: '136px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                        <div className="employee-skeleton" style={{ width: '80px', height: '14px', borderRadius: '4px' }} />
+                        <div className="employee-skeleton" style={{ width: '22px', height: '22px', borderRadius: '50%' }} />
+                      </div>
+                      <div className="employee-skeleton" style={{ width: '48px', height: '30px', borderRadius: '6px', marginBottom: '12px' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div className="employee-skeleton" style={{ width: '36px', height: '13px', borderRadius: '4px' }} />
+                        <div className="employee-skeleton" style={{ width: '80px', height: '12px', borderRadius: '4px' }} />
+                      </div>
+                    </div>
+
+                    {/* Skeleton Card 3: Landscape Calendar & Weather Card (Spans 2 columns) */}
+                    <div
+                      className="employee-cal-weather-card employee-skeleton-card-shell"
+                      style={{
+                        padding: '14px 18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        minHeight: '136px'
+                      }}
+                    >
+                      {/* Left: Weather & Time Shimmer */}
+                      <div className="employee-cal-weather-left">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div className="employee-skeleton" style={{ width: '36px', height: '36px', borderRadius: '10px', flexShrink: 0 }} />
+                          <div>
+                            <div className="employee-skeleton" style={{ width: '82px', height: '20px', borderRadius: '4px', marginBottom: '6px' }} />
+                            <div className="employee-skeleton" style={{ width: '92px', height: '12px', borderRadius: '4px' }} />
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  </section>
-
-                  {/* Chart panel skeleton */}
-                  <section className="employee-dashboard-panels" style={{ marginBottom: 14 }}>
-                    <div className="employee-skeleton-card" style={{ borderRadius: 10, padding: '14px 16px', background: '#fff', border: '1px solid #e2e8f0' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
-                        <div><div className="employee-skeleton employee-skeleton-line xs" style={{ width: 90 }} /><div className="employee-skeleton employee-skeleton-line md" style={{ marginTop: 6 }} /></div>
-                        <div className="employee-skeleton" style={{ width: 50, height: 18, borderRadius: 999 }} />
-                      </div>
-                      {/* Fake chart bars */}
-                      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 100, padding: '0 2px' }}>
-                        {[50, 65, 40, 80, 60, 95, 45, 72, 55, 70, 58, 84].map((h, i) => (
-                          <div key={i} className="employee-skeleton" style={{ flex: 1, height: h, borderRadius: '3px 3px 0 0' }} />
-                        ))}
-                      </div>
-                    </div>
-                  </section>
-
-                  {/* Bottom tables skeleton */}
-                  <section className="employee-dashboard-bottom">
-                    {[0, 1].map(t => (
-                      <div key={t} className="employee-skeleton-card" style={{ borderRadius: 10, padding: '14px 16px', background: '#fff', border: '1px solid #e2e8f0' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-                          <div><div className="employee-skeleton employee-skeleton-line xs" style={{ width: 50 }} /><div className="employee-skeleton employee-skeleton-line md" style={{ marginTop: 6 }} /></div>
-                          <div className="employee-skeleton" style={{ width: 44, height: 18, borderRadius: 999 }} />
                         </div>
-                        {[1, 2, 3, 4].map(r => (
-                          <div key={r} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, paddingBottom: 10, marginBottom: 10, borderBottom: '1px solid #f8fafc' }}>
-                            <div className="employee-skeleton employee-skeleton-line sm" />
-                            <div className="employee-skeleton employee-skeleton-line sm" />
-                            <div className="employee-skeleton employee-skeleton-line sm" />
-                            <div className="employee-skeleton" style={{ height: 16, borderRadius: 999 }} />
+                        <div style={{ marginTop: '12px' }}>
+                          <div className="employee-skeleton" style={{ width: '88px', height: '22px', borderRadius: '12px' }} />
+                        </div>
+                      </div>
+
+                      {/* Right: Calendar Grid Shimmer */}
+                      <div className="employee-cal-weather-right">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <div className="employee-skeleton" style={{ width: '105px', height: '16px', borderRadius: '4px' }} />
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <div className="employee-skeleton" style={{ width: '24px', height: '24px', borderRadius: '6px' }} />
+                            <div className="employee-skeleton" style={{ width: '24px', height: '24px', borderRadius: '6px' }} />
+                          </div>
+                        </div>
+
+                        {/* Weekday headers */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginBottom: '6px' }}>
+                          {[0, 1, 2, 3, 4, 5, 6].map(d => (
+                            <div key={d} className="employee-skeleton" style={{ height: '10px', borderRadius: '3px' }} />
+                          ))}
+                        </div>
+
+                        {/* 35 Calendar day cells with today's date pill */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }}>
+                          {Array.from({ length: 35 }).map((_, i) => (
+                            <div
+                              key={i}
+                              className="employee-skeleton"
+                              style={{
+                                height: '18px',
+                                borderRadius: i === 16 ? '7px' : '4px',
+                                opacity: i === 16 ? 0.95 : (i < 2 || i > 31 ? 0.35 : 0.65)
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Skeleton Card 4: Total Leaves (Col 1 of row 2) */}
+                    <div
+                      className="employee-kpi-item employee-skeleton-card-shell"
+                      style={{
+                        padding: '16px 18px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        minHeight: '136px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                        <div className="employee-skeleton" style={{ width: '80px', height: '14px', borderRadius: '4px' }} />
+                        <div className="employee-skeleton" style={{ width: '22px', height: '22px', borderRadius: '50%' }} />
+                      </div>
+                      <div className="employee-skeleton" style={{ width: '48px', height: '30px', borderRadius: '6px', marginBottom: '12px' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div className="employee-skeleton" style={{ width: '36px', height: '13px', borderRadius: '4px' }} />
+                        <div className="employee-skeleton" style={{ width: '80px', height: '12px', borderRadius: '4px' }} />
+                      </div>
+                    </div>
+
+                    {/* Skeleton Card 5: Support Metrics Snapshot (Col 2-4 of row 2, span 3) */}
+                    <article
+                      className="employee-panel employee-snapshot-panel employee-skeleton-card-shell"
+                      style={{
+                        padding: '16px 20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        minHeight: '136px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                        <div>
+                          <div className="employee-skeleton" style={{ width: '88px', height: '10px', borderRadius: '3px', marginBottom: '5px' }} />
+                          <div className="employee-skeleton" style={{ width: '68px', height: '16px', borderRadius: '4px' }} />
+                        </div>
+                        <div className="employee-skeleton" style={{ width: '52px', height: '20px', borderRadius: '999px' }} />
+                      </div>
+
+                      {/* 3 inner support metric cards */}
+                      <div className="employee-snapshot-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px' }}>
+                        {[0, 1, 2].map(i => (
+                          <div
+                            key={i}
+                            style={{
+                              background: '#f8fafc',
+                              borderRadius: '10px',
+                              padding: '10px 14px',
+                              border: '1px solid #e2e8f0',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '12px'
+                            }}
+                          >
+                            <div className="employee-skeleton" style={{ width: '32px', height: '32px', borderRadius: '8px', flexShrink: 0 }} />
+                            <div style={{ flex: 1 }}>
+                              <div className="employee-skeleton" style={{ width: '75%', height: '10px', borderRadius: '3px', marginBottom: '6px' }} />
+                              <div className="employee-skeleton" style={{ width: '45%', height: '22px', borderRadius: '4px' }} />
+                            </div>
                           </div>
                         ))}
                       </div>
-                    ))}
+                    </article>
+                  </section>
+
+                  {/* Attendance Statistics Chart Skeleton (Clean shimmer block, no fake line/dots) */}
+                  <section className="employee-dashboard-panels" style={{ marginBottom: 14 }}>
+                    <article className="employee-panel employee-chart-panel employee-skeleton-card-shell" style={{ padding: '20px', display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+                        <div>
+                          <div className="employee-skeleton" style={{ width: '120px', height: '10px', borderRadius: '3px', marginBottom: '6px' }} />
+                          <div className="employee-skeleton" style={{ width: '180px', height: '18px', borderRadius: '4px' }} />
+                        </div>
+                        <div className="employee-skeleton" style={{ width: '58px', height: '22px', borderRadius: '999px' }} />
+                      </div>
+
+                      {/* Clean Chart Canvas Shimmer Area (NO line/dots) */}
+                      <div style={{ height: '180px', width: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', paddingTop: '4px' }}>
+                        {/* Smooth full-width chart placeholder shimmer */}
+                        <div className="employee-skeleton" style={{ width: '100%', height: '136px', borderRadius: '10px' }} />
+
+                        {/* X-axis labels shimmer */}
+                        <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '12px' }}>
+                          {['Present Days', 'Absent Days', 'Half Days', 'Late Marks'].map((lbl, idx) => (
+                            <div key={idx} className="employee-skeleton" style={{ width: '80px', height: '12px', borderRadius: '3px' }} />
+                          ))}
+                        </div>
+                      </div>
+                    </article>
                   </section>
                 </>
               )}
@@ -3297,23 +3948,20 @@ function Dashboard() {
                 </div>
               )}
 
-              {!loading && (
+              {!(loading || refreshing) && (
                 <>
                   <section className="employee-kpi-grid">
-                    {employeeHighlights.map((item, index) => {
+                    {/* KPI 1 & 2: Total Present and Total Absent */}
+                    {employeeHighlights.slice(0, 2).map((item, index) => {
                       const Icon = item.icon;
                       const iconColors = {
-                        emerald: '#166534',  // dark green
-                        rose: '#15803d',  // royal green
-                        sky: '#16a34a',  // medium green
-                        violet: '#22c55e',  // fresh green
-                        amber: '#4ade80'   // soft green
+                        emerald: '#166534',
+                        rose: '#15803d',
+                        amber: '#4ade80'
                       };
                       const watermarkColors = {
                         emerald: 'rgba(22,101,52,0.10)',
                         rose: 'rgba(21,128,61,0.10)',
-                        sky: 'rgba(22,163,74,0.10)',
-                        violet: 'rgba(34,197,94,0.10)',
                         amber: 'rgba(74,222,128,0.10)'
                       };
                       const iconColor = iconColors[item.tone] || '#64748b';
@@ -3329,30 +3977,215 @@ function Dashboard() {
                             position: 'relative',
                             overflow: 'hidden',
                             transition: 'all 0.3s',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            padding: '16px 18px 14px',
                             animation: `fadeInUp 0.4s ease-out ${index * 0.08}s both`,
                           }}
                           onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)'}
                           onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
                         >
-                          {/* Watermark circle */}
                           <div style={{
                             position: 'absolute', right: '-18px', bottom: '-18px',
                             width: '100px', height: '100px', borderRadius: '50%',
                             background: watermarkColor, pointerEvents: 'none'
                           }} />
 
-                          {/* Top row: label (left) + icon (right) */}
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                             <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 500 }}>{item.label}</div>
                             <div style={{ color: iconColor }}><Icon size={20} /></div>
                           </div>
 
-                          {/* Big value */}
                           <div style={{ fontSize: '28px', fontWeight: 300, color: '#1e293b', marginBottom: '6px', lineHeight: 1 }}>
                             {item.value}
                           </div>
 
-                          {/* Trend row */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span style={{ color: item.isUp ? '#a8e63d' : '#ef4444', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                              {item.isUp
+                                ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="18 15 12 9 6 15" /></svg>
+                                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
+                              }
+                              <span style={{ fontSize: '12px', fontWeight: 600 }}>{item.trend}</span>
+                            </span>
+                            <span style={{ fontSize: '12px', color: '#94a3b8' }}>from last month</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Landscape Calendar & Weather Card — Spans 2 columns, replacing Assigned Projects & Completed Projects */}
+                    <div className="employee-cal-weather-card">
+                      {/* Left: Weather details, live clock & date */}
+                      <div className="employee-cal-weather-left">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div style={{ flexShrink: 0 }}>
+                            <WeatherIllustration iconType={weatherInfo.iconType} isDay={weatherInfo.isDay} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '18px', fontWeight: 700, color: '#1e293b', letterSpacing: '-0.3px', lineHeight: 1.2 }}>
+                              {liveClock.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 500, marginTop: '2px' }}>
+                              {weatherInfo.temp}°C in {weatherInfo.city}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: '#6366f1', background: '#ede9fe', padding: '4px 10px', borderRadius: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#6366f1' }} />
+                            {new Date().toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })}
+                          </div>
+                          {(cardCalDate.getMonth() !== new Date().getMonth() || cardCalDate.getFullYear() !== new Date().getFullYear()) && (
+                            <button
+                              type="button"
+                              onClick={() => setCardCalDate(new Date())}
+                              style={{ fontSize: '11px', fontWeight: 600, color: '#6366f1', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px', textDecoration: 'underline' }}
+                            >
+                              Today
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right: Month navigation & calendar grid */}
+                      <div className="employee-cal-weather-right">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1e1b4b', letterSpacing: '-0.2px' }}>
+                            {cardCalDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setCardCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                              style={{
+                                width: '24px', height: '24px', borderRadius: '6px', border: 'none',
+                                background: '#f1f0fb', color: '#6366f1', display: 'flex', alignItems: 'center',
+                                justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s'
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.background = '#e0e7ff'}
+                              onMouseLeave={e => e.currentTarget.style.background = '#f1f0fb'}
+                              title="Previous Month"
+                            >
+                              <ChevronLeft size={14} strokeWidth={2.5} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCardCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                              style={{
+                                width: '24px', height: '24px', borderRadius: '6px', border: 'none',
+                                background: '#f1f0fb', color: '#6366f1', display: 'flex', alignItems: 'center',
+                                justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s'
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.background = '#e0e7ff'}
+                              onMouseLeave={e => e.currentTarget.style.background = '#f1f0fb'}
+                              title="Next Month"
+                            >
+                              <ChevronRight size={14} strokeWidth={2.5} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Weekday headers */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', marginBottom: '4px' }}>
+                          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                            <span key={d} style={{ fontSize: '10px', fontWeight: 600, color: '#94a3b8' }}>{d}</span>
+                          ))}
+                        </div>
+
+                        {/* Days grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', textAlign: 'center' }}>
+                          {getCardCalendarCells(cardCalDate).map((cell, idx) => {
+                            const isToday =
+                              cell.isCurrentMonth &&
+                              cell.day === new Date().getDate() &&
+                              cell.month === new Date().getMonth() &&
+                              cell.year === new Date().getFullYear();
+
+                            return (
+                              <div
+                                key={idx}
+                                style={{
+                                  height: '21px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '11px',
+                                  fontWeight: isToday ? 700 : (cell.isCurrentMonth ? 600 : 400),
+                                  color: isToday ? '#ffffff' : (cell.isCurrentMonth ? '#1e293b' : '#cbd5e1'),
+                                  background: isToday ? 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' : 'transparent',
+                                  borderRadius: '7px',
+                                  boxShadow: isToday ? '0 3px 8px rgba(99, 102, 241, 0.4)' : 'none',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                onMouseEnter={e => {
+                                  if (!isToday && cell.isCurrentMonth) {
+                                    e.currentTarget.style.background = 'rgba(99, 102, 241, 0.08)';
+                                  }
+                                }}
+                                onMouseLeave={e => {
+                                  if (!isToday && cell.isCurrentMonth) {
+                                    e.currentTarget.style.background = 'transparent';
+                                  }
+                                }}
+                              >
+                                {cell.day}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Total Leaves (Col 1 of row 2) */}
+                    {employeeHighlights.slice(2, 3).map((item, index) => {
+                      const Icon = item.icon;
+                      const iconColors = {
+                        amber: '#4ade80'
+                      };
+                      const watermarkColors = {
+                        amber: 'rgba(74,222,128,0.10)'
+                      };
+                      const iconColor = iconColors[item.tone] || '#64748b';
+                      const watermarkColor = watermarkColors[item.tone] || 'rgba(100,116,139,0.08)';
+                      return (
+                        <div
+                          key={item.label}
+                          className="employee-kpi-item"
+                          style={{
+                            background: 'white',
+                            borderRadius: '12px',
+                            border: '1px solid #e2e8f0',
+                            position: 'relative',
+                            overflow: 'hidden',
+                            transition: 'all 0.3s',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            padding: '16px 18px 14px',
+                            animation: `fadeInUp 0.4s ease-out 0.16s both`,
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)'}
+                          onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                        >
+                          <div style={{
+                            position: 'absolute', right: '-18px', bottom: '-18px',
+                            width: '100px', height: '100px', borderRadius: '50%',
+                            background: watermarkColor, pointerEvents: 'none'
+                          }} />
+
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                            <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 500 }}>{item.label}</div>
+                            <div style={{ color: iconColor }}><Icon size={20} /></div>
+                          </div>
+
+                          <div style={{ fontSize: '28px', fontWeight: 300, color: '#1e293b', marginBottom: '6px', lineHeight: 1 }}>
+                            {item.value}
+                          </div>
+
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <span style={{ color: item.isUp ? '#a8e63d' : '#ef4444', display: 'flex', alignItems: 'center', gap: '2px' }}>
                               {item.isUp
@@ -3375,7 +4208,7 @@ function Dashboard() {
                           <span style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#94a3b8' }}>Support Metrics</span>
                           <div style={{ fontSize: '14px', fontWeight: 700, color: '#111827', lineHeight: 1.2, marginTop: '1px' }}>Snapshot</div>
                         </div>
-                        <span className="employee-panel-badge">Overall</span>
+                        <span className="employee-panel-badge" style={{ background: '#f0fdf4', color: '#15803d', borderColor: '#bbf7d0' }}>My Leaves</span>
                       </div>
                       {/* Stats row */}
                       <div className="employee-snapshot-stats" style={{ display: 'grid', gap: '10px', flex: 1 }}>
@@ -3400,9 +4233,9 @@ function Dashboard() {
                       <div className="employee-card-head">
                         <div>
                           <span className="employee-overline dark">Attendance Statistic</span>
-                          <h3>My Attendance Statistics</h3>
+
                         </div>
-                        <span className="employee-panel-badge">Monthly</span>
+                        <span className="employee-panel-badge" style={{ background: '#f5f3ff', color: '#7c3aed', borderColor: '#ddd6fe' }}>Monthly</span>
                       </div>
                       <div className="chart-wrapper employee-chart-wrapper" style={{ flex: 1, height: 'auto' }}>
                         <canvas ref={personalAttendanceChartRef}></canvas>
@@ -4469,8 +5302,8 @@ function Dashboard() {
         }}>
           <CheckCircle2 size={18} strokeWidth={2.5} />
           <span style={{ flex: 1, textShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>{successToast}</span>
-          <button 
-            onClick={() => setSuccessToast(null)} 
+          <button
+            onClick={() => setSuccessToast(null)}
             style={{ background: 'rgba(255,255,255,0.2)', border: 'none', cursor: 'pointer', color: 'white', padding: '4px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}
             onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.3)'}
             onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
@@ -4504,8 +5337,8 @@ function Dashboard() {
         }}>
           <span style={{ fontSize: '18px' }}>⚠️</span>
           <span style={{ flex: 1, textShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>{errorToast}</span>
-          <button 
-            onClick={() => setErrorToast(null)} 
+          <button
+            onClick={() => setErrorToast(null)}
             style={{ background: 'rgba(255,255,255,0.2)', border: 'none', cursor: 'pointer', color: 'white', padding: '4px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}
             onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.3)'}
             onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}

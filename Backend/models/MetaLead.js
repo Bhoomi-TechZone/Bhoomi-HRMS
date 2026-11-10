@@ -72,7 +72,7 @@ const metaLeadSchema = new mongoose.Schema({
   // CRM management fields
   status: {
     type: String,
-    enum: ['New', 'Contacted', 'Connected', 'Not Connected', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed', 'Client', 'Invalid', 'International'],
+    enum: ['New', 'Contacted', 'Connected', 'Not Connected', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed', 'Client', 'Invalid', 'International', 'Switched Off'],
     default: 'New',
     index: true
   },

@@ -4,7 +4,7 @@ import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import './MyLeads.css';
 
-const STATUS_OPTIONS = ['New', 'Connected', 'Interested', 'Follow-up', 'Not Connected', 'Not Interested', 'Converted', 'Invalid', 'International'];
+const STATUS_OPTIONS = ['New', 'Connected', 'Interested', 'Follow-up', 'Not Connected', 'Not Interested', 'Converted', 'Invalid', 'International', 'Switched Off'];
 const FOLLOW_UP_TIME_OPTIONS = Array.from({ length: 24 }, (_, i) => {
   const hour = Math.floor(i / 2) || 12;
   const minutes = i % 2 === 0 ? '00' : '30';
@@ -171,6 +171,24 @@ function MyLeads() {
   const [totalLeadsCount, setTotalLeadsCount] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [showStatsCards, setShowStatsCards] = useState(() => {
+    try {
+      const saved = localStorage.getItem('myLeads_showStatsCards');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleStatsCards = () => {
+    setShowStatsCards(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('myLeads_showStatsCards', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState('');
@@ -1174,6 +1192,7 @@ function MyLeads() {
     'New': 'status-new', 'Contacted': 'status-contacted', 'Qualified': 'status-qualified',
     'Interested': 'status-interested', 'Follow-up': 'status-follow-up',
     'Converted': 'status-converted', 'Not Interested': 'status-not-interested', 'Closed': 'status-closed', 'Invalid': 'status-invalid', 'International': 'status-international',
+    'Switched Off': 'status-switched-off',
   }[status] || 'status-new');
 
   const getAssigneeName = (lead) => {
@@ -2941,21 +2960,24 @@ function MyLeads() {
           <div className="skel" style={{ width: '130px', height: '26px', marginBottom: '8px' }} />
           <div className="skel" style={{ width: '260px', height: '13px' }} />
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div className="skel" style={{ width: '68px', height: '22px', borderRadius: '6px', margin: '0 2px' }} />
           <div className="skel" style={{ width: '110px', height: '34px', borderRadius: '10px' }} />
           <div className="skel" style={{ width: '110px', height: '34px', borderRadius: '10px' }} />
           <div className="skel" style={{ width: '80px', height: '34px', borderRadius: '10px' }} />
         </div>
       </div>
       {/* Stats cards skeleton */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px' }}>
-        {[...Array(6)].map((_, i) => (
-          <div key={i} style={{ background: '#fff', borderRadius: '14px', border: '1px solid #f1f5f9', padding: '16px' }}>
-            <div className="skel" style={{ width: '70px', height: '12px', marginBottom: '10px' }} />
-            <div className="skel" style={{ width: '50px', height: '28px' }} />
-          </div>
-        ))}
-      </div>
+      {showStatsCards && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px' }}>
+          {[...Array(6)].map((_, i) => (
+            <div key={i} style={{ background: '#fff', borderRadius: '14px', border: '1px solid #f1f5f9', padding: '16px' }}>
+              <div className="skel" style={{ width: '70px', height: '12px', marginBottom: '10px' }} />
+              <div className="skel" style={{ width: '50px', height: '28px' }} />
+            </div>
+          ))}
+        </div>
+      )}
       {/* Table skeleton */}
       <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #f1f5f9', overflow: 'hidden' }}>
         {/* Filter bar skeleton */}
@@ -3308,6 +3330,67 @@ function MyLeads() {
           </p>
         </div>
         <div ref={headerActionsRef} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {/* Toggle Stats Cards button (clean inline toggle with label, without bg card) */}
+          <button
+            type="button"
+            onClick={toggleStatsCards}
+            title={showStatsCards ? 'Hide Stats Cards' : 'Show Stats Cards'}
+            aria-label={showStatsCards ? 'Hide Stats Cards' : 'Show Stats Cards'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '7px',
+              background: 'transparent',
+              border: 'none',
+              padding: '4px 6px',
+              cursor: 'pointer',
+              outline: 'none',
+              fontFamily: "'Inter', 'Poppins', 'Segoe UI', sans-serif",
+              transition: 'opacity 0.2s ease',
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+          >
+            <span
+              style={{
+                fontSize: '12.5px',
+                fontWeight: 600,
+                color: showStatsCards ? '#0f172a' : '#64748b',
+                userSelect: 'none',
+                transition: 'color 0.2s ease',
+              }}
+            >
+              Stats
+            </span>
+            <span
+              style={{
+                width: '34px',
+                height: '19px',
+                borderRadius: '999px',
+                background: showStatsCards ? '#10b981' : '#cbd5e1',
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px',
+                boxSizing: 'border-box',
+                transition: 'background 0.25s ease',
+                position: 'relative',
+              }}
+            >
+              <span
+                style={{
+                  width: '15px',
+                  height: '15px',
+                  borderRadius: '50%',
+                  background: '#ffffff',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+                  transform: showStatsCards ? 'translateX(15px)' : 'translateX(0px)',
+                  transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                  display: 'block',
+                }}
+              />
+            </span>
+          </button>
+
           {canRead && (
             <button
               ref={exportButtonRef}
@@ -3526,98 +3609,100 @@ function MyLeads() {
       </div>
 
       {/* Stats Cards */}
-      <div className="ist-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '24px' }}>
-        {[
-          {
-            label: 'Total Leads', value: stats.total, prev: prevMonthStats.total, color: '#667eea', spark: sparklineData.total,
-            icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-          },
-          {
-            label: 'New', value: stats.newLeads, prev: prevMonthStats.newLeads, color: '#3b82f6', spark: sparklineData.newLeads,
-            icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></svg>
-          },
-          {
-            label: 'Follow-up', value: stats.followUp, prev: prevMonthStats.followUp, color: '#f59e0b', spark: sparklineData.followUp,
-            icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
-          },
-          {
-            label: 'Converted', value: stats.converted, prev: prevMonthStats.converted, color: '#10b981', spark: sparklineData.converted,
-            icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
-          },
-          {
-            label: 'Not Interested', value: stats.notInterested, prev: prevMonthStats.notInterested, color: '#ef4444', spark: sparklineData.notInterested,
-            icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
-          },
-        ].map(({ label, value, prev, color, spark, icon }) => {
-          const trend = prev !== null ? calcChange(value, prev) : null;
-          const up = prev !== null ? isUp(value, prev) : true;
-          const isSelected = filterStatus === label || (filterStatus === '' && label === 'Total Leads');
-          return (
-            <div
-              key={label}
-              style={{
-                background: 'white',
-                padding: '14px 16px 10px',
-                borderRadius: '12px',
-                border: isSelected ? `2px solid ${color}` : '1px solid #e2e8f0',
-                cursor: 'pointer',
-                transition: 'all 0.3s',
-                overflow: 'hidden',
-                position: 'relative'
-              }}
-              onClick={() => {
-                if (label === 'Total Leads' || filterStatus === label) {
-                  setFilterStatus('');
-                } else {
-                  setFilterStatus(label);
-                }
-                setCurrentPage(1);
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.boxShadow = '0 6px 18px rgba(0,0,0,0.08)';
-                if (!isSelected) {
-                  e.currentTarget.style.background = '#f8fafc';
-                  e.currentTarget.style.borderColor = color ? `${color}66` : '#cbd5e1';
-                }
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.boxShadow = 'none';
-                if (!isSelected) {
-                  e.currentTarget.style.background = 'white';
-                  e.currentTarget.style.borderColor = '#e2e8f0';
-                }
-              }}
-            >
-              {/* Label row + trend badge */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <div style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 600, lineHeight: 1.3 }}>{label}</div>
-                {trend !== null && (
-                  <span style={{ fontSize: '9.5px', fontWeight: 700, padding: '2px 6px', borderRadius: '20px', background: up ? 'rgba(168,230,61,0.15)' : 'rgba(239,68,68,0.1)', color: up ? '#3d7c00' : '#dc2626', whiteSpace: 'nowrap' }}>
-                    {up ? '▲' : '▼'} {trend}
-                  </span>
-                )}
-                {trend === null && <div style={{ color }}>{icon}</div>}
+      {showStatsCards && (
+        <div className="ist-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '24px' }}>
+          {[
+            {
+              label: 'Total Leads', value: stats.total, prev: prevMonthStats.total, color: '#667eea', spark: sparklineData.total,
+              icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+            },
+            {
+              label: 'New', value: stats.newLeads, prev: prevMonthStats.newLeads, color: '#3b82f6', spark: sparklineData.newLeads,
+              icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></svg>
+            },
+            {
+              label: 'Follow-up', value: stats.followUp, prev: prevMonthStats.followUp, color: '#f59e0b', spark: sparklineData.followUp,
+              icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+            },
+            {
+              label: 'Converted', value: stats.converted, prev: prevMonthStats.converted, color: '#10b981', spark: sparklineData.converted,
+              icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+            },
+            {
+              label: 'Not Interested', value: stats.notInterested, prev: prevMonthStats.notInterested, color: '#ef4444', spark: sparklineData.notInterested,
+              icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+            },
+          ].map(({ label, value, prev, color, spark, icon }) => {
+            const trend = prev !== null ? calcChange(value, prev) : null;
+            const up = prev !== null ? isUp(value, prev) : true;
+            const isSelected = filterStatus === label || (filterStatus === '' && label === 'Total Leads');
+            return (
+              <div
+                key={label}
+                style={{
+                  background: 'white',
+                  padding: '14px 16px 10px',
+                  borderRadius: '12px',
+                  border: isSelected ? `2px solid ${color}` : '1px solid #e2e8f0',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s',
+                  overflow: 'hidden',
+                  position: 'relative'
+                }}
+                onClick={() => {
+                  if (label === 'Total Leads' || filterStatus === label) {
+                    setFilterStatus('');
+                  } else {
+                    setFilterStatus(label);
+                  }
+                  setCurrentPage(1);
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.boxShadow = '0 6px 18px rgba(0,0,0,0.08)';
+                  if (!isSelected) {
+                    e.currentTarget.style.background = '#f8fafc';
+                    e.currentTarget.style.borderColor = color ? `${color}66` : '#cbd5e1';
+                  }
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.boxShadow = 'none';
+                  if (!isSelected) {
+                    e.currentTarget.style.background = 'white';
+                    e.currentTarget.style.borderColor = '#e2e8f0';
+                  }
+                }}
+              >
+                {/* Label row + trend badge */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 600, lineHeight: 1.3 }}>{label}</div>
+                  {trend !== null && (
+                    <span style={{ fontSize: '9.5px', fontWeight: 700, padding: '2px 6px', borderRadius: '20px', background: up ? 'rgba(168,230,61,0.15)' : 'rgba(239,68,68,0.1)', color: up ? '#3d7c00' : '#dc2626', whiteSpace: 'nowrap' }}>
+                      {up ? '▲' : '▼'} {trend}
+                    </span>
+                  )}
+                  {trend === null && <div style={{ color }}>{icon}</div>}
+                </div>
+                {/* Value */}
+                <div style={{ fontSize: '26px', fontWeight: 300, color: '#1e293b', lineHeight: 1, marginBottom: '8px' }}>{value}</div>
+                {/* Bottom: vs last month + sparkline */}
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '8px' }}>
+                  {trend !== null ? (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: up ? '#16a34a' : '#ef4444', lineHeight: 1.2 }}>{up ? '+' : ''}{trend}</span>
+                      <span style={{ fontSize: '9.5px', color: '#94a3b8', lineHeight: 1.4 }}>vs last month</span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>added today</span>
+                    </div>
+                  )}
+                  <Sparkline data={spark} color={color} />
+                </div>
               </div>
-              {/* Value */}
-              <div style={{ fontSize: '26px', fontWeight: 300, color: '#1e293b', lineHeight: 1, marginBottom: '8px' }}>{value}</div>
-              {/* Bottom: vs last month + sparkline */}
-              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '8px' }}>
-                {trend !== null ? (
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: up ? '#16a34a' : '#ef4444', lineHeight: 1.2 }}>{up ? '+' : ''}{trend}</span>
-                    <span style={{ fontSize: '9.5px', color: '#94a3b8', lineHeight: 1.4 }}>vs last month</span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>added today</span>
-                  </div>
-                )}
-                <Sparkline data={spark} color={color} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Table Card */}
       <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'visible', boxShadow: '0 1px 2px rgba(15,23,42,0.04)', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -4957,6 +5042,7 @@ function MyLeads() {
                     'Closed': { bg: '#f1f5f9', color: '#475569', dot: '#64748b' },
                     'Invalid': { bg: '#fee2e2', color: '#991b1b', dot: '#dc2626' },
                     'International': { bg: '#ecfeff', color: '#0e7490', dot: '#06b6d4' },
+                    'Switched Off': { bg: '#fff7ed', color: '#c2410c', dot: '#f97316' },
                   };
                   const displayStatus = getEffectiveStatus(lead);
                   const st = statusColors[displayStatus] || statusColors['New'];

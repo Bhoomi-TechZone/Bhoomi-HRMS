@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import jsPDF from 'jspdf';
@@ -7,12 +8,25 @@ import './Payroll.css';
 
 function MyPayslip() {
     const { user } = useAuth();
-    const [activeTab, setActiveTab] = useState('bank');
+    const [searchParams, setSearchParams] = useSearchParams();
+    const initialTab = searchParams.get('tab') === 'payroll' 
+        ? 'payroll' 
+        : (searchParams.get('tab') === 'payslip' ? 'payslip' : 'bank');
+    const [activeTab, setActiveTab] = useState(initialTab);
     const [employeePayslip, setEmployeePayslip] = useState(null);
+    const [myPayrollList, setMyPayrollList] = useState([]);
+    const [loadingMyPayroll, setLoadingMyPayroll] = useState(false);
     const [loading, setLoading] = useState(false);
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [salaryRules, setSalaryRules] = useState([]);
+
+    const handleTabChange = (newTab) => {
+        setActiveTab(newTab);
+        const newParams = new URLSearchParams(searchParams);
+        newParams.set('tab', newTab);
+        setSearchParams(newParams, { replace: true });
+    };
 
     // Bank Details State
     const [bankDetails, setBankDetails] = useState(null);
@@ -40,8 +54,9 @@ function MyPayslip() {
     const [loadingAttendance, setLoadingAttendance] = useState(false);
 
     // Fetch detailed attendance for employee
-    const handleViewAttendance = async () => {
-        const empId = employeePayslip?.employee?._id || employeePayslip?.employee || user?._id;
+    const handleViewAttendance = async (targetPayroll = null) => {
+        const p = targetPayroll || employeePayslip;
+        const empId = p?.employee?._id || p?.employee || user?._id;
         if (!empId) {
             alert('Employee information not available');
             return;
@@ -49,8 +64,10 @@ function MyPayslip() {
         setLoadingAttendance(true);
         setShowDetailedAttendanceModal(true);
         try {
+            const m = p?.payPeriod?.month || selectedMonth;
+            const y = p?.payPeriod?.year || selectedYear;
             const response = await api.get(`/payroll/employee-attendance/${empId}`, {
-                params: { month: selectedMonth, year: selectedYear, _t: Date.now() }
+                params: { month: m, year: y, _t: Date.now() }
             });
             setDetailedAttendanceData(response.data);
         } catch (error) {
@@ -294,28 +311,63 @@ function MyPayslip() {
         }
     }, [selectedMonth, selectedYear]);
 
+    // Fetch employee's own payroll records (including approved and paid)
+    const fetchMyPayroll = useCallback(async (isBackground = false) => {
+        if (!isBackground) setLoadingMyPayroll(true);
+        try {
+            const response = await api.get('/payroll/my-payroll', {
+                params: {
+                    month: selectedMonth,
+                    year: selectedYear
+                }
+            });
+            if (response.data) {
+                setMyPayrollList(response.data);
+            }
+        } catch (error) {
+            console.error('Error fetching my payroll records:', error);
+            setMyPayrollList([]);
+        } finally {
+            if (!isBackground) setLoadingMyPayroll(false);
+        }
+    }, [selectedMonth, selectedYear]);
+
+    const getStatusBadgeConfig = (status) => {
+        const s = (status || 'draft').toLowerCase();
+        if (s === 'paid') {
+            return { key: 'paid', bg: '#d1fae5', color: '#047857', dot: '#059669', border: '#a7f3d0', label: 'Paid' };
+        }
+        if (s === 'approved' || s === 'processed') {
+            return { key: 'approved', bg: '#dbeafe', color: '#1d4ed8', dot: '#3b82f6', border: '#bfdbfe', label: 'Approved' };
+        }
+        return { key: 'draft', bg: '#fef3c7', color: '#92400e', dot: '#f59e0b', border: '#fde68a', label: 'Draft' };
+    };
+
     useEffect(() => {
         fetchRules();
         fetchEmployeePayslip();
+        fetchMyPayroll();
         fetchBankDetails();
 
         // 1. Instant sync when tab gains focus
         const handleFocus = () => {
             fetchEmployeePayslip(true);
+            fetchMyPayroll(true);
             fetchBankDetails();
         };
         window.addEventListener('focus', handleFocus);
 
-        // 2. Real-time background poll (every 6 seconds) to immediately reflect status changes (e.g. DRAFT -> PAID)
+        // 2. Real-time background poll (every 6 seconds) to immediately reflect status changes (e.g. DRAFT -> APPROVED / PAID)
         const pollInterval = setInterval(() => {
             fetchEmployeePayslip(true);
+            fetchMyPayroll(true);
         }, 6000);
 
         return () => {
             window.removeEventListener('focus', handleFocus);
             clearInterval(pollInterval);
         };
-    }, [fetchRules, fetchEmployeePayslip, fetchBankDetails]);
+    }, [fetchRules, fetchEmployeePayslip, fetchMyPayroll, fetchBankDetails]);
 
     const Sparkline = ({ data = [0, 0, 0, 0, 0, 0], color = '#6366f1' }) => {
         const w = 84, h = 32;
@@ -389,23 +441,26 @@ function MyPayslip() {
     const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
     // Download payslip using backend template
-    const handleDownloadPayslip = async () => {
-        const isPaid = (employeePayslip?.status || '').toLowerCase() === 'paid';
-        if (!employeePayslip || !isPaid) {
+    const handleDownloadPayslip = async (targetPayroll = null) => {
+        const p = targetPayroll || employeePayslip;
+        const isPaid = (p?.status || '').toLowerCase() === 'paid';
+        if (!p || !isPaid) {
             setShowDownloadRestrictionModal(true);
             return;
         }
 
         try {
-            const response = await api.get(`/payroll/${employeePayslip._id}/payslip-pdf`, {
+            const response = await api.get(`/payroll/${p._id}/payslip-pdf`, {
                 responseType: 'blob'
             });
             const blob = new Blob([response.data], { type: 'application/pdf' });
             const link = document.createElement('a');
             link.href = window.URL.createObjectURL(blob);
-            const monthName = months.find(m => m.value === selectedMonth)?.label || 'Month';
-            const empName = `${employeePayslip.employee?.firstName || 'Employee'}_${employeePayslip.employee?.lastName || ''}`;
-            link.download = `Payslip_${empName}_${monthName}_${selectedYear}.pdf`;
+            const mVal = p.payPeriod?.month || selectedMonth;
+            const yVal = p.payPeriod?.year || selectedYear;
+            const monthName = months.find(m => m.value === mVal)?.label || 'Month';
+            const empName = `${p.employee?.firstName || 'Employee'}_${p.employee?.lastName || ''}`;
+            link.download = `Payslip_${empName}_${monthName}_${yVal}.pdf`;
             link.click();
             return;
         } catch (backendError) {
@@ -695,7 +750,7 @@ function MyPayslip() {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        {activeTab === 'payslip' && (
+                        {(activeTab === 'payslip' || activeTab === 'payroll') && (
                             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                                 <select
                                     value={selectedMonth}
@@ -740,13 +795,19 @@ function MyPayslip() {
                 <div className="payroll-tabs">
                     <button
                         className={`tab-btn ${activeTab === 'bank' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('bank')}
+                        onClick={() => handleTabChange('bank')}
                     >
                         Bank Details
                     </button>
                     <button
+                        className={`tab-btn ${activeTab === 'payroll' ? 'active' : ''}`}
+                        onClick={() => handleTabChange('payroll')}
+                    >
+                        Payroll
+                    </button>
+                    <button
                         className={`tab-btn ${activeTab === 'payslip' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('payslip')}
+                        onClick={() => handleTabChange('payslip')}
                     >
                         Salary Slip
                     </button>
@@ -935,6 +996,290 @@ function MyPayslip() {
                                 <strong style={{ color: '#334155' }}>Note:</strong> Bank and identity details are managed by HR/Accounts for direct salary disbursements.
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {/* Payroll Tab — Approved & Paid Monthly Records Table */}
+                {activeTab === 'payroll' && (
+                    <div>
+                        {loadingMyPayroll ? (
+                            <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '48px 20px', textAlign: 'center' }}>
+                                <div style={{ display: 'inline-block', width: '28px', height: '28px', border: '3px solid #e2e8f0', borderTopColor: '#10b981', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                                <p style={{ fontSize: '13px', color: '#64748b', marginTop: '12px' }}>Loading payroll data...</p>
+                            </div>
+                        ) : (() => {
+                            // Only show if the status for that month is approved or paid
+                            const currentMonthPayrolls = (myPayrollList || []).filter(p => {
+                                const m = p.payPeriod?.month;
+                                const y = p.payPeriod?.year;
+                                return (!selectedMonth || m === selectedMonth) && (!selectedYear || y === selectedYear);
+                            });
+
+                            const approvedOrPaid = currentMonthPayrolls.filter(p => {
+                                const s = (p.status || '').toLowerCase();
+                                return s === 'approved' || s === 'processed' || s === 'paid';
+                            });
+
+                            if (approvedOrPaid.length === 0) {
+                                return (
+                                    <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '48px 20px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <circle cx="12" cy="12" r="10" />
+                                                <line x1="12" y1="8" x2="12" y2="12" />
+                                                <line x1="12" y1="16" x2="12.01" y2="16" />
+                                            </svg>
+                                        </div>
+                                        <h3 style={{ fontSize: '14.5px', color: '#0f172a', marginBottom: '4px', fontWeight: 600 }}>No Approved Payroll for this Month</h3>
+                                        <p style={{ fontSize: '12.5px', color: '#64748b', margin: 0, maxWidth: '460px', marginInline: 'auto' }}>
+                                            Payroll for {months.find(m => m.value === selectedMonth)?.label} {selectedYear} has not been approved yet. Once approved by HR / Accounts, your payroll record will appear here.
+                                        </p>
+                                    </div>
+                                );
+                            }
+
+                            return (
+                                <div className="salary-structures-table" style={{ overflowX: 'auto', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+                                    <table className="payroll-table" style={{ width: '100%', minWidth: '1150px', borderCollapse: 'collapse' }}>
+                                        <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                                            <tr style={{ boxShadow: '0 1px 0 #f1f5f9' }}>
+                                                <th>SR NO</th>
+                                                <th>DATE</th>
+                                                <th>EMPLOYEE</th>
+                                                <th>ATTENDANCE</th>
+                                                <th>GROSS SALARY</th>
+                                                <th>LOP</th>
+                                                <th>PAID DAYS</th>
+                                                <th>UNPAID DAYS</th>
+                                                <th>FINAL PAY</th>
+                                                <th>DUE DATE</th>
+                                                <th>STATUS</th>
+                                                <th>GENERATED BY</th>
+                                                <th>ACTIONS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {approvedOrPaid.map((payroll, index) => {
+                                                const presentDays = payroll.attendance?.present || 0;
+                                                const absentDays = payroll.workingDays?.absent || 0;
+                                                const totalLeaves = (payroll.leaves?.paid || 0) + (payroll.leaves?.unpaid || 0);
+                                                const lateCheckIns = payroll.attendance?.lateCheckIns || 0;
+                                                const halfDays = Number(payroll.workingDays?.halfDay ?? payroll.workingDays?.halfDays) || 0;
+                                                const unpaidDays = absentDays + (halfDays * 0.5);
+                                                const paidDays = Math.max(0, 30 - unpaidDays);
+
+                                                const allowances = payroll.salaryDetails?.allowances || {};
+                                                const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
+                                                const basicSalary = payroll.salaryDetails?.basicSalary || 0;
+                                                const fullGross = (basicSalary + totalAllowances) > 0 ? (basicSalary + totalAllowances) : (payroll.salaryDetails?.grossSalary || 0);
+                                                const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+                                                const earnedGross = fullGross > 0 ? Number((paidDays * perDaySalary).toFixed(2)) : (payroll.salaryDetails?.grossSalary || 0);
+                                                const lopAmount = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : (Number(payroll.salaryDetails?.deductions?.lossOfPay) || 0);
+
+                                                const deductions = payroll.salaryDetails?.deductions || {};
+                                                const totalStdDeductions = (deductions.pf || 0) + (deductions.esi || 0) + (deductions.tax || 0) + (deductions.loan || 0) + (deductions.advance || 0) + (deductions.other || 0);
+                                                const manualPenalty = deductions.penalty || 0;
+                                                const latePenalty = deductions.lateDeduction || 0;
+                                                const totalPenalties = manualPenalty + latePenalty;
+
+                                                const comps = Array.isArray(payroll.customComponents) ? payroll.customComponents : [];
+                                                const customAdditions = comps.filter(c => (c.type || '').toLowerCase() === 'addition').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+                                                const customDeductions = comps.filter(c => (c.type || '').toLowerCase() === 'deduction').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+                                                const displayGross = Number((fullGross + customAdditions).toFixed(2));
+                                                const netSalary = Number((earnedGross + (payroll.salaryDetails?.bonus || 0) + customAdditions - totalStdDeductions - totalPenalties - customDeductions).toFixed(2));
+
+                                                const processedBy = (() => {
+                                                    const pb = payroll.processedBy;
+                                                    if (!pb) return 'Admin System';
+                                                    if (typeof pb === 'object') {
+                                                        const name = `${pb.firstName || ''} ${pb.lastName || ''}`.trim();
+                                                        if (name) return name;
+                                                    }
+                                                    if (typeof pb === 'string') return pb;
+                                                    return 'Admin System';
+                                                })();
+
+                                                const paymentDueDate = payroll.dueDate || payroll.paymentDueDate || payroll.payPeriod?.dueDate;
+                                                const isPaid = (payroll.status || '').toLowerCase() === 'paid';
+                                                const cfg = getStatusBadgeConfig(payroll.status);
+
+                                                return (
+                                                    <tr key={payroll._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                        <td><span style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 600 }}>{index + 1}</span></td>
+                                                        <td>
+                                                            <span style={{ fontSize: '11px', fontWeight: 500, color: '#475569', whiteSpace: 'nowrap' }}>
+                                                                {payroll.createdAt ? (() => {
+                                                                    const d = new Date(payroll.createdAt);
+                                                                    return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+                                                                })() : '-'}
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span
+                                                                style={{
+                                                                    display: 'inline-flex',
+                                                                    alignItems: 'center',
+                                                                    padding: '2px 8px',
+                                                                    background: 'linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%)',
+                                                                    color: '#0369a1',
+                                                                    borderRadius: '999px',
+                                                                    fontSize: '10px',
+                                                                    fontWeight: 600,
+                                                                    border: '1px solid #bae6fd',
+                                                                    boxShadow: '0 1px 3px rgba(3,105,161,0.08)',
+                                                                    whiteSpace: 'nowrap'
+                                                                }}
+                                                            >
+                                                                {payroll.employee?.firstName || user?.firstName} {payroll.employee?.lastName || user?.lastName}
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <button
+                                                                onClick={() => handleViewAttendance(payroll)}
+                                                                style={{
+                                                                    display: 'inline-flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '4px',
+                                                                    padding: '3px 9px',
+                                                                    borderRadius: '999px',
+                                                                    fontSize: '10px',
+                                                                    fontWeight: 700,
+                                                                    background: '#f0fdf4',
+                                                                    color: '#15803d',
+                                                                    border: '1px solid #bbf7d0',
+                                                                    cursor: 'pointer',
+                                                                    whiteSpace: 'nowrap',
+                                                                    transition: 'all 0.15s'
+                                                                }}
+                                                                onMouseEnter={e => { e.currentTarget.style.background = '#dcfce7'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                                                                onMouseLeave={e => { e.currentTarget.style.background = '#f0fdf4'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                                                                title={`P:${presentDays} A:${absentDays} L:${totalLeaves} H:${lateCheckIns}`}
+                                                            >
+                                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+                                                                </svg>
+                                                                View
+                                                            </button>
+                                                        </td>
+                                                        <td>
+                                                            <span style={{ color: '#0f172a', fontWeight: 700, fontSize: '11px' }}>
+                                                                {formatCurrency(displayGross)}
+                                                            </span>
+                                                            {customAdditions > 0 && (
+                                                                <div style={{ fontSize: '9.5px', fontWeight: 700, color: '#16a34a', marginTop: '1px' }}>
+                                                                    +{formatCurrency(customAdditions)}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td>
+                                                            <span style={{ color: lopAmount > 0 ? '#ef4444' : '#94a3b8', fontWeight: 700, fontSize: '11px' }}>
+                                                                {lopAmount > 0 ? formatCurrency(lopAmount) : '—'}
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                padding: '2px 8px',
+                                                                borderRadius: '999px',
+                                                                fontSize: '11px',
+                                                                fontWeight: 700,
+                                                                background: '#ecfdf5',
+                                                                color: '#059669',
+                                                                border: '1px solid #a7f3d0',
+                                                                minWidth: '28px'
+                                                            }}>
+                                                                {Number.isInteger(paidDays) ? paidDays : paidDays.toFixed(1)}
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                padding: '2px 8px',
+                                                                borderRadius: '999px',
+                                                                fontSize: '11px',
+                                                                fontWeight: 700,
+                                                                background: unpaidDays > 0 ? '#fef2f2' : '#f8fafc',
+                                                                color: unpaidDays > 0 ? '#dc2626' : '#94a3b8',
+                                                                border: unpaidDays > 0 ? '1px solid #fecaca' : '1px solid #e2e8f0',
+                                                                minWidth: '28px'
+                                                            }}>
+                                                                {Number.isInteger(unpaidDays) ? unpaidDays : unpaidDays.toFixed(1)}
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span style={{ fontSize: '11px', fontWeight: 700, color: netSalary >= 0 ? '#059669' : '#ef4444' }}>
+                                                                {formatCurrency(netSalary)}
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span style={{ fontSize: '11px', color: paymentDueDate ? '#0f172a' : '#94a3b8', fontWeight: paymentDueDate ? 600 : 400 }}>
+                                                                {paymentDueDate ? new Date(paymentDueDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span
+                                                                style={{
+                                                                    display: 'inline-flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '6px',
+                                                                    padding: '3px 10px',
+                                                                    borderRadius: '999px',
+                                                                    fontSize: '10.5px',
+                                                                    fontWeight: 700,
+                                                                    background: cfg.bg,
+                                                                    color: cfg.color,
+                                                                    border: `1px solid ${cfg.border}`,
+                                                                    whiteSpace: 'nowrap'
+                                                                }}
+                                                            >
+                                                                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: cfg.dot, flexShrink: 0, display: 'inline-block' }} />
+                                                                <span>{cfg.label}</span>
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 9px', borderRadius: '999px', background: 'linear-gradient(135deg, #f3e8ff 0%, #faf5ff 100%)', border: '1px solid #e9d5ff', fontSize: '10px', fontWeight: 700, color: '#7c3aed', whiteSpace: 'nowrap' }}>
+                                                                {processedBy}
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ paddingRight: '12px' }}>
+                                                            <div className="action-buttons" style={{ display: 'flex', flexDirection: 'row', gap: '8px', alignItems: 'center' }}>
+                                                                {/* View Attendance & Details */}
+                                                                <button
+                                                                    onClick={() => handleViewAttendance(payroll)}
+                                                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s', width: '24px', height: '24px', borderRadius: '6px' }}
+                                                                    onMouseEnter={e => e.currentTarget.style.background = '#f0fdf4'}
+                                                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                                                    title="View Details"
+                                                                >
+                                                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                                                </button>
+
+                                                                {/* Download Salary Slip - ONLY visible if status is PAID */}
+                                                                {isPaid && (
+                                                                    <button
+                                                                        onClick={() => handleDownloadPayslip(payroll)}
+                                                                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s', width: '24px', height: '24px', borderRadius: '6px' }}
+                                                                        onMouseEnter={e => e.currentTarget.style.background = '#f3e8ff'}
+                                                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                                                        title="Payslip PDF"
+                                                                    >
+                                                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            );
+                        })()}
                     </div>
                 )}
 

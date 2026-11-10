@@ -7,7 +7,7 @@ function SubmitLead() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
-  
+
   const [formData, setFormData] = useState({
     leadName: '',
     contactNumber: '',
@@ -26,12 +26,12 @@ function SubmitLead() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!formData.leadName.trim()) {
       alert('Lead name is required');
       return;
     }
-    
+
     if (!formData.contactNumber.trim()) {
       alert('Contact number is required');
       return;
@@ -41,7 +41,7 @@ function SubmitLead() {
     try {
       await axios.post('/lead-submissions', formData);
       setSuccessMessage('Lead submitted successfully! ✅');
-      
+
       // Reset form
       setFormData({
         leadName: '',
@@ -100,8 +100,8 @@ function SubmitLead() {
         <div className="form-row">
           <div className="form-group">
             <label>Status</label>
-            <select 
-              name="status" 
+            <select
+              name="status"
               value={formData.status}
               onChange={handleInputChange}
             >
@@ -113,6 +113,7 @@ function SubmitLead() {
               <option value="Converted">Converted</option>
               <option value="Invalid">Invalid</option>
               <option value="International">International</option>
+              <option value="Switched Off">Switched Off</option>
             </select>
           </div>
 

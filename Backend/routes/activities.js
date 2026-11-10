@@ -135,8 +135,10 @@ router.get('/', auth, async (req, res) => {
             myLeaves.forEach(l => {
                 activities.push({
                     type: 'leave',
-                    title: `Leave Request`,
-                    description: `Applied for ${l.leaveType} - Status: ${l.status}`,
+                    title: 'Leave Request',
+                    description: `Applied for ${l.leaveType}`,
+                    status: l.status,
+                    subType: l.leaveType,
                     timestamp: l.createdAt,
                     icon: 'calendar'
                 });
@@ -158,10 +160,12 @@ router.get('/', auth, async (req, res) => {
             myRequests.forEach(r => {
                 activities.push({
                     type: 'request',
-                    title: `My Request`,
-                    description: `${r.requestType} is ${r.status}`,
+                    title: 'My Request',
+                    description: r.requestType,
+                    status: r.status,
+                    subType: r.requestType,
                     timestamp: r.createdAt,
-                    icon: '📋'
+                    icon: 'clipboard'
                 });
             });
 

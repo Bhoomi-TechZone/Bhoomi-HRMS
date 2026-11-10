@@ -952,6 +952,8 @@ function SalesDashboard() {
       'not interested': 'Not Interested',
       notinterested: 'Not Interested',
       closed: 'Closed',
+      'switched off': 'Switched Off',
+      switchedoff: 'Switched Off',
     };
     return statusMap[normalized] || 'New';
   };
@@ -986,7 +988,7 @@ function SalesDashboard() {
   const closedWon = dealStats.closedWon || 0;
 
   // Pipeline stages data
-  const stageOrder = ['New', 'Contacted', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed', 'Invalid', 'International'];
+  const stageOrder = ['New', 'Contacted', 'Qualified', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Closed', 'Invalid', 'International', 'Switched Off'];
   const stageData = useMemo(
     () => stageOrder.map((s) => combinedByStatus[s] || 0),
     [combinedByStatus]
@@ -1299,6 +1301,7 @@ function SalesDashboard() {
     Closed: { bg: '#f8fafc', color: '#64748b' },
     Invalid: { bg: '#fee2e2', color: '#991b1b' },
     International: { bg: '#ecfeff', color: '#0e7490' },
+    'Switched Off': { bg: '#fff7ed', color: '#c2410c' },
   };
 
   const activityIcons = {

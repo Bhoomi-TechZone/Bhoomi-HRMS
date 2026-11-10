@@ -255,6 +255,7 @@ app.use("/api/broadcasts", require("./routes/broadcasts"));
 app.use("/api/projects", require("./routes/projects"));
 app.use("/api/invoices", require("./routes/invoices"));
 app.use("/api/goals", require("./routes/goals"));
+app.use("/api/requests", require("./routes/requests"));
 app.use("/api/task-requests", require("./routes/task-requests"));
 app.use("/api/assets", require("./routes/assets"));
 app.use("/api/vendors", require("./routes/vendors"));

@@ -127,6 +127,7 @@ function LeadSubmissions() {
                         <option value="Converted">Converted</option>
                         <option value="Invalid">Invalid</option>
                         <option value="International">International</option>
+                        <option value="Switched Off">Switched Off</option>
                       </select>
                     ) : (
                       <span className={`status-badge status-${submission.status.toLowerCase().replace(/\s/g, '-')}`}>

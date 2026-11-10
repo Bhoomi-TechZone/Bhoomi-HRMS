@@ -294,6 +294,100 @@ function calculateMonthlyAttendanceMetrics({
   };
 }
 
+// Get employee's own payroll records (for Payroll tab in MyPayslip)
+router.get('/my-payroll', auth, async (req, res) => {
+  try {
+    const { month, year } = req.query;
+
+    const query = {
+      $or: [
+        { employee: req.user._id },
+        { employee: req.user._id.toString() }
+      ]
+    };
+
+    if (month) query['payPeriod.month'] = parseInt(month, 10);
+    if (year) query['payPeriod.year'] = parseInt(year, 10);
+
+    const payrolls = await Payroll.find(query)
+      .populate('employee', 'firstName lastName employeeId department designation email bankName accountNumber ifscCode panNumber')
+      .populate('processedBy', 'firstName lastName email designation')
+      .populate('salaryStructure')
+      .sort({ 'payPeriod.year': -1, 'payPeriod.month': -1, createdAt: -1 });
+
+    // Auto-sync detailed allowances & LOP calculation from SalaryStructure
+    for (const payroll of payrolls) {
+      try {
+        const empId = payroll.employee?._id || payroll.employee;
+        const structure = payroll.salaryStructure || await SalaryStructure.findOne({
+          $or: [{ employee: empId }, { employee: empId.toString() }],
+          isActive: true
+        });
+
+        if (structure && structure.basicSalary) {
+          const sAllow = structure.allowances || {};
+          const sHra = Number(sAllow.hra) || 0;
+          const sConv = Number(sAllow.conveyance || sAllow.transport) || 0;
+          const sFood = Number(sAllow.food) || 0;
+          const sDa = Number(sAllow.da) || 0;
+          const sMed = Number(sAllow.medical) || 0;
+          const sOther = Number(sAllow.other) || 0;
+          const structTot = sHra + sConv + sFood + sDa + sMed + sOther;
+
+          const curAllow = payroll.salaryDetails?.allowances || {};
+          const curTot = (Number(curAllow.hra) || 0) + (Number(curAllow.conveyance || curAllow.transport) || 0) + (Number(curAllow.food) || 0) + (Number(curAllow.da) || 0) + (Number(curAllow.medical) || 0) + (Number(curAllow.other) || 0);
+
+          if (structTot > 0 && (curTot === 0 || Number(payroll.salaryDetails?.basicSalary) > Number(structure.basicSalary))) {
+            if (!payroll.salaryDetails) payroll.salaryDetails = {};
+            payroll.salaryDetails.basicSalary = Number(structure.basicSalary);
+            payroll.salaryDetails.allowances = {
+              hra: sHra,
+              conveyance: sConv,
+              food: sFood,
+              da: sDa,
+              medical: sMed,
+              transport: Number(sAllow.transport) || 0,
+              other: sOther
+            };
+            payroll.salaryStructure = structure._id;
+          }
+        }
+
+        const absentDays = Number(payroll.workingDays?.absent) || 0;
+        const halfDays = Number(payroll.workingDays?.halfDay ?? payroll.workingDays?.halfDays) || 0;
+        const unpaidDays = absentDays + (halfDays * 0.5);
+
+        const bSal = Number(payroll.salaryDetails?.basicSalary) || 0;
+        const al = payroll.salaryDetails?.allowances || {};
+        const totAl = (Number(al.hra) || 0) + (Number(al.conveyance || al.transport) || 0) + (Number(al.food) || 0) + (Number(al.da) || 0) + (Number(al.medical) || 0) + (Number(al.other) || 0);
+        const fullGross = bSal + totAl;
+        const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+        const calculatedLop = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : 0;
+
+        const d = payroll.salaryDetails?.deductions || {};
+        const manualPenalty = Number(d.penalty) || 0;
+        const latePenalty = Number(d.lateDeduction) || 0;
+        const goalPenalty = Number(d.goalDeduction) || 0;
+        const totalPenalties = manualPenalty + latePenalty + goalPenalty;
+        const stdDed = (Number(d.pf) || 0) + (Number(d.esi) || 0) + (Number(d.tax) || 0) + (Number(d.loan) || 0) + (Number(d.advance) || 0) + (Number(d.other) || 0);
+
+        if (!payroll.salaryDetails) payroll.salaryDetails = {};
+        if (!payroll.salaryDetails.deductions) payroll.salaryDetails.deductions = {};
+        payroll.salaryDetails.deductions.lossOfPay = calculatedLop;
+        payroll.salaryDetails.deductions.halfDayDeduction = 0;
+        payroll.salaryDetails.netSalary = Number((fullGross + (payroll.salaryDetails?.bonus || 0) - calculatedLop - stdDed - totalPenalties).toFixed(2));
+      } catch (syncErr) {
+        // non-blocking
+      }
+    }
+
+    res.json(payrolls);
+  } catch (error) {
+    console.error('Error fetching my payroll:', error);
+    res.status(500).json({ message: 'Error fetching payroll records' });
+  }
+});
+
 // Get employee's own payslip
 router.get('/my-payslip', auth, async (req, res) => {
   try {

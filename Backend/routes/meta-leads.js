@@ -889,7 +889,7 @@ router.get('/followups/due', auth, async (req, res) => {
     const query = {
       followUpDate: { $ne: null, $lte: now },
       followUpCompleted: { $ne: true },
-      status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Invalid'] },
+      status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Invalid', 'International', 'Switched Off'] },
       movedToPipeline: { $ne: true }
     };
     if (!isAdmin) {
@@ -1039,7 +1039,7 @@ router.patch('/:id', auth, async (req, res) => {
     }
 
     const historyEntry = { by: req.user._id, date: new Date() };
-    const resolvedStatus = (followUpDate && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid'].includes(status || lead.status))
+    const resolvedStatus = (followUpDate && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid', 'International', 'Switched Off'].includes(status || lead.status))
       ? 'Follow-up'
       : status;
 

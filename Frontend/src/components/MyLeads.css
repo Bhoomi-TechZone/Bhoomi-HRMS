@@ -604,6 +604,7 @@
 .status-closed         { background: #f1f5f9; color: #334155; }
 .status-invalid        { background: #fee2e2; color: #991b1b; }
 .status-international  { background: #ecfeff; color: #0e7490; }
+.status-switched-off   { background: #fff7ed; color: #c2410c; }
 
 /* ---- Action Buttons ---- */
 .is-actions {

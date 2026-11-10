@@ -625,17 +625,176 @@ body.sidebar-expanded .dashboard-container {
   letter-spacing: -0.5px;
 }
 
+/* ==================== EMPLOYEE TOPBAR CARD ==================== */
 .employee-topbar-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 16px 20px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.employee-topbar-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.employee-topbar-user-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.employee-topbar-user-name {
+  margin: 2px 0 0;
+  color: #0f172a;
+  line-height: 1.2;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .employee-topbar-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Base style for all topbar action buttons */
+.employee-topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  border: 1px solid transparent;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.employee-topbar-btn:active {
+  transform: scale(0.98);
+}
+
+/* 1. Selfie Button */
+.employee-topbar-btn-selfie.selfie-pending {
+  background: #f0f9ff;
+  color: #0284c7;
+  border-color: #bae6fd;
+}
+.employee-topbar-btn-selfie.selfie-pending:hover {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.15);
+}
+
+.employee-topbar-btn-selfie.selfie-completed {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+.employee-topbar-btn-selfie.selfie-completed:hover {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+/* 2. Break Details Button */
+.employee-topbar-btn-breakdetails {
+  background: #eef2ff;
+  color: #4338ca;
+  border-color: #c7d2fe;
+}
+.employee-topbar-btn-breakdetails:hover {
+  background: #e0e7ff;
+  border-color: #a5b4fc;
+  box-shadow: 0 2px 6px rgba(67, 56, 202, 0.15);
+}
+
+/* 3. Take Break Button */
+.employee-topbar-btn-takebreak {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+.employee-topbar-btn-takebreak:hover {
+  background: #ffedd5;
+  border-color: #fdba74;
+  box-shadow: 0 2px 6px rgba(194, 65, 12, 0.15);
+}
+
+/* 4. Active Break Group */
+.employee-topbar-active-break-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.employee-topbar-break-timer {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.employee-topbar-btn-stopbreak {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #dc2626;
+  padding: 0 14px;
+}
+.employee-topbar-btn-stopbreak:hover {
+  background: #dc2626;
+  border-color: #b91c1c;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+/* 5. Refresh Button */
+.employee-topbar-btn-refresh {
+  background: #ffffff;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+.employee-topbar-btn-refresh:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+.employee-topbar-btn-refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.employee-mobile-refresh-btn,
+.employee-mobile-refresh-skeleton {
+  display: none;
+}
+.employee-refresh-desktop-only {
+  display: inline-flex;
 }
 
 .employee-search-box {
@@ -1053,10 +1212,7 @@ body.sidebar-expanded .employee-dashboard-shell {
     align-items: flex-start;
   }
 
-  .employee-topbar-actions {
-    width: 100%;
-    flex-direction: column;
-  }
+  /* .employee-topbar-actions mobile handled by grid */
 
   .employee-search-box,
   .employee-refresh-btn {
@@ -1404,10 +1560,7 @@ body.sidebar-expanded .employee-dashboard-shell {
       align-items: flex-start;
     }
 
-    .employee-topbar-actions {
-      width: 100%;
-      flex-direction: column;
-    }
+    /* .employee-topbar-actions mobile handled by grid */
 
     .employee-search-box,
     .employee-refresh-btn {
@@ -1564,14 +1717,14 @@ body.sidebar-expanded .employee-dashboard-shell {
   position: relative;
   overflow: hidden;
   border-radius: 6px;
-  background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+  background: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 30%, #f8fafc 50%, #e2e8f0 70%, #f1f5f9 100%);
   background-size: 800px 100%;
-  animation: employee-skeleton-shimmer 1.4s ease-in-out infinite;
+  animation: employee-skeleton-shimmer 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 /* Green-tinted shimmer inside the dark green profile card */
 .employee-profile-card .employee-skeleton {
-  background: linear-gradient(90deg, rgba(255,255,255,0.10) 25%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.10) 75%);
+  background: linear-gradient(90deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 100%);
   background-size: 800px 100%;
 }
 
@@ -1582,8 +1735,8 @@ body.sidebar-expanded .employee-dashboard-shell {
 }
 
 @keyframes employee-skeleton-shimmer {
-  0%   { background-position: -400px 0; }
-  100% { background-position:  400px 0; }
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
 }
 
 .employee-skeleton-grid .employee-skeleton-card {
@@ -1604,13 +1757,12 @@ body.sidebar-expanded .employee-dashboard-shell {
   grid-column: 2;
 }
 
-/* Strip card chrome from skeleton cards � show only shimmer bars */
-.employee-skeleton-grid .employee-skeleton-card,
-.employee-skeleton-panel .employee-skeleton-item {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  padding: 0 !important;
+/* Ensure skeleton cards keep crisp card chrome and borders */
+.employee-skeleton-card-shell {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 
 .employee-skeleton-panel {
@@ -1820,28 +1972,136 @@ body.sidebar-expanded .employee-dashboard-shell {
     margin-top: 12px !important;
   }
 
-  /* Topbar � stack vertically, full-width inputs */
+  /* Topbar - Mobile Professional Layout */
   .employee-topbar-card {
+    display: flex !important;
     flex-direction: column !important;
-    align-items: flex-start !important;
+    align-items: stretch !important;
+    padding: 14px 14px !important;
+    gap: 12px !important;
+    border-radius: 14px !important;
+    background: #ffffff !important;
+  }
+
+  .employee-topbar-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
     gap: 10px !important;
   }
 
+  .employee-topbar-user-copy {
+    min-width: 0 !important;
+    flex: 1 !important;
+  }
+
+  .employee-topbar-user-name {
+    font-size: 16px !important;
+    margin: 1px 0 0 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: block !important;
+    line-height: 1.25 !important;
+  }
+
+  /* Compact right-aligned mobile refresh button */
+  .employee-mobile-refresh-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    height: 30px !important;
+    padding: 0 10px !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    background: #f8fafc !important;
+    color: #475569 !important;
+    border: 1px solid #e2e8f0 !important;
+    cursor: pointer !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    width: auto !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+  }
+
+  .employee-mobile-refresh-skeleton {
+    display: block !important;
+    width: 75px !important;
+    height: 30px !important;
+    border-radius: 8px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .employee-refresh-desktop-only {
+    display: none !important;
+  }
+
+  /* Actions container turns into a flexible responsive wrap container */
   .employee-topbar-actions {
-    width: 100% !important;
-    flex-wrap: wrap;
+    display: flex !important;
+    flex-wrap: wrap !important;
     gap: 8px !important;
+    width: 100% !important;
+  }
+
+  /* Mobile action button geometry */
+  .employee-topbar-btn {
+    flex: 1 1 140px !important;
+    width: auto !important;
+    min-width: 130px !important;
+    height: 38px !important;
+    font-size: 12px !important;
+    padding: 0 10px !important;
+    border-radius: 10px !important;
+    justify-content: center !important;
+  }
+
+  /* When only selfie button is present (not checked in yet), make it 100% full width */
+  .employee-topbar-btn-selfie {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+  }
+
+  /* Break details button spans full width on mobile */
+  .employee-topbar-btn-breakdetails {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+  }
+
+  /* Take break button takes remaining space or 50% */
+  .employee-topbar-btn-takebreak {
+    flex: 1 1 130px !important;
+  }
+
+  /* Active break group spans full width and splits timer & stop button evenly */
+  .employee-topbar-active-break-group {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    display: flex !important;
+    gap: 8px !important;
+  }
+
+  .employee-topbar-break-timer {
+    flex: 1 !important;
+    justify-content: center !important;
+    height: 38px !important;
+    border-radius: 10px !important;
+    font-size: 12px !important;
+  }
+
+  .employee-topbar-btn-stopbreak {
+    flex: 1 !important;
+    height: 38px !important;
+    border-radius: 10px !important;
   }
 
   .employee-search-box {
     width: 100% !important;
     min-width: 0 !important;
     box-sizing: border-box !important;
-  }
-
-  .employee-refresh-btn {
-    flex: 1;
-    justify-content: center;
   }
 
   /* Activity list less tall on mobile */
@@ -1995,5 +2255,70 @@ body.sidebar-expanded .employee-dashboard-shell {
 
   .employee-chart-wrapper {
     height: 200px !important;
+  }
+}
+/* -- Landscape Calendar & Weather Card ------------ */
+.employee-cal-weather-card {
+  grid-column: span 2;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  min-height: 140px;
+}
+
+.employee-cal-weather-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.employee-cal-weather-left {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 155px;
+  padding-right: 14px;
+  border-right: 1px dashed #e2e8f0;
+  height: 100%;
+}
+
+.employee-cal-weather-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+@media (max-width: 1024px) {
+  .employee-cal-weather-card {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 768px) {
+  .employee-cal-weather-card {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+@media (max-width: 580px) {
+  .employee-cal-weather-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .employee-cal-weather-left {
+    border-right: none;
+    border-bottom: 1px dashed #e2e8f0;
+    padding-right: 0;
+    padding-bottom: 10px;
+    width: 100%;
   }
 }

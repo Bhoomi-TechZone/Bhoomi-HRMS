@@ -892,7 +892,7 @@ router.put('/:id', auth, async (req, res) => {
 
       if (status) {
         const resolvedStatus = (nextFollowUp && nextFollowUp.trim() &&
-          !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid'].includes(status || lead.status))
+          !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid', 'International', 'Switched Off'].includes(status || lead.status))
           ? 'Follow-up' : status;
 
         if (resolvedStatus && resolvedStatus !== lead.status) {
@@ -1052,7 +1052,7 @@ router.put('/:id', auth, async (req, res) => {
     }
 
     // Update status
-    const resolvedStatus = (nextFollowUp && nextFollowUp.trim() && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid'].includes(status || lead.status))
+    const resolvedStatus = (nextFollowUp && nextFollowUp.trim() && !['Converted', 'Closed', 'Not Interested', 'Lost', 'Client', 'Invalid', 'International', 'Switched Off'].includes(status || lead.status))
       ? 'Follow-up'
       : status;
 
@@ -1237,7 +1237,7 @@ router.get('/stats/overview', auth, async (req, res) => {
         {
           nextFollowUp: { $ne: null },
           followUpCompleted: { $ne: true },
-          status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Invalid', 'Lost'] }
+          status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Invalid', 'Lost', 'International', 'Switched Off'] }
         }
       ]
     };
@@ -1342,7 +1342,7 @@ router.get('/followups/due', auth, async (req, res) => {
     const andConditions = [
       { nextFollowUp: { $ne: null, $lte: now } },
       { followUpCompleted: { $ne: true } },
-      { status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost', 'Invalid'] } },
+      { status: { $nin: ['Converted', 'Closed', 'Not Interested', 'Lost', 'Invalid', 'International', 'Switched Off'] } },
       { movedToPipeline: { $ne: true } }
     ];
 

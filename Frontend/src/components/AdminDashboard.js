@@ -1450,6 +1450,7 @@ function AdminDashboard() {
                           'Closed': { bg: '#f1f5f9', color: '#475569', dot: '#64748b' },
                           'Invalid': { bg: '#fee2e2', color: '#991b1b', dot: '#dc2626' },
                           'International': { bg: '#ecfeff', color: '#0e7490', dot: '#06b6d4' },
+                          'Switched Off': { bg: '#fff7ed', color: '#c2410c', dot: '#f97316' },
                         };
                         const status = lead.status || 'New';
                         const st = statusColors[status] || statusColors['New'];

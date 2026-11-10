@@ -10,9 +10,6 @@ import Attendance from "./components/Attendance";
 import Broadcasts from "./components/Broadcasts";
 import Dashboard from "./components/Dashboard";
 import AdminDashboard from "./components/AdminDashboard";
-import HRDashboard from "./components/HRDashboard";
-import MarketingDashboard from "./components/MarketingDashboard";
-import SalesDashboard from "./components/SalesDashboard";
 import Employees from "./components/Employees";
 import Goals from "./components/Goals";
 import MyCalendar from "./components/MyCalendar";
@@ -95,12 +92,10 @@ function LeadsWrapper() {
 // Render dynamic dashboard according to active role
 function DynamicDashboard() {
   const { user } = useAuth();
-  const roleName = user?.role?.name?.toLowerCase().trim() || '';
+  const roleName = (user?.role?.name || (typeof user?.role === 'string' ? user?.role : '') || '').toLowerCase().trim();
 
+  // Only Admin gets the AdminDashboard; all other roles (Sales, Marketing, HR, Employees, etc.) share the common Dashboard
   if (roleName === 'admin' || user?.role?.name === 'Admin') return <AdminDashboard />;
-  if (roleName === 'sales head' || roleName === 'saleshead' || roleName === 'head of sales' || roleName === 'sales') return <SalesDashboard />;
-  if (roleName.includes('marketing')) return <MarketingDashboard />;
-  if (roleName === 'hr' || user?.role?.name === 'HR') return <HRDashboard />;
   return <Dashboard />;
 }
 
@@ -194,7 +189,7 @@ function AppContent() {
           path="/dashboard/sales/overview"
           element={
             <PrivateRoute>
-              <SalesDashboard />
+              <Dashboard />
             </PrivateRoute>
           }
         />
@@ -202,7 +197,7 @@ function AppContent() {
           path="/dashboard/marketing/overview"
           element={
             <PrivateRoute>
-              <MarketingDashboard />
+              <Dashboard />
             </PrivateRoute>
           }
         />
@@ -210,7 +205,7 @@ function AppContent() {
           path="/dashboard/hr/overview"
           element={
             <PrivateRoute>
-              <HRDashboard />
+              <Dashboard />
             </PrivateRoute>
           }
         />
