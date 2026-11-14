@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from './NotificationBell';
 import {
   Bot,
   Sparkles,
@@ -81,7 +82,7 @@ const STATUS_OPTIONS = [
   'Not Interested'
 ];
 
-function AIChats() {
+function AIChats({ embedded = false }) {
   const { user, hasPermission } = useAuth();
   const canUpdate = hasPermission('ai-chats', 'update');
   const canDelete = hasPermission('ai-chats', 'delete');
@@ -288,11 +289,11 @@ function AIChats() {
 
   return (
     <div
-      className="page-container"
+      className={embedded ? "pipeline-ai-sensy-view" : "page-container"}
       style={{
-        minHeight: '100vh',
-        background: '#f8fafc',
-        padding: '24px 32px 64px',
+        minHeight: embedded ? 'auto' : '100vh',
+        background: embedded ? 'transparent' : '#f8fafc',
+        padding: embedded ? '20px 24px 48px' : '24px 32px 64px',
         fontFamily: "'Inter', 'Poppins', 'Segoe UI', sans-serif"
       }}
     >
@@ -339,7 +340,7 @@ function AIChats() {
                   gap: 8
                 }}
               >
-                <span>AI Chats</span>
+                <span>{embedded ? 'AI Sensy' : 'AI Chats'}</span>
                 <span
                   style={{
                     fontSize: 12,
@@ -351,11 +352,13 @@ function AIChats() {
                     border: '1px solid #a7f3d0'
                   }}
                 >
-                  Website AI Leads
+                  {embedded ? 'WhatsApp & AI Leads' : 'Website AI Leads'}
                 </span>
               </h1>
               <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0' }}>
-                Live inquiries, captured client details, and complete AI chat transcripts from the website
+                {embedded
+                  ? 'AI Sensy WhatsApp & conversational leads, chat transcripts and CRM outreach'
+                  : 'Live inquiries, captured client details, and complete AI chat transcripts from the website'}
               </p>
             </div>
           </div>
@@ -410,6 +413,8 @@ function AIChats() {
             <RotateCw size={15} className={loading ? 'spin' : ''} />
             <span>Refresh</span>
           </button>
+
+          {embedded && <NotificationBell filterType="CRM" />}
         </div>
       </div>
 

@@ -765,6 +765,184 @@ function Deals() {
     });
   };
 
+  const isSystemActivityText = (text, title = '') => {
+    if (!text) return true;
+    const str = String(text).trim().toLowerCase();
+    const tStr = String(title || '').trim().toLowerCase();
+
+    // Check titles of system events
+    if (
+      tStr.includes('lead moved') ||
+      tStr.includes('moved to pipeline') ||
+      tStr.includes('deal created') ||
+      tStr.includes('contact linked') ||
+      tStr.includes('company linked') ||
+      tStr.includes('payment recorded') ||
+      tStr.startsWith('task:') ||
+      tStr.startsWith('follow-up')
+    ) {
+      return true;
+    }
+
+    // Check content prefixes of system events
+    if (
+      str.startsWith('moved from') ||
+      str.startsWith('lead updated and moved') ||
+      str.startsWith('lead updated') ||
+      str.startsWith('created deal') ||
+      str.startsWith('linked contact') ||
+      str.startsWith('linked company') ||
+      str.startsWith('stage changed') ||
+      str.startsWith('status changed') ||
+      str.startsWith('deal status changed') ||
+      str.startsWith('payment of') ||
+      str.startsWith('completed task') ||
+      str.startsWith('pending task')
+    ) {
+      return true;
+    }
+
+    return false;
+  };
+
+  const getDealLatestNote = (deal) => {
+    if (!deal) return { text: '', dateTime: '' };
+
+    const candidates = [];
+
+    // 1. Deal activities
+    const acts = Array.isArray(deal.activities) ? deal.activities : [];
+    acts.forEach(a => {
+      if (!a) return;
+      const text = (a.content || a.remarks || '').trim();
+      const title = a.title || '';
+      if (isSystemActivityText(text, title)) return;
+
+      const isNote = a.type === 'note' || a.type === 'notes' || title.toLowerCase().includes('note');
+      if (isNote && text) {
+        let ts = 0;
+        if (a.createdAt) {
+          const t = new Date(a.createdAt).getTime();
+          if (!isNaN(t)) ts = t;
+        }
+        candidates.push({
+          content: text,
+          date: a.date || '',
+          time: a.time || '',
+          createdAt: a.createdAt,
+          timestamp: ts
+        });
+      }
+    });
+
+    // 2. Related lead history
+    if (Array.isArray(deal.relatedLead?.history)) {
+      deal.relatedLead.history.forEach(h => {
+        if (h && (h.action === 'Note Added' || h.action === 'Note') && h.details) {
+          const hText = String(h.details).trim();
+          if (hText && !isSystemActivityText(hText, h.action)) {
+            const hDate = h.date ? new Date(h.date) : null;
+            candidates.push({
+              content: hText,
+              date: hDate && !isNaN(hDate.getTime()) ? hDate.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-') : '',
+              time: hDate && !isNaN(hDate.getTime()) ? hDate.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() : '',
+              createdAt: hDate,
+              timestamp: hDate && !isNaN(hDate.getTime()) ? hDate.getTime() : 0
+            });
+          }
+        }
+      });
+    }
+
+    // 3. Raw notes string
+    const rawDealNotes = (deal.notes || deal.relatedLead?.notes || deal.relatedMetaLead?.notes || '').trim();
+    if (rawDealNotes) {
+      const bracketPattern = /\[(\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{4})(?:,\s*|\s+)?(\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM|am|pm))?(?:\s*IST)?)?\s*-\s*([^\]]+)\]:\s*([\s\S]*?)(?=(?:\[\d{1,2}[-/]|\d{1,2}\s+[A-Za-z]{3}|$))/g;
+      let match;
+      let matchedAny = false;
+      while ((match = bracketPattern.exec(rawDealNotes)) !== null) {
+        matchedAny = true;
+        const datePart = (match[1] || '').trim();
+        const timePart = (match[2] || '').trim();
+        const noteAuthor = (match[3] || '').trim();
+        const noteContent = (match[4] || '').trim();
+
+        let ts = 0;
+        let dObj = null;
+        try {
+          const cleanTime = timePart.replace(/IST/i, '').trim();
+          if (datePart.includes('-') || datePart.includes('/')) {
+            const parts = datePart.split(/[-/]/);
+            dObj = new Date(`${parts[2]}-${parts[1]}-${parts[0]} ${cleanTime}`);
+          } else {
+            dObj = new Date(`${datePart} ${cleanTime}`);
+          }
+          if (dObj && !isNaN(dObj.getTime())) ts = dObj.getTime();
+        } catch (e) { }
+
+        if (noteContent && !isSystemActivityText(noteContent, noteAuthor)) {
+          candidates.push({
+            content: noteContent,
+            date: datePart,
+            time: timePart,
+            createdAt: dObj,
+            timestamp: ts
+          });
+        }
+      }
+
+      if (!matchedAny && rawDealNotes.trim() && !isSystemActivityText(rawDealNotes)) {
+        const fallbackDate = deal.updatedAt || deal.createdAt || new Date();
+        const d = new Date(fallbackDate);
+        candidates.push({
+          content: rawDealNotes.trim(),
+          date: !isNaN(d.getTime()) ? d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-') : '',
+          time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() : '',
+          createdAt: d,
+          timestamp: !isNaN(d.getTime()) ? d.getTime() : 0
+        });
+      }
+    }
+
+    if (candidates.length === 0) {
+      return { text: '', dateTime: '' };
+    }
+
+    const seen = new Set();
+    const unique = candidates.filter(c => {
+      if (!c || !c.content) return false;
+      const key = c.content.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    unique.sort((a, b) => {
+      const tb = b.timestamp || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      const ta = a.timestamp || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      return tb - ta;
+    });
+
+    const latest = unique[0];
+    let formattedDateTime = '';
+    if (latest.createdAt && !isNaN(new Date(latest.createdAt).getTime())) {
+      const d = new Date(latest.createdAt);
+      const datePart = d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+      const timePart = latest.time || d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+      formattedDateTime = `${datePart}, ${timePart}${!timePart.includes('IST') ? ' IST' : ''}`;
+    } else {
+      formattedDateTime = [latest.date, latest.time].filter(Boolean).join(', ');
+      if (formattedDateTime && !formattedDateTime.includes('IST')) {
+        formattedDateTime += ' IST';
+      }
+    }
+
+    return {
+      text: latest.content,
+      dateTime: formattedDateTime
+    };
+  };
+
   const handleExportCsv = () => {
     if (allDeals.length === 0) {
       alert('No deals to export');
@@ -786,28 +964,33 @@ function Deals() {
       'Record Type',
       'Description',
       'Requirements',
-      'Notes',
+      'Latest Note',
+      'Latest Note Date & Time',
       'Created Date'
     ];
 
-    const rows = allDeals.map((deal) => [
-      deal.dealName || '',
-      deal.clientName || '',
-      deal.email || '',
-      deal.phone ? `\t${deal.phone}` : '',
-      deal.dealValue || 0,
-      deal.company || '',
-      deal.assignedTo ? `${deal.assignedTo.firstName || ''} ${deal.assignedTo.lastName || ''}`.trim() : 'Unassigned',
-      deal.stage || 'Qualification',
-      deal.probability || '10',
-      deal.expectedCloseDate ? new Date(deal.expectedCloseDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
-      deal.source || '',
-      deal.recordType ? (deal.recordType === 'crm' ? 'CRM Lead' : deal.recordType === 'meta' ? 'Meta Lead' : 'Regular Deal') : 'Regular Deal',
-      deal.description || '',
-      deal.requirements || '',
-      deal.notes || '',
-      deal.createdAt ? new Date(deal.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
-    ]);
+    const rows = allDeals.map((deal) => {
+      const latestNoteInfo = getDealLatestNote(deal);
+      return [
+        deal.dealName || '',
+        deal.clientName || '',
+        deal.email || '',
+        deal.phone ? `\t${deal.phone}` : '',
+        deal.dealValue || 0,
+        deal.company || '',
+        deal.assignedTo ? `${deal.assignedTo.firstName || ''} ${deal.assignedTo.lastName || ''}`.trim() : 'Unassigned',
+        deal.stage || 'Qualification',
+        deal.probability || '10',
+        deal.expectedCloseDate ? new Date(deal.expectedCloseDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
+        deal.source || '',
+        deal.recordType ? (deal.recordType === 'crm' ? 'CRM Lead' : deal.recordType === 'meta' ? 'Meta Lead' : 'Regular Deal') : 'Regular Deal',
+        deal.description || '',
+        deal.requirements || '',
+        latestNoteInfo.text || deal.notes || '',
+        latestNoteInfo.dateTime || '',
+        deal.createdAt ? new Date(deal.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+      ];
+    });
 
     const csvContent = [
       headers.join(','),

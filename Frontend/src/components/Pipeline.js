@@ -58,15 +58,17 @@ import {
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from './NotificationBell';
+import AiSensyCampaign from './AiSensyCampaign';
 import './Pipeline.css';
 
-// Navigation Tabs for Left Sub-Sidebar (Deals, Contacts, Companies, Tasks, Reminders)
+// Navigation Tabs for Left Sub-Sidebar (Deals, Contacts, Companies, Tasks, Reminders, AI Sensy Campaign)
 const SIDEBAR_TABS = [
     { id: 'deals', label: 'Deals', icon: Briefcase },
     { id: 'contacts', label: 'Contacts', icon: Users },
     { id: 'companies', label: 'Companies', icon: Building2 },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
-    { id: 'reminders', label: 'Reminders', icon: Bell }
+    { id: 'reminders', label: 'Reminders', icon: Bell },
+    { id: 'ai-sensy', label: 'AI Sensy', icon: MessageSquare }
 ];
 
 const TASK_PRIORITY_OPTIONS = ['High', 'Medium', 'Low'];
@@ -634,6 +636,47 @@ const formatRelativeActivityTime = (act) => {
     if (diffDays < 7) return `${diffDays} days ago`;
     if (diffDays < 30) return `${Math.floor(diffDays / 7)} ${Math.floor(diffDays / 7) === 1 ? 'week' : 'weeks'} ago`;
     return formatActivityTimestamp(act);
+};
+
+// Helper to identify automated system actions / audit logs so they are not mistaken for real user notes
+const isSystemActivityText = (text, title = '') => {
+    if (!text) return true;
+    const str = String(text).trim().toLowerCase();
+    const tStr = String(title || '').trim().toLowerCase();
+
+    // Check titles of system events
+    if (
+        tStr.includes('lead moved') ||
+        tStr.includes('moved to pipeline') ||
+        tStr.includes('deal created') ||
+        tStr.includes('contact linked') ||
+        tStr.includes('company linked') ||
+        tStr.includes('payment recorded') ||
+        tStr.startsWith('task:') ||
+        tStr.startsWith('follow-up')
+    ) {
+        return true;
+    }
+
+    // Check content prefixes of system events
+    if (
+        str.startsWith('moved from') ||
+        str.startsWith('lead updated and moved') ||
+        str.startsWith('lead updated') ||
+        str.startsWith('created deal') ||
+        str.startsWith('linked contact') ||
+        str.startsWith('linked company') ||
+        str.startsWith('stage changed') ||
+        str.startsWith('status changed') ||
+        str.startsWith('deal status changed') ||
+        str.startsWith('payment of') ||
+        str.startsWith('completed task') ||
+        str.startsWith('pending task')
+    ) {
+        return true;
+    }
+
+    return false;
 };
 
 const INITIAL_SAMPLE_DEALS = [];
@@ -3212,6 +3255,23 @@ function Pipeline() {
         setSelectedKanbanDealIds([]);
         setIsBulkMoveDropdownOpen(false);
     }, [activeTab, viewMode]);
+
+    // Live AI Sensy count
+    const [aiSensyCount, setAiSensyCount] = useState(0);
+
+    useEffect(() => {
+        let isMounted = true;
+        api.get('/aisensy/logs?limit=1')
+            .then(res => {
+                if (isMounted && res.data?.stats?.total !== undefined) {
+                    setAiSensyCount(res.data.stats.total);
+                } else if (isMounted && res.data?.total !== undefined) {
+                    setAiSensyCount(res.data.total);
+                }
+            })
+            .catch(() => {});
+        return () => { isMounted = false; };
+    }, [activeTab]);
 
     // Live currency exchange rates to INR from official Frankfurter v2 API
     const [exchangeRatesToINR, setExchangeRatesToINR] = useState({ INR: 1 });
@@ -10425,6 +10485,180 @@ function Pipeline() {
         setShowCreateModal(false);
     };
 
+    // Helper to extract the latest note with its date & time for a deal
+    const getDealLatestNote = useCallback((deal) => {
+        if (!deal) return { text: '', dateTime: '', date: '', time: '', author: '' };
+
+        const candidates = [];
+
+        // 1. In-memory / local activities for this deal
+        const localActs = (dealActivities && (dealActivities[deal._id] || dealActivities[deal.id])) || [];
+        localActs.forEach(a => {
+            if (!a) return;
+            const text = (a.content || a.remarks || '').trim();
+            const title = a.title || '';
+            if (isSystemActivityText(text, title)) return;
+
+            const isNote = a.type === 'note' || a.type === 'notes' || title.toLowerCase().includes('note');
+            if (isNote && text) {
+                const ts = parseActivityTimestamp(a);
+                candidates.push({
+                    content: text,
+                    author: a.author || '',
+                    date: a.date || '',
+                    time: a.time || '',
+                    createdAt: a.createdAt || null,
+                    timestamp: ts,
+                    rawActivity: a
+                });
+            }
+        });
+
+        // 2. Backend activities attached to deal
+        const backendActs = Array.isArray(deal.activities) ? deal.activities : [];
+        backendActs.forEach(a => {
+            if (!a) return;
+            const text = (a.content || a.remarks || '').trim();
+            const title = a.title || '';
+            if (isSystemActivityText(text, title)) return;
+
+            const isNote = a.type === 'note' || a.type === 'notes' || title.toLowerCase().includes('note');
+            if (isNote && text) {
+                const ts = parseActivityTimestamp(a);
+                candidates.push({
+                    content: text,
+                    author: a.author || '',
+                    date: a.date || '',
+                    time: a.time || '',
+                    createdAt: a.createdAt || null,
+                    timestamp: ts,
+                    rawActivity: a
+                });
+            }
+        });
+
+        // 3. Related lead history
+        if (Array.isArray(deal.relatedLead?.history)) {
+            deal.relatedLead.history.forEach(h => {
+                if (h && (h.action === 'Note Added' || h.action === 'Note') && h.details) {
+                    const hText = String(h.details).trim();
+                    if (hText && !isSystemActivityText(hText, h.action)) {
+                        const hDate = h.date ? new Date(h.date) : null;
+                        const author = (h.by && (h.by.firstName ? `${h.by.firstName} ${h.by.lastName || ''}`.trim() : h.by.name)) || '';
+                        const ts = (hDate && !isNaN(hDate.getTime())) ? hDate.getTime() : 0;
+                        candidates.push({
+                            content: hText,
+                            author: author,
+                            date: hDate && !isNaN(hDate.getTime()) ? formatDateDDMMYYYY(hDate) : '',
+                            time: hDate && !isNaN(hDate.getTime()) ? hDate.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() : '',
+                            createdAt: hDate,
+                            timestamp: ts,
+                            rawActivity: { createdAt: hDate, date: hDate ? formatDateDDMMYYYY(hDate) : '' }
+                        });
+                    }
+                }
+            });
+        }
+
+        // 4. Deal notes / Related lead notes / Meta lead notes string
+        const rawDealNotes = (deal.notes || deal.relatedLead?.notes || deal.relatedMetaLead?.notes || '').trim();
+        if (rawDealNotes) {
+            // Pattern for bracketed notes e.g.:
+            // [05-11-2026, 8:10:13 PM IST - Admin System]: Note content
+            // [27 Oct 2026 12:49 PM - Admin System]: Note content
+            const bracketPattern = /\[(\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{4})(?:,\s*|\s+)?(\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM|am|pm))?(?:\s*IST)?)?\s*-\s*([^\]]+)\]:\s*([\s\S]*?)(?=(?:\[\d{1,2}[-/]|\d{1,2}\s+[A-Za-z]{3}|$))/g;
+            let match;
+            let matchedAny = false;
+            while ((match = bracketPattern.exec(rawDealNotes)) !== null) {
+                matchedAny = true;
+                const datePart = (match[1] || '').trim();
+                const timePart = (match[2] || '').trim();
+                const noteAuthor = (match[3] || '').trim();
+                const noteContent = (match[4] || '').trim();
+
+                let ts = 0;
+                let dObj = null;
+                try {
+                    const cleanTime = timePart.replace(/IST/i, '').trim();
+                    if (datePart.includes('-') || datePart.includes('/')) {
+                        const parts = datePart.split(/[-/]/);
+                        dObj = new Date(`${parts[2]}-${parts[1]}-${parts[0]} ${cleanTime}`);
+                    } else {
+                        dObj = new Date(`${datePart} ${cleanTime}`);
+                    }
+                    if (dObj && !isNaN(dObj.getTime())) {
+                        ts = dObj.getTime();
+                    }
+                } catch (e) { }
+
+                if (noteContent && !isSystemActivityText(noteContent, noteAuthor)) {
+                    candidates.push({
+                        content: noteContent,
+                        author: noteAuthor,
+                        date: datePart,
+                        time: timePart,
+                        createdAt: dObj,
+                        timestamp: ts,
+                        rawActivity: { createdAt: dObj, date: datePart, time: timePart }
+                    });
+                }
+            }
+
+            if (!matchedAny && rawDealNotes.trim() && !isSystemActivityText(rawDealNotes)) {
+                const fallbackDate = deal.updatedAt || deal.createdAt || new Date();
+                const d = new Date(fallbackDate);
+                const ts = !isNaN(d.getTime()) ? d.getTime() : 0;
+                candidates.push({
+                    content: rawDealNotes.trim(),
+                    author: deal.salesOwner || deal.addedBy || '',
+                    date: !isNaN(d.getTime()) ? formatDateDDMMYYYY(d) : '',
+                    time: !isNaN(d.getTime()) ? d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() : '',
+                    createdAt: d,
+                    timestamp: ts,
+                    rawActivity: { createdAt: d }
+                });
+            }
+        }
+
+        if (candidates.length === 0) {
+            return { text: '', dateTime: '', date: '', time: '', author: '' };
+        }
+
+        // Deduplicate by content
+        const seen = new Set();
+        const unique = candidates.filter(c => {
+            if (!c || !c.content) return false;
+            const key = c.content.trim().toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        // Sort newest first
+        unique.sort((a, b) => {
+            const tb = b.timestamp || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+            const ta = a.timestamp || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+            return tb - ta;
+        });
+
+        const latest = unique[0];
+        let formattedDateTime = latest.rawActivity ? formatActivityTimestamp(latest.rawActivity) : '';
+        if (!formattedDateTime || formattedDateTime === '—') {
+            formattedDateTime = [latest.date, latest.time].filter(Boolean).join(', ');
+            if (formattedDateTime && !formattedDateTime.includes('IST')) {
+                formattedDateTime += ' IST';
+            }
+        }
+
+        return {
+            text: latest.content,
+            dateTime: formattedDateTime,
+            date: latest.date,
+            time: latest.time,
+            author: latest.author
+        };
+    }, [dealActivities]);
+
     // Export deals to Excel sheet with all required fields
     const handleExport = () => {
         const dealsToExport = (selectedKanbanDealIds && selectedKanbanDealIds.length > 0)
@@ -10507,7 +10741,10 @@ function Pipeline() {
                 contactSource = 'Direct';
             }
 
-            // 10. Created On
+            // 10. Latest Note & Note Timestamp
+            const latestNoteInfo = getDealLatestNote(deal);
+
+            // 11. Created On
             let createdOn = '';
             const createdDateObj = (typeof parseDealDate === 'function' ? parseDealDate(deal.createdAt || deal.createdDate || deal.date) : null) || (deal.createdAt ? new Date(deal.createdAt) : null);
             if (createdDateObj && !isNaN(createdDateObj.getTime())) {
@@ -10527,6 +10764,8 @@ function Pipeline() {
                 'Deal Owner': dealOwner,
                 'Origin': origin,
                 'Contact Source': contactSource,
+                'Latest Note': latestNoteInfo.text || '',
+                'Latest Note Date & Time': latestNoteInfo.dateTime || '',
                 'Created On': createdOn
             };
         });
@@ -10545,6 +10784,8 @@ function Pipeline() {
                 { wch: 22 }, // Deal Owner
                 { wch: 16 }, // Origin
                 { wch: 20 }, // Contact Source
+                { wch: 48 }, // Latest Note
+                { wch: 28 }, // Latest Note Date & Time
                 { wch: 16 }  // Created On
             ];
             const wb = XLSX.utils.book_new();
@@ -10563,7 +10804,7 @@ function Pipeline() {
             }
         } catch (err) {
             console.error('XLSX export failed, using CSV fallback:', err);
-            const headers = ['Client Name', 'Email', 'Phone', 'Location', 'Value', 'Status', 'Deal Owner', 'Origin', 'Contact Source', 'Created On'];
+            const headers = ['Client Name', 'Email', 'Phone', 'Location', 'Value', 'Status', 'Deal Owner', 'Origin', 'Contact Source', 'Latest Note', 'Latest Note Date & Time', 'Created On'];
             const csvRows = [headers.join(',')];
             exportRows.forEach(r => {
                 const row = [
@@ -10576,6 +10817,8 @@ function Pipeline() {
                     `"${String(r['Deal Owner'] || '').replace(/"/g, '""')}"`,
                     `"${String(r['Origin'] || '').replace(/"/g, '""')}"`,
                     `"${String(r['Contact Source'] || '').replace(/"/g, '""')}"`,
+                    `"${String(r['Latest Note'] || '').replace(/"/g, '""')}"`,
+                    `"${String(r['Latest Note Date & Time'] || '').replace(/"/g, '""')}"`,
                     `"${String(r['Created On'] || '').replace(/"/g, '""')}"`
                 ];
                 csvRows.push(row.join(','));
@@ -11841,6 +12084,9 @@ function Pipeline() {
                                     {!isSidebarCollapsed && tab.id === 'reminders' && (
                                         <span className="pipeline-sub-sidebar-count">{activeRemindersCount}</span>
                                     )}
+                                    {!isSidebarCollapsed && tab.id === 'ai-sensy' && (
+                                        <span className="pipeline-sub-sidebar-count">{aiSensyCount}</span>
+                                    )}
                                 </li>
                             );
                         })}
@@ -12991,7 +13237,7 @@ function Pipeline() {
                                                 >
                                                     <FileText size={14} />
                                                     <span>Notes</span>
-                                                    <span className="pipeline-act-tab-badge">{currentDealActivities.filter(a => a.type === 'note').length}</span>
+                                                    <span className="pipeline-act-tab-badge">{currentDealActivities.filter(a => a.type === 'note' && !isSystemActivityText(a.content, a.title)).length}</span>
                                                 </button>
                                                 <button
                                                     type="button"
@@ -13627,13 +13873,13 @@ function Pipeline() {
                                                     </div>
                                                 ) : currentDealActivities.filter(act => {
                                                     if (detailActiveTab === 'all') return true;
-                                                    if (detailActiveTab === 'notes') return act.type === 'note';
+                                                    if (detailActiveTab === 'notes') return act.type === 'note' && !isSystemActivityText(act.content, act.title);
                                                     if (detailActiveTab === 'followups') return act.type === 'followup';
                                                     return true;
                                                 }).length > 0 ? (
                                                     currentDealActivities.filter(act => {
                                                         if (detailActiveTab === 'all') return true;
-                                                        if (detailActiveTab === 'notes') return act.type === 'note';
+                                                        if (detailActiveTab === 'notes') return act.type === 'note' && !isSystemActivityText(act.content, act.title);
                                                         if (detailActiveTab === 'followups') return act.type === 'followup';
                                                         return true;
                                                     }).map(act => (
@@ -16318,7 +16564,7 @@ function Pipeline() {
                                                 >
                                                     <FileText size={14} />
                                                     <span>Notes</span>
-                                                    <span className="pipeline-act-tab-badge">{currentContactActivities.filter(a => a.type === 'note').length}</span>
+                                                    <span className="pipeline-act-tab-badge">{currentContactActivities.filter(a => a.type === 'note' && !isSystemActivityText(a.content, a.title)).length}</span>
                                                 </button>
                                                 <button
                                                     type="button"
@@ -16954,13 +17200,13 @@ function Pipeline() {
                                                     </div>
                                                 ) : currentContactActivities.filter(act => {
                                                     if (detailActiveTab === 'all') return true;
-                                                    if (detailActiveTab === 'notes') return act.type === 'note';
+                                                    if (detailActiveTab === 'notes') return act.type === 'note' && !isSystemActivityText(act.content, act.title);
                                                     if (detailActiveTab === 'followups') return act.type === 'followup';
                                                     return true;
                                                 }).length > 0 ? (
                                                     currentContactActivities.filter(act => {
                                                         if (detailActiveTab === 'all') return true;
-                                                        if (detailActiveTab === 'notes') return act.type === 'note';
+                                                        if (detailActiveTab === 'notes') return act.type === 'note' && !isSystemActivityText(act.content, act.title);
                                                         if (detailActiveTab === 'followups') return act.type === 'followup';
                                                         return true;
                                                     }).map(act => (
@@ -20693,6 +20939,15 @@ function Pipeline() {
                                 </div>
                             )}
                         </div>
+                    </div>
+                )}
+
+                {/* ====================================================================
+                6. AI SENSY TAB VIEW
+                ==================================================================== */}
+                {activeTab === 'ai-sensy' && (
+                    <div className="pipeline-tab-page-view" style={{ height: '100%', flex: 1, minHeight: 0, overflow: 'hidden', background: '#f8fafc', padding: 0 }}>
+                        <AiSensyCampaign embedded={true} isAdmin={isAdmin} />
                     </div>
                 )}
             </main>

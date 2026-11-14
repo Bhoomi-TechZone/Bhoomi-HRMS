@@ -4743,26 +4743,24 @@ ${isDownload ? '' : `
                     }
                     if (genInvoiceForm.prefillProjectId) {
                       try {
-                        await api.put(`/projects/${genInvoiceForm.prefillProjectId}`, {
-                          name: genInvoiceForm.itemDescription,
-                          description: genInvoiceForm.itemDetails || '',
-                          clientName: genInvoiceForm.clientName,
-                          clientEmail: genInvoiceForm.clientEmail,
-                          clientPhone: genInvoiceForm.clientPhone,
-                          clientAddress: genInvoiceForm.clientAddress,
-                          clientCity: genInvoiceForm.clientCity,
-                          clientPostalCode: genInvoiceForm.clientPostalCode,
-                          clientState: genInvoiceForm.clientState,
-                          clientGstin: genInvoiceForm.clientGstin,
-                          clientPan: genInvoiceForm.clientPan,
-                          gstType: genInvoiceForm.gstType,
-                          gstRate: genInvoiceForm.gstRate,
-                          hsnSac: genInvoiceForm.hsnSac,
-                          projectValue: genInvoiceForm.rate
-                        });
-                        fetchData();
+                        // Only sync client contact & tax identifiers (GSTIN, PAN, address) back to project if provided.
+                        // NEVER overwrite the project contract value (projectValue), project name, or project GST configuration with invoice line-item values!
+                        const clientSync = {};
+                        if (genInvoiceForm.clientAddress) clientSync.clientAddress = genInvoiceForm.clientAddress;
+                        if (genInvoiceForm.clientCity) clientSync.clientCity = genInvoiceForm.clientCity;
+                        if (genInvoiceForm.clientPostalCode) clientSync.clientPostalCode = genInvoiceForm.clientPostalCode;
+                        if (genInvoiceForm.clientState) clientSync.clientState = genInvoiceForm.clientState;
+                        if (genInvoiceForm.clientGstin) clientSync.clientGstin = genInvoiceForm.clientGstin;
+                        if (genInvoiceForm.clientPan) clientSync.clientPan = genInvoiceForm.clientPan;
+                        if (genInvoiceForm.clientEmail) clientSync.clientEmail = genInvoiceForm.clientEmail;
+                        if (genInvoiceForm.clientPhone) clientSync.clientPhone = genInvoiceForm.clientPhone;
+
+                        if (Object.keys(clientSync).length > 0) {
+                          await api.put(`/projects/${genInvoiceForm.prefillProjectId}`, clientSync);
+                          fetchData();
+                        }
                       } catch (error) {
-                        console.error('Error updating project details:', error);
+                        console.error('Error syncing client details to project:', error);
                       }
                     }
 

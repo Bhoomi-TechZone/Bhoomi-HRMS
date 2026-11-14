@@ -141,6 +141,7 @@ function Payroll() {
   const [showPaymentDateModal, setShowPaymentDateModal] = useState(false);
   const [paymentDueDate, setPaymentDueDate] = useState('');
   const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [exportingWithAttendance, setExportingWithAttendance] = useState(false);
   const [showBankModal, setShowBankModal] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [bankFormData, setBankFormData] = useState({
@@ -766,12 +767,13 @@ function Payroll() {
           ? `${payroll.employeeId.firstName} ${payroll.employeeId.lastName || ''}`.trim()
           : 'Employee');
 
-    // Attendance and paid days calculation (standard 30-day base)
+    // Attendance and paid days calculation (adjusted for mid-month joining)
     const presentDays = payroll.attendance?.present || 0;
     const absentDays = payroll.workingDays?.absent || 0;
     const halfDays = payroll.workingDays?.halfDay || 0;
     const unpaidDays = absentDays + (halfDays * 0.5);
-    const paidDays = Math.max(0, 30 - unpaidDays);
+    const eligibleDays = getEligibleDays(selectedYear, selectedMonth, payroll.employee?.joiningDate, payroll.workingDays?.total);
+    const paidDays = Math.max(0, eligibleDays - unpaidDays);
 
     const allowances = payroll.salaryDetails?.allowances || {};
     const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
@@ -1310,6 +1312,25 @@ function Payroll() {
 
 
 
+  // Calculate eligible payable base days in a given month (accounting for mid-month joining)
+  const getEligibleDays = (year, month, joiningDate, fallbackTotal = 30) => {
+    if (joiningDate) {
+      const jd = new Date(joiningDate);
+      if (!isNaN(jd.getTime())) {
+        const joinYear = jd.getFullYear();
+        const joinMonth = jd.getMonth() + 1;
+        const joinDay = jd.getDate();
+        if (joinYear > year || (joinYear === year && joinMonth > month)) return 0;
+        if (joinYear === year && joinMonth === month) {
+          const preJoining = Math.max(0, joinDay - 1);
+          return Math.max(0, 30 - preJoining);
+        }
+        return 30;
+      }
+    }
+    return fallbackTotal !== undefined ? fallbackTotal : 30;
+  };
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
@@ -1414,7 +1435,8 @@ function Payroll() {
         const absentDays = p.workingDays?.absent || 0;
         const halfDays = p.workingDays?.halfDay || 0;
         const unpaidDays = absentDays + (halfDays * 0.5);
-        const paidDays = Math.max(0, 30 - unpaidDays);
+        const eligibleDays = getEligibleDays(selectedYear, selectedMonth, emp.joiningDate, p.workingDays?.total);
+        const paidDays = Math.max(0, eligibleDays - unpaidDays);
 
         const allowances = p.salaryDetails?.allowances || {};
         const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
@@ -1536,7 +1558,8 @@ function Payroll() {
         const absentDays = p.workingDays?.absent || 0;
         const halfDays = p.workingDays?.halfDay || 0;
         const unpaidDays = absentDays + (halfDays * 0.5);
-        const paidDays = Math.max(0, 30 - unpaidDays);
+        const eligibleDays = getEligibleDays(selectedYear, selectedMonth, emp.joiningDate, p.workingDays?.total);
+        const paidDays = Math.max(0, eligibleDays - unpaidDays);
 
         const allowances = p.salaryDetails?.allowances || {};
         const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
@@ -1588,6 +1611,276 @@ function Payroll() {
     } catch (error) {
       console.error('Error exporting payroll Excel:', error);
       alert('Error exporting Excel file: ' + error.message);
+    }
+  };
+
+  // Export Monthly Payroll WITH Attendance Details to Excel
+  const handleExportPayrollWithAttendance = async () => {
+    try {
+      setExportingWithAttendance(true);
+
+      const monthName = months.find(m => m.value === selectedMonth)?.label || 'Month';
+      const monthShort = monthName.slice(0, 3);
+      const totalDaysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+
+      const filtered = payrolls.filter((payroll) => {
+        if (payrollStatusFilter !== 'all') {
+          const st = (payroll.status || '').toLowerCase();
+          const filterSt = payrollStatusFilter.toLowerCase();
+          const isMatch = filterSt === 'approved'
+            ? (st === 'approved' || st === 'processed')
+            : (st === filterSt);
+          if (!isMatch) return false;
+        }
+        if (payrollEmployeeFilter !== 'all') {
+          const empId = (typeof payroll.employee === 'object' ? payroll.employee?._id : payroll.employee) || '';
+          if (empId.toString() !== payrollEmployeeFilter.toString()) return false;
+        }
+        if (payrollSearchTerm.trim()) {
+          const term = payrollSearchTerm.toLowerCase().trim();
+          const emp = payroll.employee || {};
+          const fullName = `${emp.firstName || ''} ${emp.lastName || ''}`.toLowerCase();
+          const email = (emp.email || '').toLowerCase();
+          const empCode = (emp.employeeId || '').toLowerCase();
+          const designation = (emp.designation || '').toLowerCase();
+          if (!fullName.includes(term) && !email.includes(term) && !empCode.includes(term) && !designation.includes(term)) return false;
+        }
+        return true;
+      });
+
+      const listToExport = filtered.length > 0 ? filtered : payrolls;
+      if (listToExport.length === 0) {
+        alert('No payroll records found to export.');
+        return;
+      }
+
+      // Try fetching bulk attendance first
+      let attendanceMap = {};
+      try {
+        const bulkRes = await api.get('/payroll/employee-attendance-bulk', {
+          params: { month: selectedMonth, year: selectedYear, _t: Date.now() }
+        });
+        if (bulkRes.data && bulkRes.data.data) {
+          attendanceMap = bulkRes.data.data;
+        }
+      } catch (bulkErr) {
+        console.warn('Bulk attendance fetch failed, falling back to individual calls:', bulkErr);
+      }
+
+      // Fetch individually for any missing employees
+      const fetchPromises = listToExport.map(async (p) => {
+        const empId = (typeof p.employee === 'object' ? p.employee?._id : p.employee) || '';
+        if (empId && !attendanceMap[empId]) {
+          try {
+            const indRes = await api.get(`/payroll/employee-attendance/${empId}`, {
+              params: { month: selectedMonth, year: selectedYear, _t: Date.now() }
+            });
+            if (indRes.data) {
+              attendanceMap[empId] = {
+                summary: indRes.data.summary,
+                dailyBreakdown: indRes.data.dailyBreakdown
+              };
+            }
+          } catch (e) {
+            console.error(`Failed to fetch attendance for emp ${empId}:`, e);
+          }
+        }
+      });
+      await Promise.all(fetchPromises);
+
+      // Helper to format time (e.g. 09:30 AM)
+      const formatTime = (isoStr) => {
+        if (!isoStr) return '';
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+      };
+
+      // 1. Build Main Sheet (Payroll with Attendance)
+      const mainSheetData = listToExport.map((p, idx) => {
+        const emp = p.employee || {};
+        const empId = (typeof p.employee === 'object' ? p.employee?._id : p.employee) || '';
+        const attData = attendanceMap[empId] || {};
+        const attSummary = attData.summary || {};
+        const dailyList = attData.dailyBreakdown || [];
+
+        const absentDays = p.workingDays?.absent || 0;
+        const halfDays = p.workingDays?.halfDay || 0;
+        const unpaidDays = absentDays + (halfDays * 0.5);
+        const eligibleDays = getEligibleDays(selectedYear, selectedMonth, emp.joiningDate, p.workingDays?.total);
+        const paidDays = Math.max(0, eligibleDays - unpaidDays);
+
+        const allowances = p.salaryDetails?.allowances || {};
+        const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);
+        const basicSalary = p.salaryDetails?.basicSalary || 0;
+        const fullGross = (basicSalary + totalAllowances) > 0 ? (basicSalary + totalAllowances) : (p.salaryDetails?.grossSalary || 0);
+        const perDaySalary = fullGross > 0 ? (fullGross / 30) : 0;
+        const earnedGross = fullGross > 0 ? Number((paidDays * perDaySalary).toFixed(2)) : (p.salaryDetails?.grossSalary || 0);
+        const lopAmount = unpaidDays > 0 ? Number((unpaidDays * perDaySalary).toFixed(2)) : (Number(p.salaryDetails?.deductions?.lossOfPay) || 0);
+
+        const deductions = p.salaryDetails?.deductions || {};
+        const totalStdDeductions = (deductions.pf || 0) + (deductions.esi || 0) + (deductions.tax || 0) + (deductions.loan || 0) + (deductions.advance || 0) + (deductions.other || 0);
+        const manualPenalty = deductions.penalty || 0;
+        const latePenalty = deductions.lateDeduction || 0;
+        const totalPenalties = manualPenalty + latePenalty;
+
+        const comps = Array.isArray(p.customComponents) ? p.customComponents : [];
+        const cAdd = comps.filter(c => (c.type || '').toLowerCase() === 'addition').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+        const cDed = comps.filter(c => (c.type || '').toLowerCase() === 'deduction').reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+        const displayGross = Number((fullGross + cAdd).toFixed(2));
+        const netSalary = Number((earnedGross + (p.salaryDetails?.bonus || 0) + cAdd - totalStdDeductions - totalPenalties - cDed).toFixed(2));
+
+        // Collect specific details for leaves, half-days, and absents (excluding regular Present days)
+        const leavesList = [];
+        const halfDaysList = [];
+        const absentsList = [];
+
+        dailyList.forEach(dayData => {
+          const dayNum = dayData.day;
+          const dateObj = new Date(selectedYear, selectedMonth - 1, dayNum);
+          const weekday = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+          const dayStr = `${String(dayNum).padStart(2, '0')}-${monthShort} (${weekday})`;
+          const st = dayData.status || '';
+          const inT = formatTime(dayData.loginTime);
+          const outT = formatTime(dayData.logoutTime);
+          const hrs = dayData.workingHours > 0 ? `${dayData.workingHours.toFixed(1)}h` : '';
+          const punchInfo = inT ? ` (${inT}${outT ? ' - ' + outT : ''}${hrs ? ' | ' + hrs : ''})` : '';
+
+          if (st === 'Leave' || st === 'Unpaid Leave') {
+            const lCat = dayData.leaveInfo?.leaveCategory || dayData.leaveInfo?.leaveType || st;
+            leavesList.push(`${dayStr} [${lCat}]`);
+          } else if (st === 'Half-day') {
+            halfDaysList.push(`${dayStr}${punchInfo || ' (Half-day)'}`);
+          } else if (st === 'Absent') {
+            absentsList.push(dayStr);
+          }
+        });
+
+        // Exact requested fields in exact order
+        const row = {
+          'Sr No': idx + 1,
+          'Employee ID': emp.employeeId || 'N/A',
+          'Employee Name': `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'N/A',
+          'Year': selectedYear,
+          'Month': monthName,
+          'Gross Salary': displayGross,
+          'LOP': lopAmount,
+          'PD': paidDays,
+          'UD': unpaidDays,
+          'Final Pay': netSalary,
+          'Present Days': attSummary.presentDays !== undefined ? attSummary.presentDays : (p.attendance?.present || 0),
+          'Absent Days': attSummary.absentDays !== undefined ? attSummary.absentDays : absentDays,
+          'Half Days (Count)': attSummary.halfDays !== undefined ? attSummary.halfDays : halfDays,
+          'Paid Leaves': attSummary.paidLeaveDays || 0,
+          'Unpaid Leaves': attSummary.unpaidLeaveDays || 0,
+          'Week Offs': attSummary.weekOffDays || 0,
+          'Holidays': attSummary.holidayDays || 0,
+          'Total Working Hours': attSummary.totalWorkingHours ? `${attSummary.totalWorkingHours} hrs` : '0 hrs',
+          'On Leaves': leavesList.length > 0 ? leavesList.join(', ') : '—',
+          'Half Days': halfDaysList.length > 0 ? halfDaysList.join(', ') : '—',
+          'Absents': absentsList.length > 0 ? absentsList.join(', ') : '—'
+        };
+
+        return row;
+      });
+
+      // 2. Build Leaves & Absences Log Sheet (Only Leaves, Half-days & Absents - no everyday present)
+      const dailyLogRowList = [];
+      listToExport.forEach((p, empIdx) => {
+        const emp = p.employee || {};
+        const empId = (typeof p.employee === 'object' ? p.employee?._id : p.employee) || '';
+        const attData = attendanceMap[empId] || {};
+        const dailyList = attData.dailyBreakdown || [];
+
+        dailyList.forEach(dayData => {
+          const st = dayData.status || '';
+          const isException = st === 'Leave' || st === 'Unpaid Leave' || st === 'Half-day' || st === 'Absent';
+          if (!isException) return;
+
+          const inT = formatTime(dayData.loginTime);
+          const outT = formatTime(dayData.logoutTime);
+          const hrs = dayData.workingHours > 0
+            ? `${String(Math.floor(dayData.workingHours)).padStart(2, '0')}:${String(Math.round((dayData.workingHours % 1) * 60)).padStart(2, '0')}`
+            : '00:00';
+
+          const dateObj = new Date(selectedYear, selectedMonth - 1, dayData.day);
+          const weekday = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+
+          dailyLogRowList.push({
+            'Sr No': empIdx + 1,
+            'Employee ID': emp.employeeId || 'N/A',
+            'Employee Name': `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'N/A',
+            'Date': dayData.date || `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(dayData.day).padStart(2, '0')}`,
+            'Day': dayData.day,
+            'Weekday': weekday,
+            'Status': dayData.status || '—',
+            'In Time': inT || '—',
+            'Out Time': outT || '—',
+            'Working Hours': hrs,
+            'Late Check-in': dayData.isLate ? 'Yes' : 'No',
+            'Remarks': dayData.holidayName || (dayData.leaveInfo ? `${dayData.leaveInfo.leaveType} (${dayData.leaveInfo.reason || dayData.leaveInfo.leaveCategory})` : '') || ''
+          });
+        });
+      });
+
+      // 3. Create Workbook & Sheets
+      const wb = XLSX.utils.book_new();
+
+      // Sheet 1: Main Payroll With Attendance Summary
+      const ws1 = XLSX.utils.json_to_sheet(mainSheetData);
+      const cols1 = [
+        { wch: 8 },  // Sr No
+        { wch: 14 }, // Employee ID
+        { wch: 22 }, // Employee Name
+        { wch: 10 }, // Year
+        { wch: 14 }, // Month
+        { wch: 16 }, // Gross Salary
+        { wch: 14 }, // LOP
+        { wch: 8 },  // PD
+        { wch: 8 },  // UD
+        { wch: 16 }, // Final Pay
+        { wch: 14 }, // Present Days
+        { wch: 14 }, // Absent Days
+        { wch: 16 }, // Half Days (Count)
+        { wch: 14 }, // Paid Leaves
+        { wch: 14 }, // Unpaid Leaves
+        { wch: 12 }, // Week Offs
+        { wch: 12 }, // Holidays
+        { wch: 20 }, // Total Working Hours
+        { wch: 38 }, // On Leaves
+        { wch: 38 }, // Half Days
+        { wch: 30 }  // Absents
+      ];
+      ws1['!cols'] = cols1;
+      XLSX.utils.book_append_sheet(wb, ws1, 'Payroll with Attendance');
+
+      // Sheet 2: Leaves & Absences Log (Only Non-Present Records)
+      if (dailyLogRowList.length > 0) {
+        const ws2 = XLSX.utils.json_to_sheet(dailyLogRowList);
+        ws2['!cols'] = [
+          { wch: 8 },  // Sr No
+          { wch: 14 }, // Employee ID
+          { wch: 22 }, // Employee Name
+          { wch: 14 }, // Date
+          { wch: 8 },  // Day
+          { wch: 10 }, // Weekday
+          { wch: 16 }, // Status
+          { wch: 14 }, // In Time
+          { wch: 14 }, // Out Time
+          { wch: 14 }, // Working Hours
+          { wch: 14 }, // Late Check-in
+          { wch: 30 }  // Remarks
+        ];
+        XLSX.utils.book_append_sheet(wb, ws2, 'Leaves & Absences Log');
+      }
+
+      // Download file
+      XLSX.writeFile(wb, `Payroll_With_Attendance_${monthName}_${selectedYear}.xlsx`);
+    } catch (err) {
+      console.error('Error exporting payroll with attendance:', err);
+      alert('Error exporting payroll with attendance: ' + err.message);
+    } finally {
+      setExportingWithAttendance(false);
     }
   };
 
@@ -2728,9 +3021,9 @@ function Payroll() {
                     <svg style={{ position: 'relative', zIndex: 1 }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                     <span style={{ position: 'relative', zIndex: 1 }}>Export Excel</span>
                   </button>
-                  <button onClick={handleExportPayroll} className="payroll-export-btn" style={{ padding: '7px 12px', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '8px', fontSize: '11px', fontWeight: 600, color: '#475569', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <button onClick={handleExportPayrollWithAttendance} disabled={exportingWithAttendance} className="payroll-export-btn" style={{ padding: '7px 12px', border: '1px solid #bbf7d0', background: '#f0fdf4', borderRadius: '8px', fontSize: '11px', fontWeight: 600, color: '#166534', cursor: exportingWithAttendance ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 1px 2px rgba(22,163,74,0.08)' }} title="Export monthly payroll with attendance summary (leaves, half-days, absents)">
                     <svg style={{ position: 'relative', zIndex: 1 }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                    <span style={{ position: 'relative', zIndex: 1 }}>Export PDF</span>
+                    <span style={{ position: 'relative', zIndex: 1 }}>{exportingWithAttendance ? 'Exporting...' : 'Export with Attendance'}</span>
                   </button>
                 </div>
               </div>
@@ -2845,8 +3138,8 @@ function Payroll() {
                       const lateCheckIns = payroll.attendance?.lateCheckIns || 0;
                       const halfDays = payroll.workingDays?.halfDay || 0;
                       const unpaidDays = absentDays + (halfDays * 0.5);
-                      // Standard fixed 30-day base for all months
-                      const paidDays = Math.max(0, 30 - unpaidDays);
+                      const eligibleDays = getEligibleDays(selectedYear, selectedMonth, payroll.employee?.joiningDate, payroll.workingDays?.total);
+                      const paidDays = Math.max(0, eligibleDays - unpaidDays);
 
                       const allowances = payroll.salaryDetails?.allowances || {};
                       const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);

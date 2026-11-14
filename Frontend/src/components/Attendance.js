@@ -89,15 +89,40 @@ const WeekOffDropdown = ({ currentStatus, onChange }) => {
 
   const handleSelect = (status) => {
     setIsOpen(false);
-    if (status !== 'Week Off') {
-      onChange(status);
-    }
+    onChange(status);
   };
+
+  const getBadgeStyle = (status) => {
+    const s = (status || '').toLowerCase();
+    if (s === 'present') {
+      return { background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' };
+    }
+    if (s === 'absent') {
+      return { background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca' };
+    }
+    if (s === 'half-day' || s === 'halfday') {
+      return { background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a' };
+    }
+    return { background: '#f3f4f6', color: '#6b7280', border: '1px solid #e5e7eb' };
+  };
+
+  const badgeStyle = getBadgeStyle(currentStatus);
+  const options = [
+    { label: 'Week Off', value: 'Week Off', color: '#6b7280', hoverBg: '#f3f4f6' },
+    { label: 'Present', value: 'Present', color: '#15803d', hoverBg: '#dcfce7' },
+    { label: 'Half-day', value: 'Half-day', color: '#d97706', hoverBg: '#fef3c7' },
+    { label: 'Absent', value: 'Absent', color: '#dc2626', hoverBg: '#fee2e2' }
+  ];
+
+  const availableOptions = options.filter(
+    opt => opt.value.toLowerCase() !== (currentStatus || '').toLowerCase()
+  );
 
   return (
     <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-block' }}>
       <div
         onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+        title="Click to change Week Off status"
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -106,16 +131,16 @@ const WeekOffDropdown = ({ currentStatus, onChange }) => {
           borderRadius: '20px',
           fontSize: '11px',
           fontWeight: 700,
-          background: '#f3f4f6',
-          color: '#6b7280',
+          background: badgeStyle.background,
+          color: badgeStyle.color,
           cursor: 'pointer',
-          border: '1px solid #e5e7eb',
+          border: badgeStyle.border,
           transition: 'all 0.2s',
           boxShadow: isOpen ? '0 0 0 2px rgba(107, 114, 128, 0.2)' : 'none',
           lineHeight: 1.3
         }}
       >
-        {currentStatus}
+        {currentStatus || 'Week Off'}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
           <polyline points="6 9 12 15 18 9"></polyline>
         </svg>
@@ -130,45 +155,36 @@ const WeekOffDropdown = ({ currentStatus, onChange }) => {
           marginTop: '6px',
           background: '#fff',
           borderRadius: '8px',
-          boxShadow: '0 4px 15px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05)',
+          boxShadow: '0 4px 15px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.08)',
           border: '1px solid #e2e8f0',
           padding: '4px',
           zIndex: 50,
-          minWidth: '100px',
+          minWidth: '105px',
           display: 'flex',
           flexDirection: 'column',
           gap: '2px'
         }}>
-          {currentStatus !== 'Week Off' && (
+          {availableOptions.map(opt => (
             <div
-              onClick={(e) => { e.stopPropagation(); handleSelect('Week Off'); }}
-              style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600, color: '#6b7280', cursor: 'pointer', borderRadius: '6px', textAlign: 'center', transition: 'background 0.2s' }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
+              key={opt.value}
+              onClick={(e) => { e.stopPropagation(); handleSelect(opt.value); }}
+              style={{
+                padding: '6px 12px',
+                fontSize: '11px',
+                fontWeight: 600,
+                color: opt.color,
+                cursor: 'pointer',
+                borderRadius: '6px',
+                textAlign: 'center',
+                transition: 'background 0.2s',
+                whiteSpace: 'nowrap'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = opt.hoverBg}
               onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
             >
-              Week Off
+              {opt.label}
             </div>
-          )}
-          {currentStatus !== 'Present' && (
-            <div
-              onClick={(e) => { e.stopPropagation(); handleSelect('Present'); }}
-              style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600, color: '#15803d', cursor: 'pointer', borderRadius: '6px', textAlign: 'center', transition: 'background 0.2s' }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#dcfce7'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              Present
-            </div>
-          )}
-          {currentStatus !== 'Absent' && (
-            <div
-              onClick={(e) => { e.stopPropagation(); handleSelect('Absent'); }}
-              style={{ padding: '6px 12px', fontSize: '11px', fontWeight: 600, color: '#dc2626', cursor: 'pointer', borderRadius: '6px', textAlign: 'center', transition: 'background 0.2s' }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#fee2e2'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              Absent
-            </div>
-          )}
+          ))}
         </div>
       )}
     </div>
@@ -953,11 +969,14 @@ function Attendance() {
         employeeId: detailedData.employee._id,
         date: formattedDate,
         status: apiStatus,
-        editReason: 'Updated status for Week Off day'
+        editReason: `Updated status for Week Off day to ${newStatus}`
       });
 
       // Refetch to get the updated detailed data
       fetchDetailedAttendance(detailedData.employee._id, detailMonth, detailYear);
+      if (typeof fetchAttendance === 'function') {
+        fetchAttendance();
+      }
     } catch (error) {
       console.error('Error updating week off status:', error);
       alert(error.response?.data?.message || 'Error updating status');
@@ -3849,7 +3868,17 @@ function Attendance() {
                       </thead>
                       <tbody>
                         {detailedData.dailyBreakdown && detailedData.dailyBreakdown.length > 0 ? (
-                          detailedData.dailyBreakdown.map((day, index) => (
+                          detailedData.dailyBreakdown.map((day, index) => {
+                            const dayOfWeek = new Date(detailYear, detailMonth - 1, day.day).getDay();
+                            const woCount = detailedData?.shiftInfo?.weekoff ?? 1;
+                            const isDayWeekOff = Boolean(
+                              day.isWeekOff ||
+                              day.status === 'Week Off' ||
+                              (woCount >= 1 && dayOfWeek === 0) ||
+                              (woCount >= 2 && dayOfWeek === 6) ||
+                              (woCount >= 3 && dayOfWeek === 5)
+                            );
+                            return (
                             <tr
                               key={day.day}
                               style={{
@@ -3977,7 +4006,7 @@ function Attendance() {
                                 borderBottom: '1px solid #e2e8f0',
                                 textAlign: 'center',
                               }}>
-                                <span style={(day.status === 'Week Off' || day.isWeekOff) && canUpdateAttendance ? { display: 'inline-flex', justifyContent: 'center', alignItems: 'center' } : {
+                                <span style={isDayWeekOff && canUpdateAttendance ? { display: 'inline-flex', justifyContent: 'center', alignItems: 'center' } : {
                                   display: 'inline-flex',
                                   flexDirection: 'column',
                                   alignItems: 'center',
@@ -4029,7 +4058,7 @@ function Attendance() {
                                       }
                                     }}
                                   >
-                                    {(day.status === 'Week Off' || day.isWeekOff) && canUpdateAttendance ? (
+                                    {isDayWeekOff && canUpdateAttendance ? (
                                       <WeekOffDropdown
                                         currentStatus={day.status}
                                         onChange={(status) => handleWeekOffStatusChange(day.day, status)}
@@ -4101,7 +4130,8 @@ function Attendance() {
                                 </span>
                               </td>
                             </tr>
-                          ))
+                            );
+                          })
                         ) : (
                           <tr>
                             <td

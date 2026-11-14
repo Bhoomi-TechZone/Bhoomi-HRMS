@@ -5,7 +5,6 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import './Dashboard.css';
 import './AdminDasboard.css';
-import SalesDashboard from './SalesDashboard';
 import {
   CheckCircle2, XCircle, Trophy, FolderOpen, Clock, Target, Megaphone,
   Hourglass, Umbrella, ClipboardList, BarChart2, Building2, Pin,
@@ -310,8 +309,16 @@ function Dashboard() {
     presentDays: 0,
     absentDays: 0,
     halfDays: 0,
-    lateMarks: 0
+    lateMarks: 0,
+    workingDaysCount: 0,
+    weekly: {
+      labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4+'],
+      present: [0, 0, 0, 0],
+      absent: [0, 0, 0, 0],
+      halfDay: [0, 0, 0, 0]
+    }
   });
+  const [attendanceChartTab, setAttendanceChartTab] = useState('monthly');
   const [monthlyStats, setMonthlyStats] = useState({
     currentMonth: {
       present: 0,
@@ -774,7 +781,16 @@ function Dashboard() {
         personalAttendanceChartInstance.current.destroy();
       }
     };
-  }, [personalAttendance, loading, refreshing]);
+  }, [personalAttendance, attendanceChartTab, loading, refreshing, user]);
+
+  // Dynamically update attendance statistics when employee changes month on the calendar card
+  useEffect(() => {
+    const isAdmin = (user?.role?.name || (typeof user?.role === 'string' ? user?.role : '') || '').toLowerCase().trim() === 'admin';
+    if (!isAdmin && !loading && cardCalDate) {
+      fetchPersonalAttendance(cardCalDate);
+      fetchMonthlyStats(cardCalDate);
+    }
+  }, [cardCalDate]);
 
   const fetchTodayAttendance = async () => {
     try {
@@ -1175,14 +1191,16 @@ function Dashboard() {
         const elapsed = Math.floor((Date.now() - new Date(activeBreak.startTime).getTime()) / 1000);
         setBreakTimer(elapsed);
 
-        // Only enforce limit on standard breaks (Lunch / Refreshment), ignore 'Other' breaks
-        if (activeBreak.breakType === 'Other') return;
+        // Only enforce limit on standard breaks (Lunch / Refreshment), ignore 'Other' or 'Briefing/Meeting'
+        const actBT = String(activeBreak.breakType || activeBreak.type || '').toLowerCase();
+        if (actBT === 'other' || actBT.includes('meeting') || actBT.includes('briefing')) return;
 
         // Calculate past completed standard breaks taken today
         let pastStandardBreakSecs = 0;
         if (todayAttendance?.breaks) {
           todayAttendance.breaks.forEach(b => {
-            if (b.breakType === 'Other') return;
+            const bTypeStr = String(b.breakType || b.type || '').toLowerCase();
+            if (bTypeStr === 'other' || bTypeStr.includes('meeting') || bTypeStr.includes('briefing')) return;
             // Skip the current active break in the array to avoid double-counting
             if (b.startTime === activeBreak.startTime && !b.endTime) return;
             if (b.duration) {
@@ -1241,15 +1259,25 @@ function Dashboard() {
     };
   }, [activeBreak, breakLimits]);
 
-  const fetchPersonalAttendance = async () => {
+  const fetchPersonalAttendance = async (targetDate) => {
     try {
-      const response = await api.get('/attendance/my-stats');
+      const d = targetDate || cardCalDate || new Date();
+      const m = d.getMonth();
+      const y = d.getFullYear();
+      const response = await api.get(`/attendance/my-stats?month=${m}&year=${y}`);
       if (response.data) {
         setPersonalAttendance({
           presentDays: response.data.presentDays || 0,
           absentDays: response.data.absentDays || 0,
           halfDays: response.data.halfDays || 0,
-          lateMarks: response.data.lateMarks || 0
+          lateMarks: response.data.lateMarks || 0,
+          workingDaysCount: response.data.workingDaysCount || 0,
+          weekly: response.data.weekly || {
+            labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4+'],
+            present: [0, 0, 0, 0],
+            absent: [0, 0, 0, 0],
+            halfDay: [0, 0, 0, 0]
+          }
         });
       }
     } catch (error) {
@@ -1258,14 +1286,24 @@ function Dashboard() {
         presentDays: 0,
         absentDays: 0,
         halfDays: 0,
-        lateMarks: 0
+        lateMarks: 0,
+        workingDaysCount: 0,
+        weekly: {
+          labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4+'],
+          present: [0, 0, 0, 0],
+          absent: [0, 0, 0, 0],
+          halfDay: [0, 0, 0, 0]
+        }
       });
     }
   };
 
-  const fetchMonthlyStats = async () => {
+  const fetchMonthlyStats = async (targetDate) => {
     try {
-      const response = await api.get('/attendance/monthly-stats');
+      const d = targetDate || cardCalDate || new Date();
+      const m = d.getMonth();
+      const y = d.getFullYear();
+      const response = await api.get(`/attendance/monthly-stats?month=${m}&year=${y}`);
       if (response.data) {
         setMonthlyStats(response.data);
       }
@@ -1460,91 +1498,181 @@ function Dashboard() {
         // Fallback
       }
 
-      personalAttendanceChartInstance.current = new window.Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: ['Present Days', 'Absent Days', 'Half Days', 'Late Marks'],
-          datasets: [
-            {
-              label: 'Number of Days',
-              data: [
-                personalAttendance.presentDays,
-                personalAttendance.absentDays,
-                personalAttendance.halfDays,
-                personalAttendance.lateMarks
-              ],
-              borderColor: '#8b5cf6',
-              backgroundColor: purpleGradient,
-              borderWidth: 3.2,
-              tension: 0.42,
-              fill: true,
-              pointBackgroundColor: ['#6366f1', '#8b5cf6', '#a855f7', '#7c3aed'],
-              pointBorderColor: '#ffffff',
-              pointBorderWidth: 2.5,
-              pointRadius: 7,
-              pointHoverRadius: 9,
-              pointHoverBackgroundColor: '#7c3aed',
-              pointHoverBorderColor: '#ffffff',
-              pointHoverBorderWidth: 3
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              display: false
-            },
-            tooltip: {
-              backgroundColor: 'rgba(15, 23, 42, 0.88)',
-              padding: 12,
-              titleFont: {
-                size: 13,
-                weight: '600'
+      if (attendanceChartTab === 'weekly') {
+        const weeklyLabels = personalAttendance.weekly?.labels || ['Week 1', 'Week 2', 'Week 3', 'Week 4+'];
+        const presentData = personalAttendance.weekly?.present || [0, 0, 0, 0];
+        const absentData = personalAttendance.weekly?.absent || [0, 0, 0, 0];
+        const halfDayData = personalAttendance.weekly?.halfDay || [0, 0, 0, 0];
+
+        const maxVal = Math.max(...presentData, ...absentData, ...halfDayData, 4);
+
+        personalAttendanceChartInstance.current = new window.Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: weeklyLabels,
+            datasets: [
+              {
+                label: 'Present Days',
+                data: presentData,
+                backgroundColor: '#10b981',
+                borderRadius: 5,
+                barThickness: 14,
               },
-              bodyFont: {
-                size: 13
+              {
+                label: 'Absent Days',
+                data: absentData,
+                backgroundColor: '#ef4444',
+                borderRadius: 5,
+                barThickness: 14,
               },
-              cornerRadius: 8,
-              callbacks: {
-                label: function (context) {
-                  return 'Days: ' + context.parsed.y;
-                }
+              {
+                label: 'Half Days',
+                data: halfDayData,
+                backgroundColor: '#f59e0b',
+                borderRadius: 5,
+                barThickness: 14,
               }
-            }
+            ]
           },
-          scales: {
-            y: {
-              beginAtZero: true,
-              ticks: {
-                stepSize: 1,
-                font: {
-                  size: 11
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                display: true,
+                position: 'top',
+                align: 'end',
+                labels: {
+                  boxWidth: 10,
+                  boxHeight: 10,
+                  borderRadius: 3,
+                  useBorderRadius: true,
+                  padding: 10,
+                  font: { size: 11, weight: '600' }
                 }
               },
-              grid: {
-                color: 'rgba(0, 0, 0, 0.05)'
+              tooltip: {
+                backgroundColor: 'rgba(15, 23, 42, 0.88)',
+                padding: 12,
+                cornerRadius: 8,
+                callbacks: {
+                  label: function (context) {
+                    return `${context.dataset.label}: ${context.parsed.y} day(s)`;
+                  }
+                }
               }
             },
-            x: {
-              ticks: {
-                font: {
-                  size: 11,
-                  weight: '500'
-                }
+            scales: {
+              y: {
+                beginAtZero: true,
+                suggestedMax: maxVal + 1,
+                ticks: {
+                  stepSize: 1,
+                  font: { size: 11 }
+                },
+                grid: { color: 'rgba(0, 0, 0, 0.05)' }
               },
-              grid: {
-                display: false
+              x: {
+                ticks: { font: { size: 11, weight: '500' } },
+                grid: { display: false }
               }
             }
-          },
-          interaction: {
-            intersect: false,
-            mode: 'index'
           }
-        }
-      });
+        });
+      } else {
+        const dataValues = [
+          personalAttendance.presentDays || 0,
+          personalAttendance.absentDays || 0,
+          personalAttendance.halfDays || 0,
+          personalAttendance.lateMarks || 0
+        ];
+        const maxVal = Math.max(...dataValues, 5);
+
+        personalAttendanceChartInstance.current = new window.Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: ['Present Days', 'Absent Days', 'Half Days', 'Late Marks'],
+            datasets: [
+              {
+                label: 'Number of Days',
+                data: dataValues,
+                borderColor: '#8b5cf6',
+                backgroundColor: purpleGradient,
+                borderWidth: 3.2,
+                tension: 0.42,
+                fill: true,
+                pointBackgroundColor: ['#10b981', '#ef4444', '#f59e0b', '#6366f1'],
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 2.5,
+                pointRadius: 7,
+                pointHoverRadius: 9,
+                pointHoverBackgroundColor: '#7c3aed',
+                pointHoverBorderColor: '#ffffff',
+                pointHoverBorderWidth: 3
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                display: false
+              },
+              tooltip: {
+                backgroundColor: 'rgba(15, 23, 42, 0.88)',
+                padding: 12,
+                titleFont: {
+                  size: 13,
+                  weight: '600'
+                },
+                bodyFont: {
+                  size: 13
+                },
+                cornerRadius: 8,
+                callbacks: {
+                  label: function (context) {
+                    const totalWorking = personalAttendance.workingDaysCount || (personalAttendance.presentDays + personalAttendance.absentDays + personalAttendance.halfDays);
+                    const val = context.parsed.y;
+                    const pct = totalWorking > 0 ? ` (${Math.round((val / totalWorking) * 100)}%)` : '';
+                    return `${context.label}: ${val} days${pct}`;
+                  }
+                }
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                suggestedMax: maxVal + 2,
+                ticks: {
+                  stepSize: 1,
+                  font: {
+                    size: 11
+                  }
+                },
+                grid: {
+                  color: 'rgba(0, 0, 0, 0.05)'
+                }
+              },
+              x: {
+                ticks: {
+                  font: {
+                    size: 11,
+                    weight: '500'
+                  }
+                },
+                grid: {
+                  display: false
+                }
+              }
+            },
+            interaction: {
+              intersect: false,
+              mode: 'index'
+            }
+          }
+        });
+      }
     }
   };
 
@@ -2057,15 +2185,23 @@ function Dashboard() {
   };
 
   // Calculate trend changes
-  const presentChange = calculateChange(monthlyStats.currentMonth.present, monthlyStats.lastMonth.present);
-  const absentChange = calculateChange(monthlyStats.currentMonth.absent, monthlyStats.lastMonth.absent);
+  const currentPresentVal = (personalAttendance?.presentDays !== undefined && personalAttendance?.presentDays !== null)
+    ? personalAttendance.presentDays
+    : (monthlyStats.currentMonth.present || 0);
+
+  const currentAbsentVal = (personalAttendance?.absentDays !== undefined && personalAttendance?.absentDays !== null)
+    ? personalAttendance.absentDays
+    : (monthlyStats.currentMonth.absent || 0);
+
+  const presentChange = calculateChange(currentPresentVal, monthlyStats.lastMonth.present);
+  const absentChange = calculateChange(currentAbsentVal, monthlyStats.lastMonth.absent);
   const projectsChange = calculateChange(monthlyStats.currentMonth.assignedProjects, monthlyStats.lastMonth.assignedProjects);
   const completedChange = calculateChange(monthlyStats.currentMonth.completedProjects, monthlyStats.lastMonth.completedProjects);
   const leavesChange = calculateChange(monthlyStats.currentMonth.totalLeaves, monthlyStats.lastMonth.totalLeaves);
 
   // Get trend directions
-  const presentTrend = getTrendDirection(monthlyStats.currentMonth.present, monthlyStats.lastMonth.present);
-  const absentTrend = getTrendDirection(monthlyStats.currentMonth.absent, monthlyStats.lastMonth.absent);
+  const presentTrend = getTrendDirection(currentPresentVal, monthlyStats.lastMonth.present);
+  const absentTrend = getTrendDirection(monthlyStats.lastMonth.absent, currentAbsentVal); // for absent: fewer than previous is up (good)
   const projectsTrend = getTrendDirection(monthlyStats.currentMonth.assignedProjects, monthlyStats.lastMonth.assignedProjects);
   const completedTrend = getTrendDirection(monthlyStats.currentMonth.completedProjects, monthlyStats.lastMonth.completedProjects);
   const leavesTrend = getTrendDirection(monthlyStats.currentMonth.totalLeaves, monthlyStats.lastMonth.totalLeaves);
@@ -2073,7 +2209,7 @@ function Dashboard() {
   const employeeHighlights = [
     {
       label: 'Total Present',
-      value: monthlyStats.currentMonth.present || 0,
+      value: currentPresentVal,
       icon: CheckCircle2,
       tone: 'emerald',
       sub: 'this month',
@@ -2082,7 +2218,7 @@ function Dashboard() {
     },
     {
       label: 'Total Absent',
-      value: monthlyStats.currentMonth.absent || 0,
+      value: currentAbsentVal,
       icon: XCircle,
       tone: 'rose',
       sub: 'this month',
@@ -2114,7 +2250,7 @@ function Dashboard() {
     });
   };
 
-  const renderActiveBreakScreen = () => {
+      const renderActiveBreakScreen = () => {
     if (!activeBreak || hideBreakScreen) return null;
     const activeStatus = calculateActiveBreakStatus(activeBreak, shiftConfig, breakTimer);
     const breakTitle = activeBreak.breakType || activeBreak.type || 'Break';
@@ -2132,242 +2268,132 @@ function Dashboard() {
           width: '100vw',
           height: '100vh',
           zIndex: 99999999,
-          background: 'rgba(15, 23, 42, 0.68)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
+          background: 'rgba(255, 255, 255, 0.58)',
+          backdropFilter: 'blur(10px) saturate(140%)',
+          WebkitBackdropFilter: 'blur(10px) saturate(140%)',
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '20px',
+          padding: '24px 20px',
           boxSizing: 'border-box',
-          animation: 'fadeIn 0.25s ease-out'
+          animation: 'fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+          userSelect: 'none'
         }}
       >
         <div
           style={{
-            background: '#ffffff',
-            borderRadius: '24px',
-            padding: '36px 36px 32px',
-            boxShadow: isExceeded
-              ? '0 25px 60px -12px rgba(239, 68, 68, 0.25), 0 0 0 1px rgba(254, 202, 202, 0.8), 0 10px 30px rgba(15, 23, 42, 0.12)'
-              : '0 25px 60px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(226, 232, 240, 0.9), 0 10px 30px rgba(15, 23, 42, 0.08)',
-            textAlign: 'center',
-            maxWidth: '480px',
+            maxWidth: '600px',
             width: '100%',
-            position: 'relative',
-            boxSizing: 'border-box',
-            overflow: 'hidden'
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif"
           }}
         >
-          {/* Top color highlight accent bar */}
+                    {/* On Break Badge */}
           <div
             style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              height: '5px',
-              background: isExceeded
-                ? 'linear-gradient(90deg, #ef4444 0%, #dc2626 100%)'
-                : 'linear-gradient(90deg, #f59e0b 0%, #d97706 100%)'
-            }}
-          />
-
-          {/* Icon Badge */}
-          <div
-            style={{
-              width: '64px',
-              height: '64px',
-              borderRadius: '20px',
-              margin: '0 auto 16px',
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              background: isExceeded ? '#fef2f2' : '#fffbeb',
-              border: `1.5px solid ${isExceeded ? '#fecaca' : '#fde68a'}`,
-              boxShadow: isExceeded
-                ? '0 4px 16px rgba(239, 68, 68, 0.16)'
-                : '0 4px 16px rgba(245, 158, 11, 0.14)'
-            }}
-          >
-            {isExceeded ? (
-              <AlertTriangle size={30} color="#dc2626" strokeWidth={2.2} />
-            ) : (
-              <Clock size={30} color="#d97706" strokeWidth={2.2} />
-            )}
-          </div>
-
-          {/* Overline & Title */}
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              textTransform: 'uppercase',
+              gap: '7px',
+              padding: '5px 14px',
+              borderRadius: '999px',
+              background: 'rgba(234, 179, 8, 0.12)',
+              border: '1px solid rgba(234, 179, 8, 0.28)',
+              color: '#b45309',
+              fontSize: '11.5px',
+              fontWeight: 600,
               letterSpacing: '0.08em',
-              color: isExceeded ? '#dc2626' : '#64748b',
-              display: 'block',
-              marginBottom: '4px'
+              textTransform: 'uppercase',
+              marginBottom: '12px',
+              boxShadow: '0 1px 6px rgba(234, 179, 8, 0.08)'
             }}
           >
-            {isExceeded ? 'Break Limit Exceeded' : 'Active Break Session'}
-          </span>
-          <h2
-            style={{
-              fontSize: '23px',
-              color: '#0f172a',
-              margin: '0 0 8px 0',
-              fontWeight: 800,
-              letterSpacing: '-0.02em',
-              lineHeight: 1.25
-            }}
-          >
-            On Break: {displayType}
-          </h2>
-
-          {/* Schedule Window Pill */}
-          {activeStatus?.scheduledStartTime && activeStatus?.scheduledEndTime && (
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '4px 12px',
-                borderRadius: '999px',
-                background: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                fontSize: '12px',
-                color: '#475569',
-                fontWeight: 500,
-                margin: '0 auto 16px'
-              }}
-            >
-              <span>Window: <strong>{activeStatus.scheduledStartTime} – {activeStatus.scheduledEndTime}</strong></span>
-              {activeStatus.allowedDurationMins ? (
-                <>
-                  <span style={{ color: '#cbd5e1' }}>•</span>
-                  <span>Allowed: <strong>{activeStatus.allowedDurationMins}m</strong></span>
-                </>
-              ) : null}
-            </div>
-          )}
-
-          {/* High-End Timer Display Box */}
-          <div
-            style={{
-              background: isExceeded ? '#fef2f2' : '#f8fafc',
-              border: `1.5px solid ${isExceeded ? '#fecaca' : '#e2e8f0'}`,
-              borderRadius: '16px',
-              padding: '16px 20px',
-              margin: '0 0 18px',
-              textAlign: 'center'
-            }}
-          >
-            <div
-              style={{
-                fontSize: '48px',
-                fontWeight: 700,
-                color: isExceeded ? '#dc2626' : '#0f172a',
-                fontVariantNumeric: 'tabular-nums',
-                letterSpacing: '-0.5px',
-                fontFamily: "'Inter', monospace",
-                lineHeight: 1
-              }}
-            >
-              {new Date(breakTimer * 1000).toISOString().substr(11, 8)}
-            </div>
             <span
               style={{
-                fontSize: '11px',
-                fontWeight: 600,
-                color: isExceeded ? '#b91c1c' : '#94a3b8',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                marginTop: '6px',
-                display: 'block'
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                background: '#10b981',
+                boxShadow: '0 0 8px #10b981'
               }}
-            >
-              Elapsed Break Time
-            </span>
+            />
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            <span>On Break</span>
           </div>
 
-          {/* Status Message Box */}
-          {activeStatus && (
-            <div style={{ marginBottom: '22px' }}>
-              {activeStatus.isExceeded ? (
-                <div
-                  style={{
-                    background: '#fef2f2',
-                    border: '1px solid #fca5a5',
-                    color: '#b91c1c',
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    fontSize: '13px',
-                    lineHeight: '1.45',
-                    textAlign: 'center'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontWeight: 800 }}>
-                    <AlertTriangle size={15} color="#dc2626" />
-                    <span>EXCEEDED BY {activeStatus.exceededMinutes} MIN!</span>
-                  </div>
-                  <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#991b1b', marginTop: '3px', display: 'block' }}>
-                    This extra time is automatically deducted from your working hours.
-                  </span>
-                </div>
-              ) : (
-                <div
-                  style={{
-                    background: '#ecfdf5',
-                    border: '1px solid #a7f3d0',
-                    color: '#047857',
-                    padding: '8px 16px',
-                    borderRadius: '999px',
-                    fontSize: '12.5px',
-                    fontWeight: 600,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <Clock size={13} color="#059669" />
-                  <span>Time Remaining: <strong>{formatDurationHMS(activeStatus.remainingSecs)}</strong></span>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Break Name */}
+          <h1
+            style={{
+              fontSize: '32px',
+              color: '#eab308',
+              margin: '0 0 16px 0',
+              fontWeight: 600,
+              letterSpacing: '-0.02em',
+              lineHeight: 1.2
+            }}
+          >
+            {displayType}
+          </h1>
+
+          {/* Clean Professional Timer */}
+          <div
+            style={{
+              fontSize: '84px',
+              fontWeight: 300,
+              color: isExceeded ? '#dc2626' : '#0f172a',
+              fontVariantNumeric: 'tabular-nums',
+              letterSpacing: '-0.02em',
+              lineHeight: 1,
+              marginBottom: '36px',
+              textShadow: '0 2px 20px rgba(0, 0, 0, 0.03)'
+            }}
+          >
+            {new Date(breakTimer * 1000).toISOString().substr(11, 8)}
+          </div>
 
           {/* Action Buttons */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', flexWrap: 'wrap' }}>
             <button
               type="button"
               onClick={handleBreakEnd}
               style={{
-                height: '44px',
-                padding: '0 20px',
+                height: '46px',
+                padding: '0 30px',
                 background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
                 color: '#ffffff',
                 border: 'none',
-                borderRadius: '12px',
-                fontSize: '14px',
-                fontWeight: 700,
+                borderRadius: '999px',
+                fontSize: '14.5px',
+                fontWeight: 600,
                 cursor: 'pointer',
-                boxShadow: '0 4px 14px rgba(239, 68, 68, 0.35)',
+                boxShadow: '0 6px 18px -3px rgba(239, 68, 68, 0.38)',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '8px',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.18s ease',
+                letterSpacing: '-0.1px'
               }}
               onMouseEnter={e => {
-                e.currentTarget.style.background = 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)';
-                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.transform = 'translateY(-1px) scale(1.02)';
+                e.currentTarget.style.boxShadow = '0 10px 22px -3px rgba(239, 68, 68, 0.48)';
               }}
               onMouseLeave={e => {
-                e.currentTarget.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
-                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.transform = 'translateY(0) scale(1)';
+                e.currentTarget.style.boxShadow = '0 6px 18px -3px rgba(239, 68, 68, 0.38)';
               }}
             >
-              <LogOut size={16} />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
               <span>End Break Now</span>
             </button>
 
@@ -2375,33 +2401,42 @@ function Dashboard() {
               type="button"
               onClick={() => setHideBreakScreen(true)}
               style={{
-                height: '44px',
-                padding: '0 16px',
-                background: '#ffffff',
+                height: '46px',
+                padding: '0 24px',
+                background: 'rgba(255, 255, 255, 0.85)',
+                backdropFilter: 'blur(8px)',
                 color: '#475569',
-                border: '1.5px solid #cbd5e1',
-                borderRadius: '12px',
-                fontSize: '13.5px',
-                fontWeight: 600,
+                border: '1.5px solid rgba(203, 213, 225, 0.8)',
+                borderRadius: '999px',
+                fontSize: '14px',
+                fontWeight: 500,
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '6px',
-                transition: 'all 0.15s ease'
+                gap: '7px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+                transition: 'all 0.18s ease'
               }}
               onMouseEnter={e => {
-                e.currentTarget.style.background = '#f8fafc';
+                e.currentTarget.style.background = '#ffffff';
                 e.currentTarget.style.borderColor = '#94a3b8';
-                e.currentTarget.style.color = '#1e293b';
+                e.currentTarget.style.color = '#0f172a';
+                e.currentTarget.style.transform = 'translateY(-1px)';
               }}
               onMouseLeave={e => {
-                e.currentTarget.style.background = '#ffffff';
-                e.currentTarget.style.borderColor = '#cbd5e1';
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.85)';
+                e.currentTarget.style.borderColor = 'rgba(203, 213, 225, 0.8)';
                 e.currentTarget.style.color = '#475569';
+                e.currentTarget.style.transform = 'translateY(0)';
               }}
             >
-              <Minimize2 size={15} />
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="4 14 10 14 10 20" />
+                <polyline points="20 10 14 10 14 4" />
+                <line x1="14" y1="10" x2="21" y2="3" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
               <span>Minimize</span>
             </button>
           </div>
@@ -2481,58 +2516,212 @@ function Dashboard() {
             <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>Break Type <span style={{ color: '#ef4444' }}>*</span></label>
             <BreakDropdown
               value={breakForm.type}
-              onChange={val => setBreakForm({ ...breakForm, type: val })}
+              onChange={val => {
+                const isMeeting = val === 'Briefing/Meeting' || val === 'Breifing/Meeting' || (typeof val === 'string' && (val.toLowerCase().includes('meeting') || val.toLowerCase().includes('briefing')));
+                setBreakForm({ ...breakForm, type: val, reason: isMeeting ? breakForm.reason : '' });
+              }}
               disabledOptions={disabledBreakOptions}
             />
           </div>
 
-          <div style={{ marginBottom: '24px' }}>
-            <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>
-              Reason <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 400 }}>(Optional)</span>
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Lunch with team, Quick refreshment"
-              value={breakForm.reason}
-              onChange={e => setBreakForm({ ...breakForm, reason: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '11px 14px',
-                border: '1.5px solid #e2e8f0',
-                borderRadius: '10px',
-                fontSize: '14px',
-                outline: 'none',
-                boxSizing: 'border-box',
-                transition: 'border 0.2s ease',
-                fontFamily: 'inherit'
-              }}
-              onFocus={e => e.target.style.borderColor = '#f59e0b'}
-              onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-            />
-          </div>
+          {/* Only show Reason field when Break Type is Briefing/Meeting */}
+          {(() => {
+            const isMeeting = breakForm.type === 'Briefing/Meeting' || breakForm.type === 'Breifing/Meeting' || (typeof breakForm.type === 'string' && (breakForm.type.toLowerCase().includes('meeting') || breakForm.type.toLowerCase().includes('briefing')));
+            if (!isMeeting) return null;
+            return (
+              <div style={{ marginBottom: '24px' }}>
+                <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>
+                  Reason <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Enter briefing agenda / meeting details..."
+                  value={breakForm.reason}
+                  onChange={e => setBreakForm({ ...breakForm, reason: e.target.value })}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '11px 14px',
+                    border: '1.5px solid #e2e8f0',
+                    borderRadius: '10px',
+                    fontSize: '14px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    transition: 'border 0.2s ease',
+                    fontFamily: 'inherit',
+                    resize: 'vertical'
+                  }}
+                  onFocus={e => e.target.style.borderColor = '#f59e0b'}
+                  onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                />
+              </div>
+            );
+          })()}
 
-          {/* Schedule status helper text */}
+          {/* Professional Break Window Status Card */}
           {(() => {
             const currentType = breakForm.type;
             const ws = getBreakWindowStatus(currentType, shiftConfig);
             if (!ws) return null;
-            if (ws.isAnytime) {
-              return (
-                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#166534', marginBottom: '16px' }}>
-                  ⚡ This break can be taken anytime during your shift. Allowed: {ws.allowedDurationMins} mins.
-                </div>
-              );
+
+            const isMeeting = currentType === 'Briefing/Meeting' || currentType === 'Breifing/Meeting' || (typeof currentType === 'string' && (currentType.toLowerCase().includes('meeting') || currentType.toLowerCase().includes('briefing')));
+            const startStr = ws.startStr || ws.startTime || ws.info?.startStr || '';
+            const endStr = ws.endStr || ws.endTime || ws.info?.endStr || '';
+            const isAnytime = ws.isAnytime || ws.windowStatus === 'anytime' || startStr === 'Anytime';
+            const durMins = ws.allowedDurationMins || ws.allowedMins || (currentType === 'Lunch Break' ? 30 : 15);
+
+            let statusCfg = {
+              bg: '#f0fdf4',
+              border: '#bbf7d0',
+              titleColor: '#166534',
+              bodyColor: '#15803d',
+              badgeBg: '#dcfce7',
+              badgeColor: '#166534',
+              badgeBorder: '#86efac',
+              iconBg: '#dcfce7',
+              iconColor: '#16a34a',
+              title: 'Break Window Active',
+              badge: `${startStr} – ${endStr}`,
+              showBadge: Boolean(startStr && endStr && !isAnytime),
+              message: ws.message || `Scheduled window is currently open. Allowed duration: ${durMins} mins.`,
+              icon: 'check'
+            };
+
+            if (isAnytime || isMeeting) {
+              statusCfg = {
+                bg: '#f0f9ff',
+                border: '#bae6fd',
+                titleColor: '#0369a1',
+                bodyColor: '#0284c7',
+                badgeBg: '#e0f2fe',
+                badgeColor: '#0369a1',
+                badgeBorder: '#7dd3fc',
+                iconBg: '#e0f2fe',
+                iconColor: '#0284c7',
+                title: 'Flexible Break Schedule',
+                badge: 'Anytime in Shift',
+                showBadge: true,
+                message: isMeeting 
+                  ? 'Briefing / Meeting can be started at any time during your shift. Reason is required below.'
+                  : `This break is flexible and can be taken at any time during your active shift (${durMins} mins allowed).`,
+                icon: 'zap'
+              };
+            } else if (ws.windowStatus === 'early') {
+              statusCfg = {
+                bg: '#fffbeb',
+                border: '#fde68a',
+                titleColor: '#92400e',
+                bodyColor: '#b45309',
+                badgeBg: '#fef3c7',
+                badgeColor: '#92400e',
+                badgeBorder: '#fcd34d',
+                iconBg: '#fef3c7',
+                iconColor: '#d97706',
+                title: 'Break Window Not Started',
+                badge: `${startStr} – ${endStr}`,
+                showBadge: Boolean(startStr && endStr),
+                message: `This break window opens at ${startStr}. You cannot start this break until ${startStr}.`,
+                icon: 'clock'
+              };
+            } else if (ws.windowStatus === 'ended' || !ws.canStart) {
+              statusCfg = {
+                bg: '#fef2f2',
+                border: '#fecaca',
+                titleColor: '#991b1b',
+                bodyColor: '#b91c1c',
+                badgeBg: '#fee2e2',
+                badgeColor: '#991b1b',
+                badgeBorder: '#fca5a5',
+                iconBg: '#fee2e2',
+                iconColor: '#dc2626',
+                title: 'Outside Scheduled Window',
+                badge: `${startStr} – ${endStr}`,
+                showBadge: Boolean(startStr && endStr),
+                message: `Scheduled window is ${startStr} – ${endStr}. You cannot start this break outside this window.`,
+                icon: 'alert'
+              };
             }
-            if (ws.canStart) {
-              return (
-                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#166534', marginBottom: '16px' }}>
-                  ✓ Scheduled Window: {ws.startTime} – {ws.endTime} ({ws.allowedDurationMins} mins allowed).
-                </div>
-              );
-            }
+
             return (
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', color: '#991b1b', marginBottom: '16px' }}>
-                ⚠️ Outside scheduled window ({ws.startTime} – {ws.endTime}). You cannot start this break right now.
+              <div style={{
+                margin: '16px 0 18px 0',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                background: statusCfg.bg,
+                border: `1px solid ${statusCfg.border}`,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+              }}>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  background: statusCfg.iconBg,
+                  color: statusCfg.iconColor,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  marginTop: '1px'
+                }}>
+                  {statusCfg.icon === 'check' && (
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                      <polyline points="22 4 12 14.01 9 11.01" />
+                    </svg>
+                  )}
+                  {statusCfg.icon === 'clock' && (
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  )}
+                  {statusCfg.icon === 'alert' && (
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                  )}
+                  {statusCfg.icon === 'zap' && (
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                    </svg>
+                  )}
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '3px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: statusCfg.titleColor, letterSpacing: '-0.2px' }}>
+                      {statusCfg.title}
+                    </span>
+                    {statusCfg.showBadge && (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        padding: '2px 8px',
+                        borderRadius: '999px',
+                        background: statusCfg.badgeBg,
+                        color: statusCfg.badgeColor,
+                        border: `1px solid ${statusCfg.badgeBorder}`
+                      }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        {statusCfg.badge}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '12px', color: statusCfg.bodyColor, lineHeight: 1.45, fontWeight: 500 }}>
+                    {statusCfg.message}
+                  </div>
+                </div>
               </div>
             );
           })()}
@@ -2546,11 +2735,14 @@ function Dashboard() {
             </button>
             {(() => {
               const ws = getBreakWindowStatus(breakForm.type, shiftConfig);
-              const isDisabled = ws && !ws.canStart;
+              const isMeeting = breakForm.type === 'Briefing/Meeting' || breakForm.type === 'Breifing/Meeting' || (typeof breakForm.type === 'string' && (breakForm.type.toLowerCase().includes('meeting') || breakForm.type.toLowerCase().includes('briefing')));
+              const isReasonMissing = isMeeting && !breakForm.reason?.trim();
+              const isDisabled = (ws && !ws.canStart) || isReasonMissing;
               return (
                 <button
                   onClick={handleBreakStart}
                   disabled={isDisabled}
+                  title={isReasonMissing ? 'Please enter a reason for the Briefing/Meeting' : ''}
                   style={{
                     padding: '10px 22px',
                     border: 'none',
@@ -2694,14 +2886,14 @@ function Dashboard() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px', padding: '16px 20px', background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
             <div>
               <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Time Remaining</div>
-              <div style={{ fontSize: '28px', color: remainingSecs === 0 ? '#ef4444' : '#0f172a', fontWeight: 800, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.5px' }}>
+              <div style={{ fontSize: '30px', color: remainingSecs === 0 ? '#ef4444' : '#0f172a', fontWeight: 300, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em', lineHeight: 1.15 }}>
                 {formatDurationHMS(remainingSecs)}
               </div>
               <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px', fontWeight: 500 }}>Limit: {limitMins} mins total allowed</div>
             </div>
             <div style={{ borderLeft: '1px solid #e2e8f0', paddingLeft: '20px' }}>
               <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>Total Time Taken</div>
-              <div style={{ fontSize: '28px', color: '#059669', fontWeight: 800, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.5px' }}>
+              <div style={{ fontSize: '30px', color: '#059669', fontWeight: 300, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif", fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em', lineHeight: 1.15 }}>
                 {formatDurationHMS(totalBreakSecs)}
               </div>
               <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px', fontWeight: 500 }}>Format: HH:MM:SS</div>
@@ -2817,7 +3009,7 @@ function Dashboard() {
                       </div>
 
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '13.5px', fontWeight: 800, color: isOngoing ? '#16a34a' : '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
+                        <div style={{ fontSize: '13.5px', fontWeight: 500, color: isOngoing ? '#16a34a' : '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
                           {formatDurationHMS(durSecs)}
                         </div>
                         {(() => {
@@ -4229,19 +4421,82 @@ const getTotalBreakDurationString = () => {
                   </section>
 
                   <section className="employee-dashboard-panels" style={{ flex: 1 }}>
-                    <article className="employee-panel employee-chart-panel" style={{ display: 'flex', flexDirection: 'column' }}>
-                      <div className="employee-card-head">
+                    <article className="employee-panel employee-chart-panel" style={{ display: 'flex', flexDirection: 'column', background: '#ffffff', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 2px 10px rgba(0,0,0,0.03)', padding: '18px 20px', overflow: 'hidden' }}>
+                      <div className="employee-card-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                         <div>
-                          <span className="employee-overline dark">Attendance Statistic</span>
-
+                          <span className="employee-overline dark" style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block' }}>Attendance Statistic</span>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                            {cardCalDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                          </span>
                         </div>
-                        <span className="employee-panel-badge" style={{ background: '#f5f3ff', color: '#7c3aed', borderColor: '#ddd6fe' }}>Monthly</span>
+                        {/* Dynamic View Toggle Tabs */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#f1f5f9', padding: '3px', borderRadius: '8px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setAttendanceChartTab('monthly')}
+                            style={{
+                              padding: '4px 11px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              background: attendanceChartTab === 'monthly' ? '#7c3aed' : 'transparent',
+                              color: attendanceChartTab === 'monthly' ? '#ffffff' : '#64748b',
+                              boxShadow: attendanceChartTab === 'monthly' ? '0 2px 6px rgba(124, 58, 237, 0.25)' : 'none'
+                            }}
+                          >
+                            Overview
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAttendanceChartTab('weekly')}
+                            style={{
+                              padding: '4px 11px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              background: attendanceChartTab === 'weekly' ? '#7c3aed' : 'transparent',
+                              color: attendanceChartTab === 'weekly' ? '#ffffff' : '#64748b',
+                              boxShadow: attendanceChartTab === 'weekly' ? '0 2px 6px rgba(124, 58, 237, 0.25)' : 'none'
+                            }}
+                          >
+                            Weekly
+                          </button>
+                        </div>
                       </div>
-                      <div className="chart-wrapper employee-chart-wrapper" style={{ flex: 1, height: 'auto' }}>
+
+                      {/* Dynamic Stat Summary Badges */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '12px', padding: '7px 12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#047857', fontWeight: 600 }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+                          Present: {personalAttendance.presentDays || 0}
+                        </div>
+                        <div style={{ width: '1px', height: '12px', background: '#cbd5e1' }} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#be123c', fontWeight: 600 }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+                          Absent: {personalAttendance.absentDays || 0}
+                        </div>
+                        <div style={{ width: '1px', height: '12px', background: '#cbd5e1' }} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#b45309', fontWeight: 600 }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
+                          Half Day: {personalAttendance.halfDays || 0}
+                        </div>
+                        <div style={{ width: '1px', height: '12px', background: '#cbd5e1' }} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#4338ca', fontWeight: 600 }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#6366f1' }} />
+                          Late: {personalAttendance.lateMarks || 0}
+                        </div>
+                      </div>
+
+                      <div className="chart-wrapper employee-chart-wrapper" style={{ flex: 1, minHeight: '220px', position: 'relative' }}>
                         <canvas ref={personalAttendanceChartRef}></canvas>
                       </div>
                     </article>
-
                   </section>
 
                 </>

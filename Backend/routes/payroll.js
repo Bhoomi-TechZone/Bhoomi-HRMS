@@ -44,8 +44,61 @@ function calculateMonthlyAttendanceMetrics({
   let totalWorkingHours = 0;
   const dailyBreakdown = [];
 
+  // Parse employee joining date
+  let joiningDateObj = null;
+  const rawJoining = employee?.joiningDate || employee?.dateOfJoining || employee?.hireDate;
+  if (rawJoining) {
+    const jd = new Date(rawJoining);
+    if (!isNaN(jd.getTime())) {
+      joiningDateObj = new Date(jd.getFullYear(), jd.getMonth(), jd.getDate());
+      joiningDateObj.setHours(0, 0, 0, 0);
+    }
+  }
+
+  // Pre-joining days and eligible base days in this month
+  let preJoiningDays = 0;
+  let eligibleBaseDays = 30;
+  if (joiningDateObj) {
+    const joinYear = joiningDateObj.getFullYear();
+    const joinMonth = joiningDateObj.getMonth() + 1;
+    const joinDay = joiningDateObj.getDate();
+
+    if (joinYear > year || (joinYear === year && joinMonth > month)) {
+      preJoiningDays = totalDaysInMonth;
+      eligibleBaseDays = 0;
+    } else if (joinYear === year && joinMonth === month) {
+      preJoiningDays = Math.max(0, joinDay - 1);
+      eligibleBaseDays = Math.max(0, 30 - preJoiningDays);
+    } else {
+      preJoiningDays = 0;
+      eligibleBaseDays = 30;
+    }
+  }
+
   for (let day = 1; day <= totalDaysInMonth; day++) {
     const currentDate = new Date(year, month - 1, day);
+    currentDate.setHours(0, 0, 0, 0);
+
+    // If day is before employee joining date, mark as '-' and do NOT mark absent / cause LOP
+    const isBeforeJoining = joiningDateObj ? (currentDate < joiningDateObj) : false;
+    if (isBeforeJoining) {
+      dailyBreakdown.push({
+        day: day,
+        date: currentDate.toISOString().split('T')[0],
+        status: '—',
+        isWeekend: false,
+        isWeekOff: false,
+        isHoliday: false,
+        leaveInfo: null,
+        loginTime: null,
+        logoutTime: null,
+        workingHours: 0,
+        isLate: false,
+        shift: 'General'
+      });
+      continue;
+    }
+
     const dayOfWeek = currentDate.getDay();
 
     let applicableWeekoffDays = defaultWeekoffDays;
@@ -173,6 +226,7 @@ function calculateMonthlyAttendanceMetrics({
       date: currentDate.toISOString().split('T')[0],
       status: dayStatus,
       isWeekend: isWeekOff,
+      isWeekOff: isWeekOff,
       isHoliday: isHoliday,
       leaveInfo: leaveInfo ? {
         leaveType: leaveInfo.leaveType,
@@ -196,7 +250,10 @@ function calculateMonthlyAttendanceMetrics({
 
   for (let d = 1; d <= totalDaysInMonth; d++) {
     const cDate = new Date(year, month - 1, d);
+    cDate.setHours(0, 0, 0, 0);
     if (cDate > today) break;
+    // Skip dates before employee's joining date
+    if (joiningDateObj && cDate < joiningDateObj) continue;
 
     const dOfWeek = cDate.getDay();
     let appWeekoff = defaultWeekoffDays;
@@ -254,14 +311,17 @@ function calculateMonthlyAttendanceMetrics({
     }
   }
 
-  const TOTAL_PAYROLL_DAYS = 30;
+  const TOTAL_PAYROLL_DAYS = eligibleBaseDays;
   const totalUnpaidDays = Number((absentCount + unpaidLeaveDays + (halfDayCount * 0.5)).toFixed(1));
   const isMonthCompleted = endDate <= today;
   let paidDaysForCalc;
   if (isMonthCompleted) {
-    paidDaysForCalc = Math.min(TOTAL_PAYROLL_DAYS, Math.max(0, TOTAL_PAYROLL_DAYS - totalUnpaidDays));
+    paidDaysForCalc = Math.min(eligibleBaseDays, Math.max(0, eligibleBaseDays - totalUnpaidDays));
   } else {
-    const elapsedDays = Math.min(TOTAL_PAYROLL_DAYS, today.getDate());
+    let elapsedDays = Math.min(30, today.getDate());
+    if (preJoiningDays > 0) {
+      elapsedDays = Math.max(0, elapsedDays - preJoiningDays);
+    }
     paidDaysForCalc = Math.min(elapsedDays, Math.max(0, elapsedDays - totalUnpaidDays));
   }
 
@@ -512,7 +572,7 @@ router.get('/', auth, checkPermission('payroll', 'read'), async (req, res) => {
     }
 
     const payrolls = await Payroll.find(query)
-      .populate('employee', 'firstName lastName employeeId department designation email bankName accountNumber ifscCode panNumber')
+      .populate('employee', 'firstName lastName employeeId department designation email joiningDate bankName accountNumber ifscCode panNumber')
       .populate('processedBy', 'firstName lastName')
       .populate('salaryStructure')
       .sort({ createdAt: -1 });
@@ -648,6 +708,12 @@ router.post('/calculate', auth, checkPermission('payroll', 'create'), async (req
     const generatedPayrolls = [];
 
     for (const employee of employees) {
+      // Skip employee if they join after this pay period
+      if (employee.joiningDate) {
+        const jd = new Date(employee.joiningDate);
+        if (!isNaN(jd.getTime()) && jd > endDate) continue;
+      }
+
       // Get salary structure
       const structure = await SalaryStructure.findOne({
         $or: [{ employee: employee._id }, { employee: employee._id.toString() }],
@@ -1344,6 +1410,12 @@ router.post('/recalculate-selected', auth, checkPermission('payroll', 'create'),
     const regeneratedPayrolls = [];
 
     for (const employee of employees) {
+      // Skip employee if they join after this pay period
+      if (employee.joiningDate) {
+        const jd = new Date(employee.joiningDate);
+        if (!isNaN(jd.getTime()) && jd > endDate) continue;
+      }
+
       const structure = await SalaryStructure.findOne({
         $or: [{ employee: employee._id }, { employee: employee._id.toString() }],
         isActive: true
@@ -1543,6 +1615,157 @@ router.get('/summary/stats', auth, checkPermission('payroll', 'read'), async (re
   }
 });
 
+// Get detailed attendance breakdown for all employees for a month (bulk)
+router.get('/employee-attendance-bulk', auth, async (req, res) => {
+  try {
+    const hasAdminAccess = req.user.role?.permissions?.find(
+      p => p.module === 'payroll' && p.actions.includes('read')
+    );
+    const fullAccessRoles = ['Admin', 'HR', 'HR Manager', 'Director'];
+    const hasRoleAccess = req.user.role && fullAccessRoles.includes(req.user.role.name);
+
+    if (!hasAdminAccess && !hasRoleAccess) {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+
+    const { month, year } = req.query;
+    if (!month || !year) {
+      return res.status(400).json({ message: 'Month and year are required' });
+    }
+
+    const targetMonth = parseInt(month, 10);
+    const targetYear = parseInt(year, 10);
+
+    const startDate = new Date(targetYear, targetMonth - 1, 1);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(targetYear, targetMonth, 0);
+    endDate.setHours(23, 59, 59, 999);
+    const totalDaysInMonth = endDate.getDate();
+
+    const todayNow = new Date();
+    const today = new Date(todayNow.getFullYear(), todayNow.getMonth(), todayNow.getDate());
+
+    const ShiftConfig = require('../models/ShiftConfig');
+    const Holiday = require('../models/Holiday');
+    const Leave = require('../models/Leave');
+    const SalaryRule = require('../models/SalaryRule');
+
+    const allShiftConfigs = await ShiftConfig.find({});
+    const defaultShift = allShiftConfigs.find(s => s.type === 'morning') || allShiftConfigs[0];
+    const defaultWeekoffDays = defaultShift?.weekoff || 1;
+
+    const holidays = await Holiday.find({
+      date: { $gte: startDate, $lte: endDate }
+    });
+    const holidayDays = new Set(
+      holidays.map(h => new Date(h.date).getDate())
+    );
+
+    const allLeaves = await Leave.find({
+      status: { $nin: ['rejected', 'Rejected'] },
+      startDate: { $lte: endDate },
+      endDate: { $gte: startDate }
+    });
+
+    const allAttendances = await Attendance.find({
+      date: { $gte: startDate, $lte: endDate }
+    }).sort({ date: 1 });
+
+    const rules = await SalaryRule.find({ status: 'active' });
+    const lateCheckInRule = rules.find(r => r.ruleType === 'Late Check-in');
+    const lateThreshold = lateCheckInRule ? lateCheckInRule.threshold : "10:10 AM";
+
+    const employees = await User.find({ isActive: true }).select('firstName lastName employeeId department designation shiftType shiftHistory joiningDate');
+
+    const leavesByEmp = new Map();
+    allLeaves.forEach(leave => {
+      if (!leave.employee) return;
+      const empKey = leave.employee.toString();
+      if (!leavesByEmp.has(empKey)) leavesByEmp.set(empKey, []);
+      leavesByEmp.get(empKey).push(leave);
+    });
+
+    const attendancesByEmp = new Map();
+    allAttendances.forEach(att => {
+      if (!att.employee) return;
+      const empKey = att.employee.toString();
+      if (!attendancesByEmp.has(empKey)) attendancesByEmp.set(empKey, []);
+      attendancesByEmp.get(empKey).push(att);
+    });
+
+    const results = {};
+
+    for (const emp of employees) {
+      const empId = emp._id.toString();
+      const empLeaves = leavesByEmp.get(empId) || [];
+      const empAttendances = attendancesByEmp.get(empId) || [];
+
+      const leaveMap = new Map();
+      empLeaves.forEach(leave => {
+        let cur = new Date(Math.max(new Date(leave.startDate).getTime(), startDate.getTime()));
+        const last = new Date(Math.min(new Date(leave.endDate).getTime(), endDate.getTime()));
+        cur.setHours(0, 0, 0, 0);
+        last.setHours(23, 59, 59, 999);
+
+        while (cur <= last) {
+          leaveMap.set(cur.getDate(), {
+            leaveType: leave.leaveType,
+            leaveCategory: leave.leaveCategory,
+            durationType: leave.durationType,
+            reason: leave.reason,
+            status: leave.status
+          });
+          cur.setDate(cur.getDate() + 1);
+        }
+      });
+
+      const metrics = calculateMonthlyAttendanceMetrics({
+        employee: emp,
+        totalDaysInMonth,
+        year: targetYear,
+        month: targetMonth,
+        today,
+        endDate,
+        defaultWeekoffDays,
+        allShiftConfigs,
+        holidayDays,
+        leaveMap,
+        attendances: empAttendances,
+        lateCheckInRule,
+        lateThreshold,
+        perDaySalary: 0
+      });
+
+      results[empId] = {
+        summary: {
+          totalDays: 30,
+          presentDays: metrics.presentCount,
+          halfDays: metrics.halfDayCount,
+          absentDays: metrics.absentCount,
+          leaveDays: Number((metrics.paidLeaveDays + metrics.unpaidLeaveDays).toFixed(1)),
+          paidLeaveDays: Number(metrics.paidLeaveDays.toFixed(1)),
+          unpaidLeaveDays: Number(metrics.unpaidLeaveDays.toFixed(1)),
+          weekOffDays: metrics.weekOffCount,
+          holidayDays: metrics.holidayCount,
+          lateDays: metrics.lateCount,
+          totalWorkingHours: Math.round(metrics.totalWorkingHours * 100) / 100
+        },
+        dailyBreakdown: metrics.dailyBreakdown
+      };
+    }
+
+    res.json({
+      month: targetMonth,
+      year: targetYear,
+      totalDaysInMonth,
+      data: results
+    });
+  } catch (error) {
+    console.error('Error fetching bulk employee attendance:', error);
+    res.status(500).json({ message: 'Error fetching bulk attendance breakdown' });
+  }
+});
+
 // Get detailed employee attendance breakdown for a month
 router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
   try {
@@ -1565,7 +1788,7 @@ router.get('/employee-attendance/:employeeId', auth, async (req, res) => {
     }
 
     // Get employee details
-    const employee = await User.findById(employeeId).select('firstName lastName employeeId department designation shiftType shiftHistory');
+    const employee = await User.findById(employeeId).select('firstName lastName employeeId department designation shiftType shiftHistory joiningDate');
     if (!employee) {
       return res.status(404).json({ message: 'Employee not found' });
     }
@@ -2178,4 +2401,169 @@ router.get('/accounting/journal', auth, checkPermission('payroll', 'read'), asyn
   }
 });
 
+async function recalculateDraftPayrollForEmployee(employeeId, month, year) {
+  try {
+    const draftPayroll = await Payroll.findOne({
+      $or: [{ employee: employeeId }, { employee: employeeId.toString() }],
+      'payPeriod.month': parseInt(month, 10),
+      'payPeriod.year': parseInt(year, 10),
+      status: 'draft'
+    });
+    if (!draftPayroll) return null;
+
+    const employee = await User.findById(employeeId);
+    if (!employee) return null;
+
+    const structure = await SalaryStructure.findOne({
+      $or: [{ employee: employee._id }, { employee: employee._id.toString() }],
+      isActive: true
+    });
+    if (!structure) return null;
+
+    const rules = await SalaryRule.find({ status: 'active' });
+    const lateCheckInRule = rules.find(r => r.ruleType === 'Late Check-in');
+    const lateThreshold = lateCheckInRule ? lateCheckInRule.threshold : '10:10 AM';
+
+    const startDate = new Date(year, month - 1, 1);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(year, month, 0);
+    endDate.setHours(23, 59, 59, 999);
+    const totalDaysInMonth = endDate.getDate();
+
+    const todayNow = new Date();
+    const today = new Date(todayNow.getFullYear(), todayNow.getMonth(), todayNow.getDate());
+
+    const allShiftConfigs = await ShiftConfig.find({});
+    const holidays = await Holiday.find({ date: { $gte: startDate, $lte: endDate } });
+    const holidayDays = new Set(holidays.map(h => new Date(h.date).getDate()));
+
+    const shiftConfig = await ShiftConfig.findOne({ type: employee.shiftType || 'morning' });
+    const defaultWeekoffDays = shiftConfig ? shiftConfig.weekoff : 1;
+
+    const leaves = await Leave.find({
+      employee: employee._id,
+      status: 'approved',
+      $or: [
+        { startDate: { $gte: startDate, $lte: endDate } },
+        { endDate: { $gte: startDate, $lte: endDate } },
+        { startDate: { $lte: startDate }, endDate: { $gte: endDate } }
+      ]
+    });
+
+    const leaveMap = new Map();
+    leaves.forEach(leave => {
+      let cur = new Date(Math.max(new Date(leave.startDate).getTime(), startDate.getTime()));
+      const last = new Date(Math.min(new Date(leave.endDate).getTime(), endDate.getTime()));
+      cur.setHours(0, 0, 0, 0);
+      last.setHours(23, 59, 59, 999);
+      while (cur <= last) {
+        leaveMap.set(cur.getDate(), {
+          leaveType: leave.leaveType,
+          leaveCategory: leave.leaveCategory,
+          durationType: leave.durationType,
+          reason: leave.reason,
+          status: leave.status
+        });
+        cur.setDate(cur.getDate() + 1);
+      }
+    });
+
+    const attendances = await Attendance.find({
+      employee: employee._id,
+      date: { $gte: startDate, $lte: endDate }
+    }).sort({ date: 1 });
+
+    const totalAllowances = 
+      (structure.allowances?.hra || 0) + 
+      (structure.allowances?.da || 0) + 
+      (structure.allowances?.conveyance || 0) + 
+      (structure.allowances?.food || 0) + 
+      (structure.allowances?.transport || 0) + 
+      (structure.allowances?.medical || 0) + 
+      (structure.allowances?.other || 0);
+
+    const grossSalaryAmt = structure.basicSalary + totalAllowances;
+    const perDaySalary = grossSalaryAmt / 30;
+
+    const metrics = calculateMonthlyAttendanceMetrics({
+      employee,
+      totalDaysInMonth,
+      year: parseInt(year, 10),
+      month: parseInt(month, 10),
+      today,
+      endDate,
+      defaultWeekoffDays,
+      allShiftConfigs,
+      holidayDays,
+      leaveMap,
+      attendances,
+      lateCheckInRule,
+      lateThreshold,
+      perDaySalary
+    });
+
+    const stdDeductions = structure.deductions || {};
+    const totalStdDeductions =
+      (stdDeductions.pf || 0) +
+      (stdDeductions.esi || 0) +
+      (stdDeductions.tax || 0) +
+      (stdDeductions.loan || 0) +
+      (stdDeductions.advance || 0) +
+      (stdDeductions.other || 0);
+
+    const customComponentsToApply = draftPayroll.customComponents || [];
+    const bonusToApply = draftPayroll.salaryDetails?.bonus || 0;
+    const penaltyToApply = draftPayroll.salaryDetails?.deductions?.penalty || 0;
+
+    const customAdditions = customComponentsToApply
+      .filter(c => (c.type || '').toLowerCase() === 'addition')
+      .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+    const customDeductions = customComponentsToApply
+      .filter(c => (c.type || '').toLowerCase() === 'deduction')
+      .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+
+    const lateDeduction = 0;
+    const penaltyDeductions = Number((lateDeduction + penaltyToApply).toFixed(2));
+    const totalDeductionsCalc = Number((metrics.totalLossOfPay + totalStdDeductions + penaltyDeductions + customDeductions).toFixed(2));
+    const calculatedGross = Number((grossSalaryAmt + customAdditions).toFixed(2));
+    const currentNet = Number(Math.max(0, metrics.earnedGross + bonusToApply + customAdditions - totalStdDeductions - penaltyDeductions - customDeductions).toFixed(2));
+
+    draftPayroll.workingDays = {
+      total: metrics.TOTAL_PAYROLL_DAYS,
+      present: metrics.presentCount,
+      halfDay: metrics.halfDayCount,
+      leave: Number((metrics.paidLeaveDays + metrics.unpaidLeaveDays).toFixed(1)),
+      weekoff: metrics.elapsedWeekOffCount,
+      holiday: metrics.elapsedHolidayCount,
+      absent: Number((metrics.absentCount + metrics.unpaidLeaveDays).toFixed(1))
+    };
+    draftPayroll.leaves = {
+      paid: Number(metrics.paidLeaveDays.toFixed(1)),
+      unpaid: Number(metrics.unpaidLeaveDays.toFixed(1))
+    };
+    draftPayroll.attendance = {
+      lateCheckIns: metrics.lateCount,
+      present: metrics.presentCount,
+      total: metrics.TOTAL_PAYROLL_DAYS
+    };
+    if (!draftPayroll.salaryDetails) draftPayroll.salaryDetails = {};
+    if (!draftPayroll.salaryDetails.deductions) draftPayroll.salaryDetails.deductions = {};
+    draftPayroll.salaryDetails.deductions.lossOfPay = metrics.totalLossOfPay;
+    draftPayroll.salaryDetails.grossSalary = calculatedGross;
+    draftPayroll.salaryDetails.totalDeductions = totalDeductionsCalc;
+    draftPayroll.salaryDetails.netSalary = currentNet;
+
+    await draftPayroll.save();
+    return draftPayroll;
+  } catch (err) {
+    console.error('[recalculateDraftPayrollForEmployee] Error:', err);
+    return null;
+  }
+}
+
+router.calculateMonthlyAttendanceMetrics = calculateMonthlyAttendanceMetrics;
+router.recalculateDraftPayrollForEmployee = recalculateDraftPayrollForEmployee;
+
 module.exports = router;
+module.exports.calculateMonthlyAttendanceMetrics = calculateMonthlyAttendanceMetrics;
+module.exports.recalculateDraftPayrollForEmployee = recalculateDraftPayrollForEmployee;

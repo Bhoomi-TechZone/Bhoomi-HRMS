@@ -68,10 +68,10 @@ io.use(async (socket, next) => {
 io.on('connection', (socket) => {
   const employeeId = socket.user.employeeId;
   const userId = socket.user._id.toString();
-  
+
   socket.join(`user:${userId}`);
   socket.join(`employee:${employeeId}`);
-  
+
   console.log(`[Socket.IO] Socket Connected for employee: ${employeeId} (${socket.id})`);
 
   // Check if this is the employee's first socket connection
@@ -135,9 +135,9 @@ io.on('connection', (socket) => {
     const session = await getSession(data.sessionId);
     if (session) {
       if (socket.user.employeeId === session.employeeId) {
-         io.to(`user:${session.adminId}`).emit('webrtc:ice-candidate', data);
+        io.to(`user:${session.adminId}`).emit('webrtc:ice-candidate', data);
       } else {
-         io.to(`employee:${session.employeeId}`).emit('webrtc:ice-candidate', data);
+        io.to(`employee:${session.employeeId}`).emit('webrtc:ice-candidate', data);
       }
     }
   });
@@ -150,21 +150,21 @@ io.on('connection', (socket) => {
 
   const agentEvents = ['monitoring:reject', 'monitoring:accepted', 'monitoring:started', 'monitoring:error', 'monitoring:stopped'];
   agentEvents.forEach(event => {
-      socket.on(event, async (data) => {
-          const session = await MonitoringSession.findOne({ sessionId: data.sessionId });
-          if (session) {
-              if (event === 'monitoring:started') session.status = 'ACTIVE';
-              if (event === 'monitoring:stopped') { session.status = 'STOPPED'; session.endedAt = new Date(); sessionCache.delete(data.sessionId); }
-              if (event === 'monitoring:reject' || event === 'monitoring:error') { session.status = 'FAILED'; session.errorReason = data.reason || data.message; session.endedAt = new Date(); sessionCache.delete(data.sessionId); }
-              await session.save();
-              io.to(`user:${session.adminId.toString()}`).emit(event, data);
-          }
-      });
+    socket.on(event, async (data) => {
+      const session = await MonitoringSession.findOne({ sessionId: data.sessionId });
+      if (session) {
+        if (event === 'monitoring:started') session.status = 'ACTIVE';
+        if (event === 'monitoring:stopped') { session.status = 'STOPPED'; session.endedAt = new Date(); sessionCache.delete(data.sessionId); }
+        if (event === 'monitoring:reject' || event === 'monitoring:error') { session.status = 'FAILED'; session.errorReason = data.reason || data.message; session.endedAt = new Date(); sessionCache.delete(data.sessionId); }
+        await session.save();
+        io.to(`user:${session.adminId.toString()}`).emit(event, data);
+      }
+    });
   });
-  
+
   socket.on('disconnect', () => {
     console.log(`[Socket.IO] Socket Disconnected for employee: ${employeeId} (${socket.id})`);
-    
+
     // Check if this was the last active connection for the employee
     const room = io.sockets.adapter.rooms.get(`employee:${employeeId}`);
     const hasRemainingSockets = room && room.size > 0;
@@ -293,6 +293,7 @@ app.use("/api/webhook", require("./routes/webhooks")); // Alias for singular
 app.use("/api/meta-leads", require("./routes/meta-leads"));
 app.use("/api/website-leads", require("./routes/website-leads"));
 app.use("/api/ai-chats", require("./routes/ai-chats").router);
+app.use("/api/aisensy", require("./routes/aisensy"));
 app.use("/api/recruitment", require("./routes/recruitment"));
 app.use("/api/agent", require("./routes/agent"));
 app.use("/api/notifications", require("./routes/notifications"));

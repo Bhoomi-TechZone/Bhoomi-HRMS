@@ -1066,7 +1066,8 @@ function MyPayslip() {
                                                 const lateCheckIns = payroll.attendance?.lateCheckIns || 0;
                                                 const halfDays = Number(payroll.workingDays?.halfDay ?? payroll.workingDays?.halfDays) || 0;
                                                 const unpaidDays = absentDays + (halfDays * 0.5);
-                                                const paidDays = Math.max(0, 30 - unpaidDays);
+                                                const totalEligible = payroll.workingDays?.total !== undefined ? payroll.workingDays.total : 30;
+                                                const paidDays = Math.max(0, totalEligible - unpaidDays);
 
                                                 const allowances = payroll.salaryDetails?.allowances || {};
                                                 const totalAllowances = (allowances.hra || 0) + (allowances.da || 0) + (allowances.conveyance || 0) + (allowances.food || 0) + (allowances.transport || 0) + (allowances.medical || 0) + (allowances.other || 0);

@@ -980,9 +980,9 @@ router.get('/export/excel', auth, async (req, res) => {
           isActive: true,
           role: { $ne: adminRole?._id }
         })
-          .select('firstName lastName employeeId department designation shiftType')
+          .select('firstName lastName employeeId department designation shiftType joiningDate')
           .sort({ firstName: 1, lastName: 1 })
-        : [await User.findById(req.user._id).select('firstName lastName employeeId department designation shiftType')];
+        : [await User.findById(req.user._id).select('firstName lastName employeeId department designation shiftType joiningDate')];
 
       if (allEmployees.length === 0 || !allEmployees[0]) {
         return res.status(404).json({ message: 'No employee attendance found' });
@@ -1171,6 +1171,15 @@ router.get('/export/excel', auth, async (req, res) => {
         const shiftConfig = shiftConfigMap[emp.shiftType || 'morning'];
         const weekoffDays = shiftConfig?.weekoff || 1;
 
+        let empJoiningDate = null;
+        if (emp.joiningDate) {
+          const jd = new Date(emp.joiningDate);
+          if (!isNaN(jd.getTime())) {
+            empJoiningDate = new Date(jd.getFullYear(), jd.getMonth(), jd.getDate());
+            empJoiningDate.setHours(0, 0, 0, 0);
+          }
+        }
+
         let presentCount = 0;
         let halfDayCount = 0;
         let weekOffCount = 0;
@@ -1240,8 +1249,8 @@ router.get('/export/excel', auth, async (req, res) => {
             leaveCount++;
           } else if (isHoliday) {
             weekOffCount++;
-          } else if (isFuture) {
-            // Future dates don't count as absent
+          } else if (isFuture || (empJoiningDate && date < empJoiningDate)) {
+            // Future dates and pre-joining dates don't count as absent
           } else if (isWeekOff) {
             weekOffCount++;
           } else {
@@ -1492,7 +1501,7 @@ router.get('/export/excel', auth, async (req, res) => {
             }
           } else if (isHoliday) {
             status = 'H';
-          } else if (isFuture) {
+          } else if (isFuture || (empJoiningDate && date < empJoiningDate)) {
             status = '—';
           } else if ((weekoffDays >= 1 && dayOfWeek === 0) || (weekoffDays >= 2 && dayOfWeek === 6) || (weekoffDays >= 3 && dayOfWeek === 5)) {
             status = 'WO';
@@ -1787,92 +1796,183 @@ router.get('/today', auth, async (req, res) => {
   }
 });
 
-// Get personal attendance statistics for current month
+// Helper to compute employee attendance stats, accounting for shift weekoffs, holidays, and approved leaves
+async function calculateEmployeeAttendanceSummary(userId, year, month, userShiftType) {
+  const User = require('../models/User');
+  const ShiftConfig = require('../models/ShiftConfig');
+  const Holiday = require('../models/Holiday');
+  const Leave = require('../models/Leave');
+
+  let weekoffCount = 1;
+  try {
+    let shiftType = userShiftType;
+    if (!shiftType) {
+      const u = await User.findById(userId).select('shiftType');
+      shiftType = u?.shiftType;
+    }
+    const shiftConfig = await ShiftConfig.findOne({ type: shiftType });
+    if (shiftConfig && shiftConfig.weekoff) {
+      weekoffCount = shiftConfig.weekoff;
+    }
+  } catch (err) {
+    console.error('Error fetching shift config:', err);
+  }
+
+  const firstDay = new Date(year, month, 1);
+  firstDay.setHours(0, 0, 0, 0);
+  const lastDay = new Date(year, month + 1, 0);
+  lastDay.setHours(23, 59, 59, 999);
+
+  const now = new Date();
+  const isCurrentMonth = (now.getFullYear() === year && now.getMonth() === month);
+  const evaluationEndDate = isCurrentMonth
+    ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+    : lastDay;
+
+  // 1. Fetch Attendance records
+  const attendance = await Attendance.find({
+    employee: userId,
+    date: { $gte: firstDay, $lte: lastDay }
+  });
+
+  // 2. Fetch Holidays
+  const holidayDates = new Set();
+  try {
+    const holidays = await Holiday.find({
+      date: { $gte: firstDay, $lte: lastDay }
+    });
+    holidays.forEach(h => {
+      const d = new Date(h.date);
+      holidayDates.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    });
+  } catch (err) {
+    console.error('Error fetching holidays:', err);
+  }
+
+  // 3. Fetch Approved Leaves
+  const leaveDates = new Set();
+  try {
+    const leaves = await Leave.find({
+      employee: userId,
+      status: 'approved',
+      $or: [
+        { startDate: { $lte: lastDay }, endDate: { $gte: firstDay } }
+      ]
+    });
+    leaves.forEach(leave => {
+      let d = new Date(leave.startDate);
+      const endD = new Date(leave.endDate);
+      while (d <= endD) {
+        leaveDates.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+        d.setDate(d.getDate() + 1);
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching leaves:', err);
+  }
+
+  let presentDays = 0;
+  let halfDays = 0;
+  let lateMarks = 0;
+  let recordedAbsent = 0;
+  const presentDates = new Set();
+  const halfDayDates = new Set();
+  const recordedAbsentDates = new Set();
+
+  attendance.forEach(record => {
+    const recDate = new Date(record.date);
+    const dateKey = `${recDate.getFullYear()}-${recDate.getMonth()}-${recDate.getDate()}`;
+    if (record.status === 'present') {
+      presentDays++;
+      presentDates.add(dateKey);
+      if (record.loginTime) {
+        const loginHour = new Date(record.loginTime).getHours();
+        const loginMinute = new Date(record.loginTime).getMinutes();
+        if (loginHour > 10 || (loginHour === 10 && loginMinute > 0)) {
+          lateMarks++;
+        }
+      }
+    } else if (record.status === 'half-day') {
+      halfDays++;
+      halfDayDates.add(dateKey);
+    } else if (record.status === 'absent') {
+      recordedAbsent++;
+      recordedAbsentDates.add(dateKey);
+    }
+  });
+
+  let workingDaysCount = 0;
+  let unrecordedAbsentDays = 0;
+  const currentDate = new Date(firstDay);
+
+  const weeklyData = [
+    { label: 'Week 1', present: 0, absent: 0, halfDay: 0, late: 0 },
+    { label: 'Week 2', present: 0, absent: 0, halfDay: 0, late: 0 },
+    { label: 'Week 3', present: 0, absent: 0, halfDay: 0, late: 0 },
+    { label: 'Week 4+', present: 0, absent: 0, halfDay: 0, late: 0 }
+  ];
+
+  while (currentDate <= evaluationEndDate && currentDate <= lastDay) {
+    const dayOfWeek = currentDate.getDay();
+    const dayOfMonth = currentDate.getDate();
+    const dateKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}-${currentDate.getDate()}`;
+
+    let isOffDay = false;
+    if (weekoffCount === 1) {
+      isOffDay = (dayOfWeek === 0);
+    } else if (weekoffCount === 2) {
+      isOffDay = (dayOfWeek === 0 || dayOfWeek === 6);
+    } else if (weekoffCount >= 3) {
+      isOffDay = (dayOfWeek === 0 || dayOfWeek === 6 || dayOfWeek === 5);
+    }
+
+    if (holidayDates.has(dateKey) || leaveDates.has(dateKey)) {
+      isOffDay = true;
+    }
+
+    const weekIndex = dayOfMonth <= 7 ? 0 : (dayOfMonth <= 14 ? 1 : (dayOfMonth <= 21 ? 2 : 3));
+
+    if (!isOffDay) {
+      workingDaysCount++;
+      if (presentDates.has(dateKey)) {
+        weeklyData[weekIndex].present++;
+      } else if (halfDayDates.has(dateKey)) {
+        weeklyData[weekIndex].halfDay++;
+      } else if (recordedAbsentDates.has(dateKey)) {
+        weeklyData[weekIndex].absent++;
+      } else {
+        unrecordedAbsentDays++;
+        weeklyData[weekIndex].absent++;
+      }
+    }
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  const totalAbsent = recordedAbsent + unrecordedAbsentDays;
+
+  return {
+    presentDays,
+    absentDays: totalAbsent,
+    halfDays,
+    lateMarks,
+    workingDaysCount,
+    weekly: {
+      labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4+'],
+      present: weeklyData.map(w => w.present),
+      absent: weeklyData.map(w => w.absent),
+      halfDay: weeklyData.map(w => w.halfDay)
+    }
+  };
+}
+
+// Get personal attendance statistics for current month or specified month/year
 router.get('/my-stats', auth, async (req, res) => {
   try {
-    const User = require('../models/User');
-    const user = await User.findById(req.user._id);
-
-    // Fetch ShiftConfig to get weekoff dynamically
-    const ShiftConfig = require('../models/ShiftConfig');
-    let weekoffCount = 1;
-    try {
-      const shiftConfig = await ShiftConfig.findOne({ type: user?.shiftType });
-      if (shiftConfig && shiftConfig.weekoff) {
-        weekoffCount = shiftConfig.weekoff;
-      }
-    } catch (err) {
-      console.error('Error fetching shift config:', err);
-    }
-
     const now = new Date();
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    firstDayOfMonth.setHours(0, 0, 0, 0);
-    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    lastDayOfMonth.setHours(23, 59, 59, 999);
+    const targetYear = req.query.year ? parseInt(req.query.year) : now.getFullYear();
+    const targetMonth = req.query.month !== undefined ? parseInt(req.query.month) : now.getMonth();
 
-    const attendance = await Attendance.find({
-      employee: req.user._id,
-      date: { $gte: firstDayOfMonth, $lte: lastDayOfMonth }
-    });
-
-    const stats = {
-      presentDays: 0,
-      absentDays: 0,
-      halfDays: 0,
-      lateMarks: 0
-    };
-
-    // Count working days in the current month up to today
-    let workingDaysCount = 0;
-    const currentDate = new Date(firstDayOfMonth);
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-
-    while (currentDate <= today && currentDate <= lastDayOfMonth) {
-      const dayOfWeek = currentDate.getDay();
-
-      let isOffDay = false;
-      if (weekoffCount === 1) {
-        isOffDay = (dayOfWeek === 0);
-      } else if (weekoffCount === 2) {
-        isOffDay = (dayOfWeek === 0 || dayOfWeek === 6);
-      } else if (weekoffCount >= 3) {
-        isOffDay = (dayOfWeek === 0 || dayOfWeek === 6 || dayOfWeek === 5);
-      }
-
-      if (!isOffDay) {
-        workingDaysCount++;
-      }
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-
-    // Process attendance records
-    attendance.forEach(record => {
-      if (record.status === 'present') {
-        stats.presentDays++;
-        // Check if late (after 10:00 AM)
-        if (record.loginTime) {
-          const loginHour = new Date(record.loginTime).getHours();
-          const loginMinute = new Date(record.loginTime).getMinutes();
-          if (loginHour > 10 || (loginHour === 10 && loginMinute > 0)) {
-            stats.lateMarks++;
-          }
-        }
-      } else if (record.status === 'half-day') {
-        stats.halfDays++;
-      } else {
-        stats.absentDays++;
-      }
-    });
-
-    // Calculate absent days as: total working days - (present + half days)
-    // This accounts for days with no attendance record
-    const recordedDays = stats.presentDays + stats.halfDays + stats.absentDays;
-    if (workingDaysCount > recordedDays) {
-      stats.absentDays += (workingDaysCount - recordedDays);
-    }
-
+    const stats = await calculateEmployeeAttendanceSummary(req.user._id, targetYear, targetMonth);
     res.json(stats);
   } catch (error) {
     console.error('Error fetching personal attendance stats:', error);
@@ -2134,36 +2234,31 @@ router.get('/monthly-stats', auth, async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Current month
     const now = new Date();
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const targetYear = req.query.year ? parseInt(req.query.year) : now.getFullYear();
+    const targetMonth = req.query.month !== undefined ? parseInt(req.query.month) : now.getMonth();
 
-    // Last month
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    // Target month
+    const currentMonthStart = new Date(targetYear, targetMonth, 1);
+    const currentMonthEnd = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59, 999);
 
-    // Get current month attendance
-    const currentMonthAttendance = await Attendance.find({
-      employee: userId,
-      date: { $gte: currentMonthStart, $lte: currentMonthEnd }
-    });
+    // Prior month (for trend calculation)
+    const lastMonthStart = new Date(targetYear, targetMonth - 1, 1);
+    const lastMonthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
 
-    // Get last month attendance
-    const lastMonthAttendance = await Attendance.find({
-      employee: userId,
-      date: { $gte: lastMonthStart, $lte: lastMonthEnd }
-    });
+    // Calculate accurate attendance summaries using common logic (accounting for weekoffs, holidays & approved leaves)
+    const [currentSummary, lastSummary] = await Promise.all([
+      calculateEmployeeAttendanceSummary(userId, targetYear, targetMonth),
+      calculateEmployeeAttendanceSummary(userId, lastMonthStart.getFullYear(), lastMonthStart.getMonth())
+    ]);
 
-    // Calculate current month stats
-    const currentPresent = currentMonthAttendance.filter(a => a.status === 'present').length;
-    const currentAbsent = currentMonthAttendance.filter(a => a.status === 'absent').length;
-    const currentHalfDay = currentMonthAttendance.filter(a => a.status === 'half-day').length;
+    const currentPresent = currentSummary.presentDays;
+    const currentAbsent = currentSummary.absentDays;
+    const currentHalfDay = currentSummary.halfDays;
 
-    // Calculate last month stats
-    const lastPresent = lastMonthAttendance.filter(a => a.status === 'present').length;
-    const lastAbsent = lastMonthAttendance.filter(a => a.status === 'absent').length;
-    const lastHalfDay = lastMonthAttendance.filter(a => a.status === 'half-day').length;
+    const lastPresent = lastSummary.presentDays;
+    const lastAbsent = lastSummary.absentDays;
+    const lastHalfDay = lastSummary.halfDays;
 
     // Calculate trends (percentage change)
     const calculateTrend = (current, last) => {
@@ -2688,7 +2783,8 @@ router.put('/update-status', auth, async (req, res) => {
     }
 
     // Validate status if provided
-    if (status && !['present', 'absent', 'half-day', 'checked-in', 'late-checkin', 'early-checkin', 'week off'].includes(status)) {
+    const normalizedStatus = status ? status.toLowerCase().trim() : null;
+    if (normalizedStatus && !['present', 'absent', 'half-day', 'checked-in', 'late-checkin', 'early-checkin', 'week off', 'week-off'].includes(normalizedStatus)) {
       return res.status(400).json({ message: 'Invalid status.' });
     }
 
@@ -2717,9 +2813,17 @@ router.put('/update-status', auth, async (req, res) => {
 
     console.log(`[Update Attendance] Existing record found: ${attendance ? 'YES (ID: ' + attendance._id + ', Date: ' + attendance.date.toISOString() + ')' : 'NO - will create new'}`);
 
-    if (status === 'week off') {
+    if (normalizedStatus === 'week off' || normalizedStatus === 'week-off') {
       if (attendance) {
         await Attendance.findByIdAndDelete(attendance._id);
+        try {
+          const { recalculateDraftPayrollForEmployee } = require('./payroll');
+          if (typeof recalculateDraftPayrollForEmployee === 'function') {
+            await recalculateDraftPayrollForEmployee(employeeId, attendanceDate.getMonth() + 1, attendanceDate.getFullYear());
+          }
+        } catch (e) {
+          console.error('[Update Attendance] Error syncing draft payroll on week off revert:', e);
+        }
         return res.json({ message: 'Attendance reverted to Week Off', attendance: { _id: attendance._id, date: attendance.date, status: 'Week Off' } });
       }
       return res.json({ message: 'Already a Week Off', attendance: { date: attendanceDate, status: 'Week Off' } });
@@ -2803,6 +2907,14 @@ router.put('/update-status', auth, async (req, res) => {
       console.log(`[Update Attendance] Creating with data:`, attendanceData);
       attendance = await Attendance.create(attendanceData);
       console.log(`[Update Attendance] Record created with ID: ${attendance._id}`);
+      try {
+        const { recalculateDraftPayrollForEmployee } = require('./payroll');
+        if (typeof recalculateDraftPayrollForEmployee === 'function') {
+          await recalculateDraftPayrollForEmployee(employeeId, attendanceDate.getMonth() + 1, attendanceDate.getFullYear());
+        }
+      } catch (e) {
+        console.error('[Update Attendance] Error syncing draft payroll on create:', e);
+      }
     } else {
       // Updating existing record - check for UPDATE permission
       const hasUpdatePermission = req.user.role.permissions.find(
@@ -2976,6 +3088,14 @@ router.put('/update-status', auth, async (req, res) => {
       }
 
       console.log(`[Update Attendance] Record updated successfully`);
+      try {
+        const { recalculateDraftPayrollForEmployee } = require('./payroll');
+        if (typeof recalculateDraftPayrollForEmployee === 'function') {
+          await recalculateDraftPayrollForEmployee(employeeId, attendanceDate.getMonth() + 1, attendanceDate.getFullYear());
+        }
+      } catch (e) {
+        console.error('[Update Attendance] Error syncing draft payroll on update:', e);
+      }
     }
 
     await attendance.populate([
@@ -3105,7 +3225,7 @@ router.get('/employee-details/:employeeId', auth, async (req, res) => {
 
     // Get employee details
     const User = require('../models/User');
-    const employee = await User.findById(employeeId).select('firstName lastName employeeId department designation shiftType shiftHistory');
+    const employee = await User.findById(employeeId).select('firstName lastName employeeId department designation shiftType shiftHistory joiningDate');
     if (!employee) {
       return res.status(404).json({ message: 'Employee not found' });
     }
@@ -3224,8 +3344,41 @@ router.get('/employee-details/:employeeId', auth, async (req, res) => {
     let previousDayShiftStart = null;
     let previousDayShiftEnd = null;
 
+    let joiningDateObj = null;
+    const rawJoining = employee?.joiningDate || employee?.dateOfJoining || employee?.hireDate;
+    if (rawJoining) {
+      const jd = new Date(rawJoining);
+      if (!isNaN(jd.getTime())) {
+        joiningDateObj = new Date(jd.getFullYear(), jd.getMonth(), jd.getDate());
+        joiningDateObj.setHours(0, 0, 0, 0);
+      }
+    }
+
     for (let day = 1; day <= totalDaysInMonth; day++) {
       const currentDate = new Date(year, month - 1, day);
+      currentDate.setHours(0, 0, 0, 0);
+
+      // Check if this date is before employee joining date
+      const isBeforeJoining = joiningDateObj ? (currentDate < joiningDateObj) : false;
+      if (isBeforeJoining) {
+        dailyBreakdown.push({
+          day: day,
+          date: `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`,
+          status: '—',
+          loginTime: null,
+          logoutTime: null,
+          logoutMethod: null,
+          workingHours: 0,
+          leaveType: null,
+          leaveReason: null,
+          holidayName: null,
+          holidayDescription: null,
+          isHistoricalShift: false,
+          isWeekOff: false
+        });
+        continue;
+      }
+
       // Use local date comparison to avoid UTC timezone shift
       const attendance = attendances.find(att => {
         const attDate = new Date(att.date);
@@ -3325,7 +3478,8 @@ router.get('/employee-details/:employeeId', auth, async (req, res) => {
         leaveReason: null,
         holidayName: null,
         holidayDescription: null,
-        isHistoricalShift: false
+        isHistoricalShift: false,
+        isWeekOff: isWeekOff
       };
 
       // PRIORITY ORDER:
@@ -3340,6 +3494,7 @@ router.get('/employee-details/:employeeId', auth, async (req, res) => {
         // Attendance record exists — always show it, even if employee had a leave that day
         dayData.status = attendance.status === 'present' ? 'Present'
           : attendance.status === 'half-day' ? 'Half-day'
+            : (attendance.status === 'week off' || attendance.status === 'week-off') ? 'Week Off'
             : 'Absent';
         dayData.loginTime = attendance.loginTime;
         dayData.logoutTime = attendance.logoutTime;
@@ -3363,6 +3518,7 @@ router.get('/employee-details/:employeeId', auth, async (req, res) => {
 
         if (attendance.status === 'present') presentCount++;
         else if (attendance.status === 'half-day') halfDayCount++;
+        else if (attendance.status === 'week off' || attendance.status === 'week-off') { /* week off */ }
         else absentCount++;
       }
       // No attendance record — check leave
@@ -3383,75 +3539,7 @@ router.get('/employee-details/:employeeId', auth, async (req, res) => {
         dayData.status = '—';
       }
       // Check week off based on shift config
-      // weekoffDays=1 → Sunday only, 2 → Sat+Sun, 3 → Fri+Sat+Sun
       else {
-        const dayOfWeek = currentDate.getDay(); // 0=Sun, 6=Sat, 5=Fri
-
-        let applicableWeekoffDays = weekoffDays; // default to current shift's weekoffDays
-
-        // Find the historical shift using shiftHistory
-        let matchingShiftConfig = null;
-        if (employee.shiftHistory && employee.shiftHistory.length > 0) {
-          const historyEntry = employee.shiftHistory.find(h => {
-            const s = new Date(h.startDate);
-            s.setHours(0, 0, 0, 0);
-            const e = h.endDate ? new Date(h.endDate) : new Date('2099-12-31');
-            if (h.endDate) e.setHours(23, 59, 59, 999);
-            return currentDate >= s && currentDate <= e;
-          });
-          if (historyEntry) {
-            matchingShiftConfig = allShiftConfigs.find(s => s.type === historyEntry.shiftType);
-          }
-        }
-
-        if (!matchingShiftConfig) {
-          // Find the closest attendance record on or before this day to infer the historical shift
-          let closestRecord = null;
-          let matchingShift = null;
-          for (let i = attendances.length - 1; i >= 0; i--) {
-            const attDate = new Date(attendances[i].date);
-            if (attDate <= currentDate) {
-              const shift = getInferredShift(attendances[i]);
-              if (shift) {
-                closestRecord = attendances[i];
-                matchingShift = shift;
-                break;
-              }
-            }
-          }
-
-          if (closestRecord && matchingShift) {
-            matchingShiftConfig = matchingShift;
-          } else {
-            // If no past record in this month has a valid shift, check the first future record
-            const futureRecord = attendances.find(att => {
-              if (new Date(att.date) > currentDate) {
-                const shift = getInferredShift(att);
-                if (shift) {
-                  matchingShift = shift;
-                  return true;
-                }
-              }
-              return false;
-            });
-            if (futureRecord && matchingShift) {
-              matchingShiftConfig = matchingShift;
-            }
-          }
-        }
-
-        if (matchingShiftConfig) {
-          applicableWeekoffDays = matchingShiftConfig.weekoff || 1;
-          currentDayShiftStart = matchingShiftConfig.startTime;
-          currentDayShiftEnd = matchingShiftConfig.endTime;
-        }
-
-        const isWeekOff = (
-          (applicableWeekoffDays >= 1 && dayOfWeek === 0) ||
-          (applicableWeekoffDays >= 2 && dayOfWeek === 6) ||
-          (applicableWeekoffDays >= 3 && dayOfWeek === 5)
-        );
-
         if (isWeekOff) {
           dayData.status = 'Week Off';
         } else {
@@ -3533,7 +3621,7 @@ router.get('/employee-details/:employeeId/export', auth, async (req, res) => {
 
     // Get employee details
     const User = require('../models/User');
-    const employee = await User.findById(employeeId).select('firstName lastName employeeId department designation shiftType shiftHistory');
+    const employee = await User.findById(employeeId).select('firstName lastName employeeId department designation shiftType shiftHistory joiningDate');
     if (!employee) {
       return res.status(404).json({ message: 'Employee not found' });
     }
@@ -3651,12 +3739,38 @@ router.get('/employee-details/:employeeId/export', auth, async (req, res) => {
     let weekOffCount = 0;
     let leaveCount = 0;
 
+    let joiningDateObj = null;
+    const rawJoining = employee?.joiningDate || employee?.dateOfJoining || employee?.hireDate;
+    if (rawJoining) {
+      const jd = new Date(rawJoining);
+      if (!isNaN(jd.getTime())) {
+        joiningDateObj = new Date(jd.getFullYear(), jd.getMonth(), jd.getDate());
+        joiningDateObj.setHours(0, 0, 0, 0);
+      }
+    }
+
     for (let day = 1; day <= daysInMonth; day++) {
       const currentDate = new Date(year, month - 1, day);
+      currentDate.setHours(0, 0, 0, 0);
       // Use local date parts to avoid UTC timezone shift
       const dateKey = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
       const dayOfWeek = currentDate.getDay(); // 0 = Sunday, 6 = Saturday
       const dayName = dayNames[dayOfWeek];
+
+      const isBeforeJoining = joiningDateObj ? (currentDate < joiningDateObj) : false;
+      if (isBeforeJoining) {
+        excelData.push({
+          'Date': currentDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
+          'Day': dayName,
+          'Check-in Time': '—',
+          'Checkout Time': '—',
+          'Working Hours': '—',
+          'Status': '—',
+          'Shift Start': '—',
+          'Shift End': '—'
+        });
+        continue;
+      }
 
       // Check if this date is in the future
       const today = new Date();

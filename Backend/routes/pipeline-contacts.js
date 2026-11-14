@@ -499,7 +499,7 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
     });
 
     deal.activities.push({
-      type: 'note',
+      type: 'activity',
       title: 'Lead moved to Pipeline Deals',
       content: `Lead updated and moved to Deals under "New Lead" stage by ${userFullName}.`,
       author: userFullName,
@@ -510,7 +510,7 @@ async function moveSingleLeadToPipeline({ leadId, leadType = 'regular', override
     await deal.save();
   } else {
     const initialActivities = [...parsedLeadNoteActivities, {
-      type: 'note',
+      type: 'activity',
       title: 'Lead moved to Pipeline Deals',
       content: `Moved from ${leadType === 'meta' ? 'Meta Leads' : 'Leads'} into Deals under "New Lead" stage by ${userFullName}.`,
       author: userFullName,

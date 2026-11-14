@@ -19,32 +19,44 @@ export const parseTimeString = (timeStr) => {
 };
 
 export const getBreakScheduleInfo = (breakType, shiftConfig) => {
-  if (!shiftConfig) return null;
+  // If briefing or meeting or other:
+  const isMeeting = breakType === 'Briefing/Meeting' || breakType === 'Breifing/Meeting' || (typeof breakType === 'string' && (breakType.toLowerCase().includes('meeting') || breakType.toLowerCase().includes('briefing') || breakType.toLowerCase() === 'other'));
+  if (isMeeting) {
+    return {
+      startStr: 'Anytime',
+      endStr: 'Anytime',
+      allowAnytime: true,
+      isUnlimited: true,
+      windowDuration: 999999
+    };
+  }
+
   let startStr = null, endStr = null, allowAnytime = false;
 
   if (breakType === 'Lunch Break') {
-    startStr = shiftConfig.lunchStartTime || shiftConfig.lunchTime;
-    endStr = shiftConfig.lunchEndTime;
-    allowAnytime = Boolean(shiftConfig.allowLunchAnytime);
-  } else if (breakType === '1st Refreshment Break') {
-    startStr = shiftConfig.refreshment1StartTime;
-    endStr = shiftConfig.refreshment1EndTime;
-    allowAnytime = Boolean(shiftConfig.allowRefreshment1Anytime);
+    startStr = shiftConfig?.lunchStartTime || shiftConfig?.lunchTime;
+    endStr = shiftConfig?.lunchEndTime;
+    allowAnytime = Boolean(shiftConfig?.allowLunchAnytime);
+  } else if (breakType === '1st Refreshment Break' || breakType === 'Tea Break' || breakType === 'Refreshment Break') {
+    startStr = shiftConfig?.refreshment1StartTime;
+    endStr = shiftConfig?.refreshment1EndTime;
+    allowAnytime = Boolean(shiftConfig?.allowRefreshment1Anytime);
   } else if (breakType === '2nd Refreshment Break') {
-    startStr = shiftConfig.refreshment2StartTime;
-    endStr = shiftConfig.refreshment2EndTime;
-    allowAnytime = Boolean(shiftConfig.allowRefreshment2Anytime);
-  } else if (breakType === 'Tea Break' || breakType === 'Refreshment Break') {
-    startStr = shiftConfig.refreshment1StartTime;
-    endStr = shiftConfig.refreshment1EndTime;
-    allowAnytime = Boolean(shiftConfig.allowRefreshment1Anytime);
+    startStr = shiftConfig?.refreshment2StartTime;
+    endStr = shiftConfig?.refreshment2EndTime;
+    allowAnytime = Boolean(shiftConfig?.allowRefreshment2Anytime);
+  } else {
+    return {
+      startStr: 'Anytime',
+      endStr: 'Anytime',
+      allowAnytime: true,
+      isUnlimited: true,
+      windowDuration: 999999
+    };
   }
 
-  if (!startStr || !endStr) {
-    if (allowAnytime) {
-      return { startStr: 'Anytime', endStr: 'Anytime', allowAnytime: true, windowDuration: breakType === 'Lunch Break' ? 30 : 15 };
-    }
-    return null;
+  if (allowAnytime) {
+    return { startStr: 'Anytime', endStr: 'Anytime', allowAnytime: true, windowDuration: breakType === 'Lunch Break' ? 30 : 15 };
   }
 
   const sP = parseTimeString(startStr);
@@ -52,13 +64,31 @@ export const getBreakScheduleInfo = (breakType, shiftConfig) => {
   let windowDuration = (eP.hours * 60 + eP.minutes) - (sP.hours * 60 + sP.minutes);
   if (windowDuration < 0) windowDuration += 1440;
 
-  return { startStr, endStr, allowAnytime, windowDuration };
+  return {
+    startStr,
+    endStr,
+    allowAnytime: false,
+    windowDuration: windowDuration || (breakType === 'Lunch Break' ? 30 : 15)
+  };
 };
 
 export const getBreakWindowStatus = (breakType, shiftConfig, now = new Date()) => {
   const info = getBreakScheduleInfo(breakType, shiftConfig);
   if (!info || info.allowAnytime) {
-    return { canStart: true, windowStatus: 'open', message: null, allowedMins: info ? info.windowDuration : 15 };
+    const dur = info ? info.windowDuration : (breakType === 'Lunch Break' ? 30 : 15);
+    return {
+      canStart: true,
+      windowStatus: 'anytime',
+      message: `Flexible break: can be taken anytime during your shift (${dur} mins allowed).`,
+      allowedMins: dur,
+      allowedDurationMins: dur,
+      isAnytime: true,
+      startTime: 'Anytime',
+      endTime: 'Anytime',
+      startStr: 'Anytime',
+      endStr: 'Anytime',
+      info: info || { startStr: 'Anytime', endStr: 'Anytime', allowAnytime: true, windowDuration: dur }
+    };
   }
 
   const sP = parseTimeString(info.startStr);
@@ -74,6 +104,12 @@ export const getBreakWindowStatus = (breakType, shiftConfig, now = new Date()) =
       windowStatus: 'early',
       message: `Window opens at ${info.startStr}. You cannot take this break before ${info.startStr}.`,
       allowedMins: 0,
+      allowedDurationMins: info.windowDuration,
+      isAnytime: false,
+      startTime: info.startStr,
+      endTime: info.endStr,
+      startStr: info.startStr,
+      endStr: info.endStr,
       info
     };
   }
@@ -84,6 +120,12 @@ export const getBreakWindowStatus = (breakType, shiftConfig, now = new Date()) =
       windowStatus: 'ended',
       message: `Window ended at ${info.endStr}. You can no longer take this break today.`,
       allowedMins: 0,
+      allowedDurationMins: info.windowDuration,
+      isAnytime: false,
+      startTime: info.startStr,
+      endTime: info.endStr,
+      startStr: info.startStr,
+      endStr: info.endStr,
       info
     };
   }
@@ -105,7 +147,13 @@ export const getBreakWindowStatus = (breakType, shiftConfig, now = new Date()) =
     windowStatus: 'open',
     message: note,
     allowedMins,
+    allowedDurationMins: info.windowDuration,
     lateMins,
+    isAnytime: false,
+    startTime: info.startStr,
+    endTime: info.endStr,
+    startStr: info.startStr,
+    endStr: info.endStr,
     info
   };
 };
@@ -113,6 +161,24 @@ export const getBreakWindowStatus = (breakType, shiftConfig, now = new Date()) =
 export const calculateActiveBreakStatus = (activeBreak, shiftConfig, elapsedSecs) => {
   if (!activeBreak) return null;
   const breakType = activeBreak.breakType || activeBreak.type;
+  const bType = String(breakType || '').toLowerCase();
+  const isMeeting = bType.includes('meeting') || bType.includes('briefing') || bType === 'other';
+
+  if (isMeeting) {
+    return {
+      breakType,
+      scheduledStartTime: null,
+      scheduledEndTime: null,
+      allowedDurationMins: null,
+      allowedSecs: null,
+      isExceeded: false,
+      exceededSecs: 0,
+      remainingSecs: null,
+      exceededMinutes: 0,
+      isUnlimited: true
+    };
+  }
+
   const info = getBreakScheduleInfo(breakType, shiftConfig);
 
   const start = new Date(activeBreak.startTime);
@@ -154,8 +220,9 @@ export const calculateActiveBreakStatus = (activeBreak, shiftConfig, elapsedSecs
 };
 
 export const calculateBreakDeductionSecs = (b, shiftConfig, now = new Date()) => {
-  if (b.breakType === 'Other' || b.breakType === 'Briefing/Meeting' || b.breakType === 'Breifing/Meeting') {
-    return 0; // Ignore
+  const bType = String(b?.breakType || b?.type || '').toLowerCase();
+  if (bType.includes('meeting') || bType.includes('briefing') || bType === 'other') {
+    return 0; // Never deduct Briefing/Meeting or Other from working hours
   }
 
   const start = new Date(b.startTime);
@@ -202,7 +269,8 @@ export const formatDurationHMS = (seconds) => {
 
 export const getBreakExceededSeconds = (b, shiftConfig, now = new Date()) => {
   if (!b) return 0;
-  if (b.breakType === 'Other' || b.breakType === 'Briefing/Meeting' || b.breakType === 'Breifing/Meeting') {
+  const bType = String(b?.breakType || b?.type || '').toLowerCase();
+  if (bType.includes('meeting') || bType.includes('briefing') || bType === 'other') {
     return 0;
   }
 
