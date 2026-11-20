@@ -158,7 +158,12 @@ router.post('/', auth, async (req, res) => {
       status: advVal >= grandTot && grandTot > 0 ? 'Paid' : advVal > 0 ? 'Partially Paid' : 'Unpaid',
       projectStatus: data.projectStatus || 'Active',
       generatedBy: data.generatedBy || (req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''} (${req.user.employeeId || 'ADMIN'})`.trim() : 'Admin'),
-      generatedOn: data.generatedOn || new Date().toISOString(),
+      generatedOn: data.invoiceDate || data.generatedOn || new Date().toISOString(),
+      additionalTerms: Array.isArray(data.additionalTerms)
+        ? data.additionalTerms.filter(t => t && String(t).trim())
+        : (typeof data.additionalTerms === 'string' && data.additionalTerms.trim()
+            ? data.additionalTerms.split('\n').map(t => t.trim()).filter(Boolean)
+            : []),
       rawForm: data.rawForm || data,
       createdBy: req.user?._id || null
     };
@@ -241,6 +246,9 @@ router.post('/bulk-sync', auth, async (req, res) => {
           projectStatus: inv.projectStatus || 'Active',
           generatedBy: inv.generatedBy || 'Admin System (ADMIN001)',
           generatedOn: inv.generatedOn || new Date().toISOString(),
+          additionalTerms: Array.isArray(inv.additionalTerms)
+            ? inv.additionalTerms.filter(t => t && String(t).trim())
+            : (Array.isArray(inv.rawForm?.additionalTerms) ? inv.rawForm.additionalTerms.filter(t => t && String(t).trim()) : []),
           rawForm: inv.rawForm || inv,
           createdBy: req.user?._id || null
         });

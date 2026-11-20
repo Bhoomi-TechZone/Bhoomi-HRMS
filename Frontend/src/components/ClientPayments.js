@@ -868,6 +868,8 @@ function ClientPayments() {
     gstRate: '18',
     // Payment
     advanceAmount: '',
+    // Terms & Conditions (additional custom points)
+    additionalTerms: [],
   });
 
   const handleSwitchInvoiceCategory = (category) => {
@@ -917,6 +919,7 @@ function ClientPayments() {
       gstType: 'cgst_sgst',
       gstRate: '18',
       advanceAmount: '',
+      additionalTerms: [],
       generatedBy: creatorStr,
       generatedOn: new Date().toISOString()
     });
@@ -961,6 +964,7 @@ function ClientPayments() {
       gstType: merged.gstType || merged.rawForm?.gstType || f.gstType,
       gstRate: merged.gstRate ? String(merged.gstRate) : (merged.rawForm?.gstRate ? String(merged.rawForm.gstRate) : f.gstRate),
       advanceAmount: merged.paidAmount !== undefined ? String(merged.paidAmount) : (merged.advanceAmount !== undefined ? String(merged.advanceAmount) : f.advanceAmount),
+      additionalTerms: merged.additionalTerms || merged.rawForm?.additionalTerms || f.additionalTerms || [],
       generatedBy: merged.generatedBy || merged.rawForm?.generatedBy || creatorStr,
       generatedOn: merged.generatedOn || merged.rawForm?.generatedOn || new Date().toISOString()
     }));
@@ -984,6 +988,25 @@ function ClientPayments() {
 
     const fmtNum = (n) => Math.round(n).toLocaleString('en-IN');
     const fmtAmt = (n) => `${fmtNum(n)}/-`;
+
+    const defaultTerms = isProforma ? [
+      'This is a Proforma Invoice (Quotation / Estimate) and not a Tax Invoice.',
+      'Payment is due upon receipt of this proforma invoice as per agreed project milestone terms.',
+      'Work deliverables and timeline commencement will take effect upon receipt of advance remittance.',
+      'All disputes are subject to NOIDA UP jurisdiction only.'
+    ] : [
+      'GRN will be shared upon receipt of goods.',
+      'The credit period will start upon successful receipt / GRN.',
+      'All disputes are subject to NOIDA UP jurisdiction only.'
+    ];
+
+    const extraTerms = Array.isArray(form.additionalTerms)
+      ? form.additionalTerms.filter(t => t && String(t).trim())
+      : (typeof form.additionalTerms === 'string' && form.additionalTerms.trim()
+          ? form.additionalTerms.split('\n').map(t => t.trim()).filter(Boolean)
+          : []);
+
+    const allTerms = [...defaultTerms, ...extraTerms];
     const invoiceDate = new Date(form.invoiceDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
     const dueDate = new Date(form.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -1213,16 +1236,9 @@ function ClientPayments() {
   <div class="bottom-grid">
     <div class="terms-blk">
       <div class="terms-hdr">Terms &amp; Conditions</div>
-      ${isProforma ? `
-        <div class="term-item"><span>•</span><span>This is a Proforma Invoice (Quotation / Estimate) and not a Tax Invoice.</span></div>
-        <div class="term-item"><span>•</span><span>Payment is due upon receipt of this proforma invoice as per agreed project milestone terms.</span></div>
-        <div class="term-item"><span>•</span><span>Work deliverables and timeline commencement will take effect upon receipt of advance remittance.</span></div>
-        <div class="term-item"><span>•</span><span>All disputes are subject to NOIDA UP jurisdiction only.</span></div>
-      ` : `
-        <div class="term-item"><span>•</span><span>GRN will be shared upon receipt of goods.</span></div>
-        <div class="term-item"><span>•</span><span>The credit period will start upon successful receipt / GRN.</span></div>
-        <div class="term-item"><span>•</span><span>All disputes are subject to NOIDA UP jurisdiction only.</span></div>
-      `}
+      ${allTerms.map(term => `
+        <div class="term-item"><span>•</span><span>${term}</span></div>
+      `).join('')}
     </div>
   </div>
 
@@ -1536,7 +1552,8 @@ ${isDownload ? '' : `
       gstRate,
       advanceAmount: resolvedAdvance,
       generatedBy,
-      generatedOn
+      generatedOn,
+      additionalTerms: raw.additionalTerms || raw.rawForm?.additionalTerms || savedCustom?.additionalTerms || savedCustom?.rawForm?.additionalTerms || []
     };
   };
 
@@ -4680,6 +4697,139 @@ ${isDownload ? '' : `
                   </div>
                 </div>
 
+                {/* Terms & Conditions Section */}
+                <div className="gi-section-lbl" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Terms &amp; Conditions</span>
+                  <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', textTransform: 'none' }}>
+                    Standard points + Add further points
+                  </span>
+                </div>
+
+                <div style={{ background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: '10px', padding: '12px 14px', marginBottom: '8px' }}>
+                  {/* Default / Already Present Points */}
+                  <div style={{ marginBottom: '10px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                      Standard Terms ({genInvoiceForm.invoiceCategory === 'proforma' ? 'Proforma Invoice' : 'Tax Invoice'}):
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                      {(genInvoiceForm.invoiceCategory === 'proforma' ? [
+                        'This is a Proforma Invoice (Quotation / Estimate) and not a Tax Invoice.',
+                        'Payment is due upon receipt of this proforma invoice as per agreed project milestone terms.',
+                        'Work deliverables and timeline commencement will take effect upon receipt of advance remittance.',
+                        'All disputes are subject to NOIDA UP jurisdiction only.'
+                      ] : [
+                        'GRN will be shared upon receipt of goods.',
+                        'The credit period will start upon successful receipt / GRN.',
+                        'All disputes are subject to NOIDA UP jurisdiction only.'
+                      ]).map((term, idx) => (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: '#64748b', lineHeight: 1.5 }}>
+                          <span style={{ color: '#2C7B30', fontWeight: 700, minWidth: '8px' }}>•</span>
+                          <span>{term}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Add Further Points */}
+                  <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '10px', marginTop: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <label className="gi-lbl" style={{ marginBottom: 0, color: '#1e293b' }}>
+                        Add Further Points (Appears after standard points):
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGenInvoiceForm(f => ({
+                            ...f,
+                            additionalTerms: [...(f.additionalTerms || []), '']
+                          }));
+                        }}
+                        style={{
+                          background: genInvoiceForm.invoiceCategory === 'proforma' ? '#eff6ff' : '#f0fdf4',
+                          color: genInvoiceForm.invoiceCategory === 'proforma' ? '#2563eb' : '#166534',
+                          border: `1px solid ${genInvoiceForm.invoiceCategory === 'proforma' ? '#bfdbfe' : '#bbf7d0'}`,
+                          borderRadius: '6px',
+                          padding: '4px 10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <line x1="12" y1="5" x2="12" y2="19"></line>
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        <span>+ Add Point</span>
+                      </button>
+                    </div>
+
+                    {(!genInvoiceForm.additionalTerms || genInvoiceForm.additionalTerms.length === 0) ? (
+                      <div style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', padding: '4px 0' }}>
+                        No additional points added yet. Click &ldquo;+ Add Point&rdquo; to add custom terms.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {genInvoiceForm.additionalTerms.map((point, index) => (
+                          <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: '#2563eb', minWidth: '10px' }}>
+                              •
+                            </span>
+                            <input
+                              type="text"
+                              className="gi-input"
+                              style={{ flex: 1, fontSize: '11.5px', padding: '6px 10px' }}
+                              value={point}
+                              placeholder={`Enter additional term point #${index + 1}...`}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setGenInvoiceForm(f => {
+                                  const updated = [...(f.additionalTerms || [])];
+                                  updated[index] = val;
+                                  return { ...f, additionalTerms: updated };
+                                });
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setGenInvoiceForm(f => {
+                                  const updated = [...(f.additionalTerms || [])];
+                                  updated.splice(index, 1);
+                                  return { ...f, additionalTerms: updated };
+                                });
+                              }}
+                              title="Delete point"
+                              style={{
+                                background: '#fee2e2',
+                                color: '#dc2626',
+                                border: '1px solid #fca5a5',
+                                borderRadius: '6px',
+                                width: '30px',
+                                height: '30px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                padding: 0,
+                                flexShrink: 0
+                              }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Live preview of totals */}
                 {genInvoiceForm.rate && (
                   (() => {
@@ -4785,6 +4935,10 @@ ${isDownload ? '' : `
                     const genOnStr = genInvoiceForm.generatedOn || new Date().toISOString();
                     const finalInvNo = formatInvoiceNumberInput(genInvoiceForm.invoiceNo, genInvoiceForm.invoiceCategory) || genInvoiceForm.invoiceNo;
 
+                    const cleanedTerms = Array.isArray(genInvoiceForm.additionalTerms)
+                      ? genInvoiceForm.additionalTerms.filter(t => t && String(t).trim())
+                      : [];
+
                     const newInvItem = {
                       id: finalInvNo,
                       invoiceNo: finalInvNo,
@@ -4821,7 +4975,8 @@ ${isDownload ? '' : `
                       status: advVal >= grandTot && grandTot > 0 ? 'Paid' : advVal > 0 ? 'Partially Paid' : 'Unpaid',
                       projectStatus: 'Active',
                       createdAt: genOnStr,
-                      rawForm: { ...genInvoiceForm, invoiceNo: finalInvNo, generatedBy: genByStr, generatedOn: genOnStr }
+                      additionalTerms: cleanedTerms,
+                      rawForm: { ...genInvoiceForm, invoiceNo: finalInvNo, generatedBy: genByStr, generatedOn: genOnStr, additionalTerms: cleanedTerms }
                     };
 
                     const targetNo = String(newInvItem.invoiceNo || '').trim().toLowerCase();
@@ -4858,7 +5013,7 @@ ${isDownload ? '' : `
                     setInvoiceCurrentPage(1);
                     setInvoiceStatusFilter('all');
 
-                    handlePrintGeneratedInvoice({ ...genInvoiceForm, invoiceNo: finalInvNo, generatedBy: genByStr, generatedOn: genOnStr }, true);
+                    handlePrintGeneratedInvoice({ ...genInvoiceForm, invoiceNo: finalInvNo, generatedBy: genByStr, generatedOn: genOnStr, additionalTerms: cleanedTerms }, true);
                     setShowGenInvoiceModal(false);
                   }}
                   style={{
