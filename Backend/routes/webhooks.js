@@ -169,9 +169,24 @@ async function processLead(leadGenId) {
             });
         }
 
-    } catch (error) {
+} catch (error) {
         console.error('❌ Error processing lead:', error.message);
     }
 }
+
+/* ==========================================================================
+   META WHATSAPP CLOUD API WEBHOOK INTEGRATION
+   Endpoint: /api/webhooks/whatsapp/integration
+   ========================================================================== */
+const whatsappWebhookController = require('../controllers/whatsappWebhookController');
+
+// GET: Meta Webhook Verification
+router.get('/whatsapp/integration', whatsappWebhookController.verifyWebhook);
+
+// POST: Meta WhatsApp Cloud API Message Events and Status Updates
+router.post('/whatsapp/integration', whatsappWebhookController.handleWebhookEvent);
+
+// GET: Stored WhatsApp Messages with CRM Filters
+router.get('/whatsapp/messages', whatsappWebhookController.getMessages);
 
 module.exports = router;
