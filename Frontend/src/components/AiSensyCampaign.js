@@ -191,6 +191,22 @@ const SparklesIcon = ({ size = 14, color = "currentColor" }) => (
   </svg>
 );
 
+const UploadCloudIcon = ({ size = 20, color = "currentColor" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);
+
+const ImageIcon = ({ size = 16, color = "currentColor" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <polyline points="21 15 16 10 5 21" />
+  </svg>
+);
+
 const DEFAULT_MEDIA_URL = "https://d3jt6ku4g6z5l8.cloudfront.net/IMAGE/6353da2e153a147b991dd812/4958901_highanglekidcheatingschooltestmin.jpg";
 const AISENSY_ENDPOINT = "https://backend.aisensy.com/campaign/t1/api/v2";
 
@@ -202,72 +218,8 @@ function getAvatarColor(name = '') {
   return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
 }
 
-// Initial CRM Contacts fallback
-const INITIAL_CRM_CONTACTS = [
-  {
-    destination: '917985440421',
-    name: 'Lead Gen Campaign',
-    lastMessage: 'Ready for CRM outreach campaign',
-    lastMessageTime: new Date().toISOString(),
-    lastDirection: 'outbound',
-    lastStatus: 'delivered',
-    source: 'Campaign'
-  },
-  {
-    destination: '2983292892',
-    name: 'Rahul (Website AI Lead)',
-    lastMessage: 'Custom Website Development (Budget: 10000, 15 days)',
-    lastMessageTime: new Date(Date.now() - 3600000 * 1).toISOString(),
-    lastDirection: 'inbound',
-    lastStatus: 'read',
-    source: 'Website AI Lead'
-  },
-  {
-    destination: '17147099070',
-    name: 'David Farley',
-    lastMessage: 'Beauty & cosmetics lead inquiry',
-    lastMessageTime: new Date(Date.now() - 3600000 * 2).toISOString(),
-    lastDirection: 'inbound',
-    lastStatus: 'read',
-    source: 'CRM Lead'
-  },
-  {
-    destination: '233270000844',
-    name: 'Akosua Frimpo',
-    lastMessage: 'Requested services catalog & pricing',
-    lastMessageTime: new Date(Date.now() - 3600000 * 4).toISOString(),
-    lastDirection: 'inbound',
-    lastStatus: 'read',
-    source: 'CRM Lead'
-  },
-  {
-    destination: '233230630022',
-    name: 'Samuel Asante',
-    lastMessage: 'Website development quote discussed',
-    lastMessageTime: new Date(Date.now() - 3600000 * 7).toISOString(),
-    lastDirection: 'outbound',
-    lastStatus: 'delivered',
-    source: 'CRM Lead'
-  },
-  {
-    destination: '971526342282',
-    name: 'Mohammed Al-Mansoor',
-    lastMessage: 'Inquiry on IT software automation',
-    lastMessageTime: new Date(Date.now() - 3600000 * 12).toISOString(),
-    lastDirection: 'inbound',
-    lastStatus: 'read',
-    source: 'CRM Lead'
-  },
-  {
-    destination: '919876543210',
-    name: 'Rahul Verma',
-    lastMessage: 'Can you please share pricing for custom CRM?',
-    lastMessageTime: new Date(Date.now() - 3600000 * 24).toISOString(),
-    lastDirection: 'inbound',
-    lastStatus: 'read',
-    source: 'Website Lead'
-  }
-];
+// Initial CRM Contacts fallback (Clean empty default)
+const INITIAL_CRM_CONTACTS = [];
 
 export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin }) {
   const { user } = useAuth();
@@ -292,7 +244,7 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
   }, [propIsAdmin, user]);
 
   // Active horizontal tab
-  const [activeTab, setActiveTab] = useState('messages'); // 'messages' | 'campaigns' | 'configuration'
+  const [activeTab, setActiveTab] = useState('messages'); // 'messages' | 'audience' | 'campaigns' | 'configuration'
 
   // Safety: Prevent non-admin users from viewing configuration tab
   useEffect(() => {
@@ -302,9 +254,9 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
   }, [isAdmin, activeTab]);
 
   // Messages state
-  const [conversations, setConversations] = useState(INITIAL_CRM_CONTACTS);
+  const [conversations, setConversations] = useState([]);
   const [convLoading, setConvLoading] = useState(false);
-  const [selectedDest, setSelectedDest] = useState('917985440421');
+  const [selectedDest, setSelectedDest] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [newMessageText, setNewMessageText] = useState('');
@@ -328,6 +280,85 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
   const [showTemplatePreviewBar, setShowTemplatePreviewBar] = useState(true);
+  const [uploadingTemplateImage, setUploadingTemplateImage] = useState(false);
+  const [showDirectUrlInput, setShowDirectUrlInput] = useState(false);
+  const templateFileInputRef = useRef(null);
+
+  // ── Audience Groups & Contacts State (Strict User Isolation) ─────────────
+  const [audienceGroups, setAudienceGroups] = useState([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [groupContacts, setGroupContacts] = useState([]);
+  const [loadingContacts, setLoadingContacts] = useState(false);
+  const [searchGroupQuery, setSearchGroupQuery] = useState('');
+  const [searchContactQuery, setSearchContactQuery] = useState('');
+
+  // Modals for Audience
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupDesc, setNewGroupDesc] = useState('');
+  const [newGroupTags, setNewGroupTags] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
+
+  const [showAddContactModal, setShowAddContactModal] = useState(false);
+  const [newContactName, setNewContactName] = useState('');
+  const [newContactPhone, setNewContactPhone] = useState('');
+  const [newContactEmail, setNewContactEmail] = useState('');
+  const [newContactCompany, setNewContactCompany] = useState('');
+  const [addingContact, setAddingContact] = useState(false);
+
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importTab, setImportTab] = useState('csv'); // 'csv' | 'crm_leads'
+  const [importCsvText, setImportCsvText] = useState('');
+  const [parsedImportContacts, setParsedImportContacts] = useState([]);
+  const [myCrmLeads, setMyCrmLeads] = useState([]);
+  const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
+  const [loadingLeads, setLoadingLeads] = useState(false);
+  const [importingContacts, setImportingContacts] = useState(false);
+  const [importResultMsg, setImportResultMsg] = useState(null);
+
+  // Group Template Broadcast
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [broadcastProgress, setBroadcastProgress] = useState({ sent: 0, total: 0 });
+
+  const handleTemplateImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload a valid image file (JPG, PNG, WEBP, GIF).');
+      return;
+    }
+
+    try {
+      setUploadingTemplateImage(true);
+      const data = new FormData();
+      data.append('file', file);
+
+      const res = await api.post('/aisensy/upload-media', data, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      if (res.data?.success && res.data.url) {
+        setEditingTemplate((prev) => ({
+          ...prev,
+          headerMediaUrl: res.data.url,
+          headerType: 'IMAGE'
+        }));
+      } else {
+        alert(res.data?.message || 'Failed to upload image');
+      }
+    } catch (err) {
+      console.error('Template image upload error:', err);
+      alert('Could not upload image: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setUploadingTemplateImage(false);
+      if (templateFileInputRef.current) {
+        templateFileInputRef.current.value = '';
+      }
+    }
+  };
 
   // Campaign Form State
   const [formData, setFormData] = useState({
@@ -457,13 +488,14 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
     try {
       setConvLoading(true);
       const res = await api.get('/aisensy/conversations');
-      if (res.data?.success && Array.isArray(res.data.conversations) && res.data.conversations.length > 0) {
-        const map = new Map();
-        for (const c of res.data.conversations) map.set(c.destination, c);
-        for (const init of INITIAL_CRM_CONTACTS) {
-          if (!map.has(init.destination)) map.set(init.destination, init);
-        }
-        setConversations(Array.from(map.values()));
+      if (res.data?.success && Array.isArray(res.data.conversations)) {
+        setConversations(res.data.conversations);
+        setSelectedDest((prev) => {
+          if (prev && res.data.conversations.some((c) => c.destination === prev)) return prev;
+          return res.data.conversations[0]?.destination || '';
+        });
+      } else {
+        setConversations([]);
       }
     } catch (err) {
       console.error('Conversations note:', err);
@@ -474,29 +506,21 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
 
   // Fetch Messages for destination
   const fetchMessagesForDest = useCallback(async (destination) => {
-    if (!destination) return;
+    if (!destination) {
+      setChatMessages([]);
+      return;
+    }
     try {
       setChatLoading(true);
       const res = await api.get(`/aisensy/messages/${destination}`);
-      if (res.data?.success && Array.isArray(res.data.messages) && res.data.messages.length > 0) {
+      if (res.data?.success && Array.isArray(res.data.messages)) {
         setChatMessages(res.data.messages);
       } else {
-        setChatMessages([
-          {
-            _id: 'seed-' + destination,
-            conversationId: destination,
-            destination: destination,
-            contactName: 'Lead Gen Campaign',
-            direction: 'outbound',
-            messageType: 'text',
-            text: `Hi! This is Bhoomi TechZone CRM. Connected via AiSensy WhatsApp Cloud. How can we assist you?`,
-            status: 'delivered',
-            createdAt: new Date().toISOString()
-          }
-        ]);
+        setChatMessages([]);
       }
     } catch (err) {
       console.error('Messages note:', err);
+      setChatMessages([]);
     } finally {
       setChatLoading(false);
     }
@@ -521,6 +545,297 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
     }
   }, []);
 
+  // ── Audience Functions (Strict User Isolation) ───────────────────────────
+  const fetchAudienceGroups = useCallback(async () => {
+    try {
+      setLoadingGroups(true);
+      const res = await api.get('/aisensy/groups');
+      if (res.data?.success) {
+        setAudienceGroups(res.data.groups || []);
+        setSelectedGroup((prev) => {
+          if (prev && res.data.groups.some((g) => g._id === prev._id)) {
+            return res.data.groups.find((g) => g._id === prev._id);
+          }
+          return res.data.groups[0] || null;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch audience groups:', err);
+    } finally {
+      setLoadingGroups(false);
+    }
+  }, []);
+
+  const fetchGroupContacts = useCallback(async (groupId) => {
+    if (!groupId) {
+      setGroupContacts([]);
+      return;
+    }
+    try {
+      setLoadingContacts(true);
+      const res = await api.get(`/aisensy/groups/${groupId}/contacts`);
+      if (res.data?.success) {
+        setGroupContacts(res.data.contacts || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch group contacts:', err);
+      setGroupContacts([]);
+    } finally {
+      setLoadingContacts(false);
+    }
+  }, []);
+
+  const fetchMyCrmLeads = useCallback(async () => {
+    try {
+      setLoadingLeads(true);
+      const res = await api.get('/aisensy/my-crm-leads');
+      if (res.data?.success) {
+        setMyCrmLeads(res.data.leads || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch user CRM leads:', err);
+    } finally {
+      setLoadingLeads(false);
+    }
+  }, []);
+
+  const handleCreateGroup = async (e) => {
+    if (e) e.preventDefault();
+    if (!newGroupName.trim()) {
+      alert('Please enter a group name');
+      return;
+    }
+    try {
+      setCreatingGroup(true);
+      const res = await api.post('/aisensy/groups', {
+        name: newGroupName.trim(),
+        description: newGroupDesc.trim(),
+        tags: newGroupTags ? newGroupTags.split(',').map((t) => t.trim()).filter(Boolean) : []
+      });
+      if (res.data?.success) {
+        setNewGroupName('');
+        setNewGroupDesc('');
+        setNewGroupTags('');
+        setShowCreateGroupModal(false);
+        await fetchAudienceGroups();
+        if (res.data.group) setSelectedGroup(res.data.group);
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to create audience group');
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
+  const handleDeleteGroup = async (groupId, groupName) => {
+    if (!window.confirm(`Are you sure you want to delete "${groupName}" and all its contacts?`)) return;
+    try {
+      const res = await api.delete(`/aisensy/groups/${groupId}`);
+      if (res.data?.success) {
+        await fetchAudienceGroups();
+        if (selectedGroup?._id === groupId) {
+          setSelectedGroup(null);
+          setGroupContacts([]);
+        }
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to delete group');
+    }
+  };
+
+  const handleAddContact = async (e) => {
+    if (e) e.preventDefault();
+    if (!selectedGroup) return;
+    if (!newContactName.trim() || !newContactPhone.trim()) {
+      alert('Contact Name and Phone Number are required');
+      return;
+    }
+    try {
+      setAddingContact(true);
+      const res = await api.post(`/aisensy/groups/${selectedGroup._id}/contacts`, {
+        name: newContactName.trim(),
+        phone: newContactPhone.trim(),
+        email: newContactEmail.trim(),
+        company: newContactCompany.trim()
+      });
+      if (res.data?.success) {
+        setNewContactName('');
+        setNewContactPhone('');
+        setNewContactEmail('');
+        setNewContactCompany('');
+        setShowAddContactModal(false);
+        fetchGroupContacts(selectedGroup._id);
+        fetchAudienceGroups();
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to add contact');
+    } finally {
+      setAddingContact(false);
+    }
+  };
+
+  const handleDeleteContact = async (contactId) => {
+    if (!selectedGroup) return;
+    if (!window.confirm('Are you sure you want to remove this contact from the group?')) return;
+    try {
+      const res = await api.delete(`/aisensy/groups/${selectedGroup._id}/contacts/${contactId}`);
+      if (res.data?.success) {
+        fetchGroupContacts(selectedGroup._id);
+        fetchAudienceGroups();
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to delete contact');
+    }
+  };
+
+  const parseCsvText = (text) => {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lines.length === 0) return [];
+    const firstLine = lines[0].toLowerCase();
+    const hasHeader = firstLine.includes('name') || firstLine.includes('phone') || firstLine.includes('mobile');
+    const startIndex = hasHeader ? 1 : 0;
+    const parsed = [];
+
+    for (let i = startIndex; i < lines.length; i++) {
+      const parts = lines[i].split(/,|\t/).map((p) => p.trim().replace(/^["']|["']$/g, ''));
+      if (parts.length >= 2) {
+        let name = parts[0];
+        let phone = parts[1];
+        let email = parts[2] || '';
+        let company = parts[3] || '';
+
+        if (/^\+?\d{9,15}$/.test(parts[0].replace(/\s+/g, '')) && !/^\+?\d{9,15}$/.test(parts[1].replace(/\s+/g, ''))) {
+          phone = parts[0];
+          name = parts[1];
+        }
+
+        if (phone && phone.replace(/\D/g, '').length >= 10) {
+          parsed.push({ name: name || 'Contact', phone, email, company });
+        }
+      } else if (parts.length === 1 && parts[0].replace(/\D/g, '').length >= 10) {
+        parsed.push({ name: `Contact ${parsed.length + 1}`, phone: parts[0], email: '', company: '' });
+      }
+    }
+    return parsed;
+  };
+
+  const handleCsvFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target.result;
+      setImportCsvText(content);
+      const parsed = parseCsvText(content);
+      setParsedImportContacts(parsed);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImportSubmit = async () => {
+    if (!selectedGroup) return;
+    try {
+      setImportingContacts(true);
+      setImportResultMsg(null);
+
+      if (importTab === 'csv') {
+        const toSend = parsedImportContacts.length > 0 ? parsedImportContacts : parseCsvText(importCsvText);
+        if (toSend.length === 0) {
+          alert('No valid contacts parsed from CSV. Please check formatting.');
+          setImportingContacts(false);
+          return;
+        }
+
+        const res = await api.post(`/aisensy/groups/${selectedGroup._id}/contacts/import`, {
+          contacts: toSend
+        });
+
+        if (res.data?.success) {
+          setImportResultMsg(res.data.message);
+          fetchGroupContacts(selectedGroup._id);
+          fetchAudienceGroups();
+          setTimeout(() => {
+            setShowImportModal(false);
+            setImportResultMsg(null);
+            setImportCsvText('');
+            setParsedImportContacts([]);
+          }, 2000);
+        }
+      } else if (importTab === 'crm_leads') {
+        const selectedLeads = myCrmLeads.filter((l) => selectedLeadIds.has(String(l._id || l.id)));
+        if (selectedLeads.length === 0) {
+          alert('Please select at least one CRM lead to import');
+          setImportingContacts(false);
+          return;
+        }
+
+        const res = await api.post(`/aisensy/groups/${selectedGroup._id}/contacts/import`, {
+          contacts: selectedLeads.map((l) => ({
+            name: l.name || 'Lead',
+            phone: l.phone,
+            email: l.email || '',
+            company: l.company || '',
+            source: 'crm_lead'
+          }))
+        });
+
+        if (res.data?.success) {
+          setImportResultMsg(res.data.message);
+          fetchGroupContacts(selectedGroup._id);
+          fetchAudienceGroups();
+          setTimeout(() => {
+            setShowImportModal(false);
+            setImportResultMsg(null);
+            setSelectedLeadIds(new Set());
+          }, 2000);
+        }
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to import contacts');
+    } finally {
+      setImportingContacts(false);
+    }
+  };
+
+  const handleBroadcastToGroup = async () => {
+    if (!selectedGroup || !selectedTemplate || groupContacts.length === 0) return;
+    if (!window.confirm(`Are you sure you want to dispatch the approved template "${selectedTemplate.name}" to all ${groupContacts.length} contacts in "${selectedGroup.name}"?`)) return;
+
+    try {
+      setBroadcasting(true);
+      setShowBroadcastModal(true);
+      setBroadcastProgress({ sent: 0, total: groupContacts.length });
+
+      let sentCount = 0;
+      for (const contact of groupContacts) {
+        try {
+          await api.post('/aisensy/messages/send', {
+            destination: contact.phone,
+            text: selectedTemplate.body,
+            mediaUrl: selectedTemplate.headerMediaUrl || '',
+            contactName: contact.name,
+            campaignName: selectedTemplate.campaignName || 'CRM',
+            templateId: selectedTemplate._id,
+            templateBody: selectedTemplate.body,
+            isTemplate: true
+          });
+          sentCount++;
+          setBroadcastProgress({ sent: sentCount, total: groupContacts.length });
+        } catch (contactErr) {
+          console.warn(`Broadcast failed for ${contact.phone}:`, contactErr);
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      fetchConversations();
+      fetchLogs();
+    } catch (err) {
+      alert(err.message || 'Group broadcast error');
+    } finally {
+      setBroadcasting(false);
+    }
+  };
+
   useEffect(() => {
     if (isAdmin) {
       fetchConfig();
@@ -529,7 +844,14 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
     fetchLogs();
     fetchConversations();
     fetchTemplates();
-  }, [isAdmin, fetchConfig, fetchSalesEmployees, fetchLogs, fetchConversations, fetchTemplates]);
+    fetchAudienceGroups();
+  }, [isAdmin, fetchConfig, fetchSalesEmployees, fetchLogs, fetchConversations, fetchTemplates, fetchAudienceGroups]);
+
+  useEffect(() => {
+    if (selectedGroup?._id) {
+      fetchGroupContacts(selectedGroup._id);
+    }
+  }, [selectedGroup?._id, fetchGroupContacts]);
 
   useEffect(() => {
     if (selectedDest) fetchMessagesForDest(selectedDest);
@@ -543,14 +865,25 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
   }, [chatMessages, activeTab]);
 
   const activeContact = useMemo(() => {
-    return (
-      conversations.find((c) => c.destination === selectedDest) || {
-        destination: selectedDest || '917985440421',
-        name: 'Lead Gen Campaign',
-        source: 'Campaign'
-      }
-    );
-  }, [conversations, selectedDest]);
+    if (!selectedDest) return { destination: '', name: '', source: '' };
+    const found = conversations.find((c) => c.destination === selectedDest);
+    if (found) return found;
+    const cleanDest = (selectedDest || '').replace(/[^\d]/g, '');
+    const foundAudience = groupContacts.find((gc) => (gc.phone || '').replace(/[^\d]/g, '') === cleanDest);
+    if (foundAudience) {
+      return {
+        destination: selectedDest,
+        name: foundAudience.name || selectedDest,
+        company: foundAudience.company || '',
+        source: 'Audience Contact'
+      };
+    }
+    return {
+      destination: selectedDest,
+      name: selectedDest,
+      source: 'Direct Chat'
+    };
+  }, [conversations, selectedDest, groupContacts]);
 
   // For non-admin employees: find the names of all campaigns assigned to this user
   const myAssignedCampaignNames = useMemo(() => {
@@ -579,7 +912,6 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
     templates.forEach((t) => {
       const cName = (t.campaignName || '').trim();
       if (!cName) return;
-      if (!isAdmin && !myAssignedCampaignNames.includes(cName.toLowerCase())) return;
       if (!map.has(cName)) {
         map.set(cName, {
           campaignName: cName,
@@ -598,7 +930,6 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
     logs.forEach((l) => {
       const cName = (l.campaignName || '').trim();
       if (!cName) return;
-      if (!isAdmin && !myAssignedCampaignNames.includes(cName.toLowerCase())) return;
       if (!map.has(cName)) {
         map.set(cName, {
           campaignName: cName,
@@ -655,18 +986,20 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
   }, [salesEmployees, assignSearch]);
 
   const filteredConversations = useMemo(() => {
-    if (!isAdmin && myAssignedCampaignNames.length === 0) return [];
-
     return conversations.filter((c) => {
-      // Non-admin restriction: only show conversations belonging to assigned campaigns
-      if (!isAdmin) {
+      // Non-admin restriction: if specific campaigns are assigned, prioritize those campaigns while preserving assigned leads/deals
+      if (!isAdmin && myAssignedCampaignNames.length > 0) {
         const cCamp = (c.campaignName || '').toLowerCase().trim();
         const lastMsg = (c.lastMessage || '').toLowerCase();
         const cleanDest = (c.destination || '').replace(/[^\d]/g, '');
         const belongsToMyCampaign =
           (cCamp && myAssignedCampaignNames.includes(cCamp)) ||
           myAssignedCampaignNames.some((camp) => lastMsg.includes(`campaign: ${camp}`)) ||
-          logs.some((l) => (l.destination || '').replace(/[^\d]/g, '') === cleanDest && myAssignedCampaignNames.includes((l.campaignName || '').toLowerCase().trim()));
+          logs.some((l) => (l.destination || '').replace(/[^\d]/g, '') === cleanDest && myAssignedCampaignNames.includes((l.campaignName || '').toLowerCase().trim())) ||
+          c.source?.includes('Lead') ||
+          c.source?.includes('Deal') ||
+          c.source?.includes('AiSensy Chat') ||
+          c.source?.includes('Audience');
         if (!belongsToMyCampaign) return false;
       }
 
@@ -1262,7 +1595,43 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
               color: activeTab === 'messages' ? '#ffffff' : '#475569'
             }}
           >
-            {conversations.length}
+            {filteredConversations.length}
+          </span>
+        </button>
+
+        {/* ── Audience Tab Button (Positioned immediately after Messages) ── */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('audience')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 14px',
+            borderRadius: 6,
+            fontSize: '12px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: 'none',
+            background: activeTab === 'audience' ? '#10b981' : 'transparent',
+            color: activeTab === 'audience' ? '#ffffff' : '#64748b',
+            boxShadow: activeTab === 'audience' ? '0 1px 3px rgba(16, 185, 129, 0.25)' : 'none',
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <UsersIcon size={14} />
+          <span>Audience</span>
+          <span
+            style={{
+              fontSize: '10px',
+              fontWeight: 700,
+              padding: '1px 5px',
+              borderRadius: 8,
+              background: activeTab === 'audience' ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
+              color: activeTab === 'audience' ? '#ffffff' : '#475569'
+            }}
+          >
+            {audienceGroups.length}
           </span>
         </button>
 
@@ -1339,47 +1708,6 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
       {/* 3. TAB 1: MESSAGES (SEPARATELY SCROLLABLE WHATSAPP WORKBENCH)             */}
       {/* ────────────────────────────────────────────────────────────────────────── */}
       {activeTab === 'messages' && (
-        !hasAssignedCampaigns ? (
-          <div
-            style={{
-              flex: 1,
-              background: '#ffffff',
-              borderRadius: 14,
-              border: '1px solid #e2e8f0',
-              padding: '72px 28px',
-              textAlign: 'center',
-              boxShadow: '0 1px 3px rgba(15,23,42,0.04)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '10px 0 24px'
-            }}
-          >
-            <div
-              style={{
-                width: 60,
-                height: 60,
-                borderRadius: '50%',
-                background: '#f1f5f9',
-                border: '1px solid #e2e8f0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: 16,
-                color: '#64748b'
-              }}
-            >
-              <MessagesTabIcon size={28} />
-            </div>
-            <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0', letterSpacing: '-0.01em' }}>
-              You have not any assigned campaign yet
-            </h3>
-            <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '460px', margin: 0, lineHeight: 1.55 }}>
-              No WhatsApp campaign chats are accessible because you have not been assigned to any campaigns. Contact your administrator to assign a campaign to your account.
-            </p>
-          </div>
-        ) : (
         <div
           style={{
             flex: 1,
@@ -1419,945 +1747,1519 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>WhatsApp Chats</span>
                 <span style={{ fontSize: '10.5px', fontWeight: 600, background: '#f1f5f9', color: '#64748b', padding: '1px 6px', borderRadius: 8 }}>
-                  {conversations.length}
+                  {filteredConversations.length}
                 </span>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowNewNumberModal(true)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '4px 9px',
-                  borderRadius: 6,
-                  background: '#10b981',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                <PlusIcon size={12} color="#fff" />
-                <span>New Chat</span>
-              </button>
-            </div>
-
-            {/* Search Box */}
-            <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', flexShrink: 0 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  background: '#f8fafc',
-                  borderRadius: 6,
-                  padding: '5px 9px',
-                  border: '1px solid #e2e8f0'
-                }}
-              >
-                <SearchIcon size={13} color="#94a3b8" />
-                <input
-                  type="text"
-                  placeholder="Search numbers or names..."
-                  value={searchNumber}
-                  onChange={(e) => setSearchNumber(e.target.value)}
-                  style={{
-                    border: 'none',
-                    background: 'transparent',
-                    outline: 'none',
-                    fontSize: '11.5px',
-                    width: '100%',
-                    color: '#0f172a'
-                  }}
-                />
-                {searchNumber && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchNumber('')}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '11px', padding: 0 }}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              {/* Filter Chips */}
-              <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
-                {[
-                  { id: 'ALL', label: 'All' },
-                  { id: 'CRM', label: 'CRM Leads' },
-                  { id: 'CAMPAIGN', label: 'Campaigns' }
-                ].map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setFilterCategory(f.id)}
-                    style={{
-                      padding: '2px 7px',
-                      borderRadius: 4,
-                      fontSize: '10.5px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      border: 'none',
-                      background: filterCategory === f.id ? '#0f172a' : '#f1f5f9',
-                      color: filterCategory === f.id ? '#ffffff' : '#64748b'
-                    }}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Campaign Filter Dropdown in Messages Tab */}
-              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap' }}>Campaign:</span>
-                <select
-                  value={messagesCampaignFilter}
-                  onChange={(e) => setMessagesCampaignFilter(e.target.value)}
-                  style={{
-                    flex: 1,
-                    padding: '2px 6px',
-                    borderRadius: 4,
-                    border: '1px solid #cbd5e1',
-                    fontSize: '10.5px',
-                    background: '#ffffff',
-                    color: '#0f172a',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <option value="ALL">All Campaigns</option>
-                  {availableCampaigns.map((c) => (
-                    <option key={c.campaignName} value={c.campaignName}>
-                      {c.campaignName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Conversations Scrollable List */}
-            <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                overflowY: 'auto'
-              }}
-            >
-              {filteredConversations.map((c) => {
-                const isSelected = c.destination === selectedDest;
-                const avatarBg = getAvatarColor(c.name || c.destination);
-                return (
-                  <div
-                    key={c.destination}
-                    onClick={() => setSelectedDest(c.destination)}
-                    style={{
-                      padding: '10px 12px',
-                      borderBottom: '1px solid #f8fafc',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 9,
-                      cursor: 'pointer',
-                      background: isSelected ? '#f0fdf4' : '#ffffff',
-                      borderLeft: isSelected ? '3px solid #10b981' : '3px solid transparent',
-                      transition: 'background 0.1s ease'
-                    }}
-                  >
-                    {/* Modern Avatar */}
-                    <div
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: '50%',
-                        background: avatarBg,
-                        color: '#ffffff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 700,
-                        fontSize: '12.5px',
-                        flexShrink: 0,
-                        position: 'relative'
-                      }}
-                    >
-                      {c.name ? c.name.charAt(0).toUpperCase() : 'U'}
-                      <div
-                        style={{
-                          position: 'absolute',
-                          bottom: -1,
-                          right: -1,
-                          width: 9,
-                          height: 9,
-                          borderRadius: '50%',
-                          background: '#10b981',
-                          border: '1.5px solid #ffffff'
-                        }}
-                      />
-                    </div>
-
-                    {/* Content */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                        <span
-                          style={{
-                            fontSize: '12.5px',
-                            fontWeight: 700,
-                            color: isSelected ? '#047857' : '#0f172a',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            maxWidth: '150px'
-                          }}
-                        >
-                          {c.name || 'Contact'}
-                        </span>
-                        <span style={{ fontSize: '10px', color: '#94a3b8' }}>
-                          {formatTime(c.lastMessageTime)}
-                        </span>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#475569', fontFamily: 'monospace' }}>
-                          {formatPhone(c.destination)}
-                        </span>
-                        {c.source && (
-                          <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: 3, background: '#f1f5f9', color: '#64748b' }}>
-                            {c.source}
-                          </span>
-                        )}
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: '11px',
-                          color: '#64748b',
-                          marginTop: 2,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis'
-                        }}
-                      >
-                        {c.lastDirection === 'outbound' && (
-                          <DoubleCheckIcon size={11} blue={c.lastStatus === 'read' || c.lastStatus === 'delivered'} />
-                        )}{' '}
-                        {c.lastMessage}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* ── Right Pane: Active WhatsApp Chat Window (Independent Scroll) ── */}
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              background: '#f8fafc',
-              height: '100%',
-              minHeight: 0,
-              overflow: 'hidden',
-              position: 'relative'
-            }}
-          >
-            {/* Chat Header (Fixed at top) */}
-            <div
-              style={{
-                padding: '10px 16px',
-                background: '#ffffff',
-                borderBottom: '1px solid #e2e8f0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexShrink: 0
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: '50%',
-                    background: getAvatarColor(activeContact.name),
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 700,
-                    fontSize: '13.5px'
-                  }}
-                >
-                  {activeContact.name ? activeContact.name.charAt(0).toUpperCase() : 'W'}
-                </div>
-
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
-                      {activeContact.name || 'WhatsApp Contact'}
-                    </span>
-                    <span style={{ fontSize: '11.5px', fontFamily: 'monospace', color: '#059669', fontWeight: 600 }}>
-                      {formatPhone(selectedDest)}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
-                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#10b981' }} />
-                    <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 500 }}>
-                      AiSensy WhatsApp Cloud Connected
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {/* Campaign Template Quick Selector & Dropdown */}
-                <div style={{ position: 'relative' }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowTemplateDropdown(!showTemplateDropdown)}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      background: '#f0fdf4',
-                      border: '1px solid #bbf7d0',
-                      color: '#166534',
-                      padding: '4px 10px',
-                      borderRadius: 6,
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      cursor: 'pointer'
-                    }}
-                    title="Select WhatsApp Template"
-                  >
-                    <TemplateIcon size={12} color="#166534" />
-                    <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {selectedTemplate ? selectedTemplate.name : 'Select Template'}
-                    </span>
-                    <span style={{ fontSize: '9px', marginLeft: 2 }}>▾</span>
-                  </button>
-
-                  {/* Template Dropdown Menu */}
-                  {showTemplateDropdown && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '100%',
-                        right: 0,
-                        marginTop: 4,
-                        width: '290px',
-                        background: '#ffffff',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 8,
-                        boxShadow: '0 10px 25px -5px rgba(0,0,0,0.12)',
-                        zIndex: 100,
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <div style={{ padding: '8px 10px', background: '#f8fafc', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>WhatsApp Templates</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowTemplateDropdown(false);
-                            setTemplateModalMode('create');
-                            setEditingTemplate(null);
-                            setShowTemplateModal(true);
-                          }}
-                          style={{
-                            border: 'none',
-                            background: 'transparent',
-                            color: '#10b981',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 2
-                          }}
-                        >
-                          <PlusIcon size={10} color="#10b981" /> Add
-                        </button>
-                      </div>
-
-                      <div style={{ maxHeight: '210px', overflowY: 'auto' }}>
-                        {templates.map((tpl) => (
-                          <div
-                            key={tpl._id}
-                            onClick={() => {
-                              setSelectedTemplate(tpl);
-                              setChatCampaignName(tpl.campaignName || 'CRM');
-                              setShowTemplatePreviewBar(true);
-                              setShowTemplateDropdown(false);
-                            }}
-                            style={{
-                              padding: '8px 10px',
-                              borderBottom: '1px solid #f8fafc',
-                              cursor: 'pointer',
-                              background: selectedTemplate?._id === tpl._id ? '#ecfdf5' : '#ffffff',
-                              transition: 'background 0.15s'
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontSize: '11.5px', fontWeight: 600, color: selectedTemplate?._id === tpl._id ? '#047857' : '#0f172a' }}>
-                                {tpl.name}
-                              </span>
-                              <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: 3, background: '#f1f5f9', color: '#64748b' }}>
-                                {tpl.campaignName}
-                              </span>
-                            </div>
-                            <div style={{ fontSize: '10px', color: '#64748b', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {tpl.body.slice(0, 45)}...
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div style={{ padding: '7px 10px', background: '#f8fafc', borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowTemplateDropdown(false);
-                            setTemplateModalMode('list');
-                            setShowTemplateModal(true);
-                          }}
-                          style={{
-                            border: 'none',
-                            background: 'transparent',
-                            color: '#059669',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 4
-                          }}
-                        >
-                          <TemplateIcon size={12} color="#059669" />
-                          <span>Manage & Customize Templates</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
                 <button
                   type="button"
-                  onClick={() => {
-                    setTemplateModalMode('list');
-                    setShowTemplateModal(true);
-                  }}
+                  onClick={() => setShowNewNumberModal(true)}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 4,
                     padding: '4px 9px',
                     borderRadius: 6,
-                    background: '#ffffff',
-                    color: '#334155',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                  title="Open Template Manager"
-                >
-                  <TemplateIcon size={12} color="#64748b" />
-                  <span>Templates</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleJumpToCampaign(selectedDest)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: '5px 10px',
-                    borderRadius: 6,
-                    background: '#ecfdf5',
-                    color: '#059669',
-                    border: '1px solid #a7f3d0',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                >
-                  <CampaignsTabIcon size={12} />
-                  <span>Send Campaign</span>
-                </button>
-
-                <a
-                  href={`https://wa.me/${selectedDest}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: '5px 10px',
-                    borderRadius: 6,
-                    background: '#ffffff',
-                    color: '#0f172a',
-                    border: '1px solid #e2e8f0',
-                    textDecoration: 'none',
-                    fontSize: '11px',
-                    fontWeight: 600
-                  }}
-                >
-                  <WhatsAppIcon size={12} />
-                  <span>WhatsApp Web</span>
-                  <ExternalLinkIcon size={10} />
-                </a>
-              </div>
-            </div>
-
-            {/* AiSensy Error Banner if last dispatch had an issue */}
-            {chatError && (
-              <div
-                style={{
-                  padding: '7px 14px',
-                  background: '#fef2f2',
-                  borderBottom: '1px solid #fecaca',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  color: '#991b1b',
-                  fontSize: '11px',
-                  flexShrink: 0
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: '13px' }}>⚠️</span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <strong>AiSensy WhatsApp API Notice:</strong> {chatError}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setChatError(null)}
-                  style={{
+                    background: '#10b981',
+                    color: '#ffffff',
                     border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    color: '#991b1b',
-                    fontWeight: 700,
-                    padding: '0 4px',
-                    fontSize: '12px'
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
                   }}
                 >
-                  ✕
+                  <PlusIcon size={12} color="#fff" />
+                  <span>New Chat</span>
                 </button>
               </div>
-            )}
 
-            {/* Chat Messages Body (SEPARATELY SCROLLABLE!) */}
-            <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                overflowY: 'auto',
-                padding: '16px 20px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 9,
-                background: '#f8fafc'
-              }}
-            >
-              {/* Date divider */}
-              <div style={{ textAlign: 'center', margin: '2px 0 6px' }}>
-                <span
+              {/* Search Box */}
+              <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', flexShrink: 0 }}>
+                <div
                   style={{
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    color: '#64748b',
-                    background: '#f1f5f9',
-                    padding: '2px 9px',
-                    borderRadius: 10
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    background: '#f8fafc',
+                    borderRadius: 6,
+                    padding: '5px 9px',
+                    border: '1px solid #e2e8f0'
                   }}
                 >
-                  Today • Official WhatsApp API Communication
-                </span>
-              </div>
-
-              {chatLoading ? (
-                <div style={{ textAlign: 'center', padding: '24px', color: '#94a3b8', fontSize: '12px' }}>
-                  <RefreshIcon size={15} className="spin" />
-                  <span style={{ marginLeft: 6 }}>Loading messages...</span>
+                  <SearchIcon size={13} color="#94a3b8" />
+                  <input
+                    type="text"
+                    placeholder="Search numbers or names..."
+                    value={searchNumber}
+                    onChange={(e) => setSearchNumber(e.target.value)}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      outline: 'none',
+                      fontSize: '11.5px',
+                      width: '100%',
+                      color: '#0f172a'
+                    }}
+                  />
+                  {searchNumber && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchNumber('')}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '11px', padding: 0 }}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
-              ) : (
-                chatMessages.map((msg, index) => {
-                  const isOutbound = msg.direction === 'outbound';
-                  return (
-                    <div
-                      key={msg._id || index}
+
+                {/* Filter Chips */}
+                <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                  {[
+                    { id: 'ALL', label: 'All' },
+                    { id: 'CRM', label: 'CRM Leads' },
+                    { id: 'CAMPAIGN', label: 'Campaigns' }
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setFilterCategory(f.id)}
                       style={{
-                        alignSelf: isOutbound ? 'flex-end' : 'flex-start',
-                        maxWidth: '68%',
-                        background: isOutbound ? '#dcfce7' : '#ffffff',
-                        border: isOutbound ? '1px solid #bbf7d0' : '1px solid #e2e8f0',
-                        borderRadius: isOutbound ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
-                        padding: '8px 12px',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                        padding: '2px 7px',
+                        borderRadius: 4,
+                        fontSize: '10.5px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        border: 'none',
+                        background: filterCategory === f.id ? '#0f172a' : '#f1f5f9',
+                        color: filterCategory === f.id ? '#ffffff' : '#64748b'
                       }}
                     >
-                      {/* Campaign Tag */}
-                      {msg.messageType === 'campaign' && (
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Campaign Filter Dropdown in Messages Tab */}
+                <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap' }}>Campaign:</span>
+                  <select
+                    value={messagesCampaignFilter}
+                    onChange={(e) => setMessagesCampaignFilter(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      border: '1px solid #cbd5e1',
+                      fontSize: '10.5px',
+                      background: '#ffffff',
+                      color: '#0f172a',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="ALL">All Campaigns</option>
+                    {availableCampaigns.map((c) => (
+                      <option key={c.campaignName} value={c.campaignName}>
+                        {c.campaignName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Conversations Scrollable List */}
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto'
+                }}
+              >
+                {convLoading ? (
+                  <div style={{ textAlign: 'center', padding: '36px 16px', color: '#94a3b8', fontSize: '12px' }}>
+                    <RefreshIcon size={16} className="spin" />
+                    <div style={{ marginTop: 6 }}>Loading conversations...</div>
+                  </div>
+                ) : filteredConversations.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px 16px', color: '#64748b' }}>
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: '50%',
+                        background: '#f1f5f9',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        margin: '0 auto 10px',
+                        color: '#94a3b8'
+                      }}
+                    >
+                      <MessagesTabIcon size={20} />
+                    </div>
+                    <p style={{ fontSize: '13px', fontWeight: 600, color: '#334155', margin: '0 0 4px' }}>
+                      No chats yet
+                    </p>
+                    <p style={{ fontSize: '11.5px', color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>
+                      Dispatched template messages to your audience will appear here.
+                    </p>
+                  </div>
+                ) : (
+                  filteredConversations.map((c) => {
+                  const isSelected = c.destination === selectedDest;
+                  const avatarBg = getAvatarColor(c.name || c.destination);
+                  return (
+                    <div
+                      key={c.destination}
+                      onClick={() => setSelectedDest(c.destination)}
+                      style={{
+                        padding: '10px 12px',
+                        borderBottom: '1px solid #f8fafc',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 9,
+                        cursor: 'pointer',
+                        background: isSelected ? '#f0fdf4' : '#ffffff',
+                        borderLeft: isSelected ? '3px solid #10b981' : '3px solid transparent',
+                        transition: 'background 0.1s ease'
+                      }}
+                    >
+                      {/* Modern Avatar */}
+                      <div
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: '50%',
+                          background: avatarBg,
+                          color: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 700,
+                          fontSize: '12.5px',
+                          flexShrink: 0,
+                          position: 'relative'
+                        }}
+                      >
+                        {c.name ? c.name.charAt(0).toUpperCase() : 'U'}
                         <div
                           style={{
-                            fontSize: '9.5px',
-                            fontWeight: 700,
-                            color: '#047857',
-                            background: '#ecfdf5',
-                            padding: '1px 6px',
-                            borderRadius: 4,
-                            marginBottom: 5,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 3
+                            position: 'absolute',
+                            bottom: -1,
+                            right: -1,
+                            width: 9,
+                            height: 9,
+                            borderRadius: '50%',
+                            background: '#10b981',
+                            border: '1.5px solid #ffffff'
                           }}
-                        >
-                          <CampaignsTabIcon size={10} />
-                          <span>Campaign: {msg.campaignName || 'CRM'}</span>
-                        </div>
-                      )}
-
-                      {/* Media image */}
-                      {msg.mediaUrl && (
-                        <div style={{ marginBottom: 6, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(0,0,0,0.05)' }}>
-                          <img
-                            src={msg.mediaUrl}
-                            alt="Attachment"
-                            style={{ width: '100%', maxHeight: '160px', objectFit: 'cover', display: 'block' }}
-                          />
-                        </div>
-                      )}
-
-                      {/* Message text */}
-                      <div style={{ fontSize: '12px', color: '#0f172a', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                        {msg.text}
+                        />
                       </div>
 
-                      {/* Time & tick */}
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, marginTop: 3 }}>
-                        <span style={{ fontSize: '9.5px', color: '#64748b' }}>
-                          {formatTime(msg.createdAt)}
-                        </span>
-                        {isOutbound && (
-                          msg.status === 'failed' ? (
-                            <span
-                              title={msg.error || 'AiSensy delivery error'}
-                              style={{
-                                fontSize: '9px',
-                                fontWeight: 700,
-                                color: '#ef4444',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 2,
-                                background: '#fef2f2',
-                                padding: '1px 4px',
-                                borderRadius: 3
-                              }}
-                            >
-                              ⚠️ Not delivered
+                      {/* Content */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <span
+                            style={{
+                              fontSize: '12.5px',
+                              fontWeight: 700,
+                              color: isSelected ? '#047857' : '#0f172a',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              maxWidth: '150px'
+                            }}
+                          >
+                            {c.name || 'Contact'}
+                          </span>
+                          <span style={{ fontSize: '10px', color: '#94a3b8' }}>
+                            {formatTime(c.lastMessageTime)}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
+                          <span style={{ fontSize: '11px', fontWeight: 600, color: '#475569', fontFamily: 'monospace' }}>
+                            {formatPhone(c.destination)}
+                          </span>
+                          {c.source && (
+                            <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: 3, background: '#f1f5f9', color: '#64748b' }}>
+                              {c.source}
                             </span>
-                          ) : msg.status === 'sending' ? (
-                            <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>⏳</span>
-                          ) : (
-                            <DoubleCheckIcon size={12} blue={msg.status === 'read' || msg.status === 'delivered'} />
-                          )
-                        )}
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: '11px',
+                            color: '#64748b',
+                            marginTop: 2,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                        >
+                          {c.lastDirection === 'outbound' && (
+                            <DoubleCheckIcon size={11} blue={c.lastStatus === 'read' || c.lastStatus === 'delivered'} />
+                          )}{' '}
+                          {c.lastMessage}
+                        </div>
                       </div>
                     </div>
                   );
                 })
               )}
-              <div ref={messagesEndRef} />
+              </div>
             </div>
 
-            {/* Interactive Template Quick-Send Banner */}
-            {selectedTemplate && showTemplatePreviewBar && (
-              <div
-                style={{
-                  padding: '7px 14px',
-                  background: '#f0fdf4',
-                  borderTop: '1px solid #bbf7d0',
+            {/* ── Right Pane: Active WhatsApp Chat Window (Independent Scroll) ── */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                background: '#f8fafc',
+                height: '100%',
+                minHeight: 0,
+                overflow: 'hidden',
+                position: 'relative'
+              }}
+            >
+              {!selectedDest ? (
+                <div
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '40px 24px',
+                    textAlign: 'center'
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 56,
+                      height: 56,
+                      borderRadius: '50%',
+                      background: '#f1f5f9',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginBottom: 14,
+                      color: '#94a3b8'
+                    }}
+                  >
+                    <MessagesTabIcon size={26} />
+                  </div>
+                  <h4 style={{ fontSize: '15px', fontWeight: 700, color: '#1e293b', margin: '0 0 6px' }}>
+                    No Conversation Selected
+                  </h4>
+                  <p style={{ fontSize: '12.5px', color: '#64748b', maxWidth: 360, margin: 0, lineHeight: 1.5 }}>
+                    Select a conversation from the left or use the <strong>Audience</strong> tab to dispatch approved templates to your contact groups.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Chat Header (Fixed at top) */}
+                  <div
+                    style={{
+                      padding: '10px 16px',
+                  background: '#ffffff',
                   borderBottom: '1px solid #e2e8f0',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: 10,
                   flexShrink: 0
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-                  {selectedTemplate.headerMediaUrl && (
-                    <img
-                      src={selectedTemplate.headerMediaUrl}
-                      alt="Template Media"
-                      style={{ width: 34, height: 34, borderRadius: 5, objectFit: 'cover', border: '1px solid #86efac', flexShrink: 0 }}
-                    />
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#166534' }}>
-                        {selectedTemplate.name}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: '50%',
+                      background: getAvatarColor(activeContact.name),
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 700,
+                      fontSize: '13.5px'
+                    }}
+                  >
+                    {activeContact.name ? activeContact.name.charAt(0).toUpperCase() : 'W'}
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                        {activeContact.name || 'WhatsApp Contact'}
                       </span>
-                      <span style={{ fontSize: '9px', fontWeight: 600, background: '#dcfce7', color: '#15803d', padding: '1px 5px', borderRadius: 4 }}>
-                        Campaign: {selectedTemplate.campaignName}
+                      <span style={{ fontSize: '11.5px', fontFamily: 'monospace', color: '#059669', fontWeight: 600 }}>
+                        {formatPhone(selectedDest)}
                       </span>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: '#15803d', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 1 }}>
-                      {(selectedTemplate.body || '').replace(/\{FirstName\}|\$FirstName|\{\{1\}\}/g, activeContact.name || 'Client').slice(0, 75)}...
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#10b981' }} />
+                      <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 500 }}>
+                        AiSensy WhatsApp Cloud Connected
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                {/* Action Buttons */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {/* Campaign Template Quick Selector & Dropdown */}
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowTemplateDropdown(!showTemplateDropdown)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        background: '#f0fdf4',
+                        border: '1px solid #bbf7d0',
+                        color: '#166534',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                      title="Select WhatsApp Template"
+                    >
+                      <TemplateIcon size={12} color="#166534" />
+                      <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {selectedTemplate ? selectedTemplate.name : 'Select Template'}
+                      </span>
+                      <span style={{ fontSize: '9px', marginLeft: 2 }}>▾</span>
+                    </button>
+
+                    {/* Template Dropdown Menu */}
+                    {showTemplateDropdown && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: '100%',
+                          right: 0,
+                          marginTop: 4,
+                          width: '290px',
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 8,
+                          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.12)',
+                          zIndex: 100,
+                          overflow: 'hidden'
+                        }}
+                      >
+                        <div style={{ padding: '8px 10px', background: '#f8fafc', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#334155' }}>Approved Templates</span>
+                          <span style={{ fontSize: '9px', fontWeight: 700, color: '#16a34a', background: '#dcfce7', padding: '1px 5px', borderRadius: 4 }}>
+                            ✓ Meta Live
+                          </span>
+                        </div>
+
+                        <div style={{ maxHeight: '210px', overflowY: 'auto' }}>
+                          {templates.map((tpl) => (
+                            <div
+                              key={tpl._id}
+                              onClick={() => {
+                                setSelectedTemplate(tpl);
+                                setChatCampaignName(tpl.campaignName || 'CRM');
+                                setShowTemplatePreviewBar(true);
+                                setShowTemplateDropdown(false);
+                              }}
+                              style={{
+                                padding: '8px 10px',
+                                borderBottom: '1px solid #f8fafc',
+                                cursor: 'pointer',
+                                background: selectedTemplate?._id === tpl._id ? '#ecfdf5' : '#ffffff',
+                                transition: 'background 0.15s'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: '11.5px', fontWeight: 600, color: selectedTemplate?._id === tpl._id ? '#047857' : '#0f172a' }}>
+                                  {tpl.name}
+                                </span>
+                                <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: 3, background: '#f1f5f9', color: '#64748b' }}>
+                                  {tpl.campaignName}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '10px', color: '#64748b', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {tpl.body.slice(0, 45)}...
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div style={{ padding: '7px 10px', background: '#f8fafc', borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowTemplateDropdown(false);
+                              setTemplateModalMode('list');
+                              setShowTemplateModal(true);
+                            }}
+                            style={{
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#059669',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4
+                            }}
+                          >
+                            <TemplateIcon size={12} color="#059669" />
+                            <span>View Approved Templates</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     type="button"
-                    disabled={sendingChat}
-                    onClick={() => handleSendTemplate(selectedTemplate)}
+                    onClick={() => {
+                      setTemplateModalMode('list');
+                      setShowTemplateModal(true);
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '4px 9px',
+                      borderRadius: 6,
+                      background: '#ffffff',
+                      color: '#334155',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                    title="Open Template Manager"
+                  >
+                    <TemplateIcon size={12} color="#64748b" />
+                    <span>Templates</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleJumpToCampaign(selectedDest)}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 5,
+                      padding: '5px 10px',
+                      borderRadius: 6,
+                      background: '#ecfdf5',
+                      color: '#059669',
+                      border: '1px solid #a7f3d0',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <CampaignsTabIcon size={12} />
+                    <span>Send Campaign</span>
+                  </button>
+
+                  <a
+                    href={`https://wa.me/${selectedDest}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '5px 10px',
+                      borderRadius: 6,
+                      background: '#ffffff',
+                      color: '#0f172a',
+                      border: '1px solid #e2e8f0',
+                      textDecoration: 'none',
+                      fontSize: '11px',
+                      fontWeight: 600
+                    }}
+                  >
+                    <WhatsAppIcon size={12} />
+                    <span>WhatsApp Web</span>
+                    <ExternalLinkIcon size={10} />
+                  </a>
+                </div>
+              </div>
+
+              {/* AiSensy Error Banner if last dispatch had an issue */}
+              {chatError && (
+                <div
+                  style={{
+                    padding: '7px 14px',
+                    background: '#fef2f2',
+                    borderBottom: '1px solid #fecaca',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    color: '#991b1b',
+                    fontSize: '11px',
+                    flexShrink: 0
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: '13px' }}>⚠️</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <strong>AiSensy WhatsApp API Notice:</strong> {chatError}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setChatError(null)}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      color: '#991b1b',
+                      fontWeight: 700,
+                      padding: '0 4px',
+                      fontSize: '12px'
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Chat Messages Body (SEPARATELY SCROLLABLE!) */}
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  padding: '16px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 9,
+                  background: '#f8fafc'
+                }}
+              >
+                {/* Date divider */}
+                <div style={{ textAlign: 'center', margin: '2px 0 6px' }}>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      color: '#64748b',
+                      background: '#f1f5f9',
+                      padding: '2px 9px',
+                      borderRadius: 10
+                    }}
+                  >
+                    Today • Official WhatsApp API Communication
+                  </span>
+                </div>
+
+                {chatLoading ? (
+                  <div style={{ textAlign: 'center', padding: '24px', color: '#94a3b8', fontSize: '12px' }}>
+                    <RefreshIcon size={15} className="spin" />
+                    <span style={{ marginLeft: 6 }}>Loading messages...</span>
+                  </div>
+                ) : chatMessages.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 16px', color: '#94a3b8' }}>
+                    <p style={{ fontSize: '13px', fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                      No messages exchanged yet
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>
+                      Send an approved template below to start the conversation with {activeContact.name || formatPhone(selectedDest)}.
+                    </p>
+                  </div>
+                ) : (
+                  chatMessages.map((msg, index) => {
+                    const isOutbound = msg.direction === 'outbound';
+                    return (
+                      <div
+                        key={msg._id || index}
+                        style={{
+                          alignSelf: isOutbound ? 'flex-end' : 'flex-start',
+                          maxWidth: '68%',
+                          background: isOutbound ? '#dcfce7' : '#ffffff',
+                          border: isOutbound ? '1px solid #bbf7d0' : '1px solid #e2e8f0',
+                          borderRadius: isOutbound ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
+                          padding: '8px 12px',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                        }}
+                      >
+                        {/* Campaign Tag */}
+                        {msg.messageType === 'campaign' && (
+                          <div
+                            style={{
+                              fontSize: '9.5px',
+                              fontWeight: 700,
+                              color: '#047857',
+                              background: '#ecfdf5',
+                              padding: '1px 6px',
+                              borderRadius: 4,
+                              marginBottom: 5,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 3
+                            }}
+                          >
+                            <CampaignsTabIcon size={10} />
+                            <span>Campaign: {msg.campaignName || 'CRM'}</span>
+                          </div>
+                        )}
+
+                        {/* Media image */}
+                        {msg.mediaUrl && (
+                          <div style={{ marginBottom: 6, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(0,0,0,0.05)' }}>
+                            <img
+                              src={msg.mediaUrl}
+                              alt="Attachment"
+                              style={{ width: '100%', maxHeight: '160px', objectFit: 'cover', display: 'block' }}
+                            />
+                          </div>
+                        )}
+
+                        {/* Message text */}
+                        <div style={{ fontSize: '12px', color: '#0f172a', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {msg.text}
+                        </div>
+
+                        {/* Time & tick */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3, marginTop: 3 }}>
+                          <span style={{ fontSize: '9.5px', color: '#64748b' }}>
+                            {formatTime(msg.createdAt)}
+                          </span>
+                          {isOutbound && (
+                            msg.status === 'failed' ? (
+                              <span
+                                title={msg.error || 'AiSensy delivery error'}
+                                style={{
+                                  fontSize: '9px',
+                                  fontWeight: 700,
+                                  color: '#ef4444',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 2,
+                                  background: '#fef2f2',
+                                  padding: '1px 4px',
+                                  borderRadius: 3
+                                }}
+                              >
+                                ⚠️ Not delivered
+                              </span>
+                            ) : msg.status === 'sending' ? (
+                              <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>⏳</span>
+                            ) : (
+                              <DoubleCheckIcon size={12} blue={msg.status === 'read' || msg.status === 'delivered'} />
+                            )
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Pinned Bottom Action Bar: Approved Template Sender (Chat input not needed) */}
+              <div
+                style={{
+                  padding: '12px 16px',
+                  background: '#ffffff',
+                  borderTop: '1px solid #e2e8f0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  flexShrink: 0,
+                  boxShadow: '0 -2px 10px rgba(0,0,0,0.02)'
+                }}
+              >
+                {selectedTemplate ? (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                      {selectedTemplate.headerMediaUrl && (
+                        <img
+                          src={selectedTemplate.headerMediaUrl}
+                          alt="Template Media"
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 6,
+                            objectFit: 'cover',
+                            border: '1px solid #86efac',
+                            flexShrink: 0
+                          }}
+                        />
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: '#166534' }}>
+                            {selectedTemplate.name}
+                          </span>
+                          <span style={{ fontSize: '9.5px', fontWeight: 600, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 4 }}>
+                            ✓ Approved Live Campaign: {selectedTemplate.campaignName}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#475569', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+                          {(selectedTemplate.body || '').replace(/\{FirstName\}|\$FirstName|\{\{1\}\}/g, activeContact.name || 'Client')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowTemplateModal(true)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: 6,
+                          background: '#f8fafc',
+                          border: '1px solid #cbd5e1',
+                          color: '#475569',
+                          fontSize: '11.5px',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                        title="View all approved templates"
+                      >
+                        Change Template
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={sendingChat}
+                        onClick={() => handleSendTemplate(selectedTemplate)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '7px 18px',
+                          borderRadius: 6,
+                          background: sendingChat ? '#6ee7b7' : '#10b981',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: sendingChat ? 'not-allowed' : 'pointer',
+                          boxShadow: '0 2px 4px rgba(16,185,129,0.3)'
+                        }}
+                        title="Dispatch this approved template to client's WhatsApp"
+                      >
+                        <SendIcon size={13} color="#ffffff" />
+                        <span>{sendingChat ? 'Sending...' : `Send Template to ${activeContact.name || 'Lead'}`}</span>
+                      </button>
+
+                      <a
+                        href={`https://web.whatsapp.com/send?phone=${selectedDest}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open in WhatsApp Web for live 1-on-1 chatting"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 32,
+                          height: 32,
+                          borderRadius: 6,
+                          background: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          color: '#16a34a',
+                          textDecoration: 'none'
+                        }}
+                      >
+                        <WhatsAppIcon size={16} color="#16a34a" />
+                      </a>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <TemplateIcon size={16} color="#059669" />
+                      <span style={{ fontSize: '12px', color: '#475569' }}>
+                        Select an approved WhatsApp template to dispatch directly to <strong>{activeContact.name || selectedDest}</strong>
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowTemplateModal(true)}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 6,
+                          background: '#10b981',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontSize: '11.5px',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Choose Template
+                      </button>
+                      <a
+                        href={`https://web.whatsapp.com/send?phone=${selectedDest}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open in WhatsApp Web"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '6px 12px',
+                          borderRadius: 6,
+                          background: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          color: '#16a34a',
+                          textDecoration: 'none',
+                          fontSize: '11.5px',
+                          fontWeight: 600,
+                          gap: 4
+                        }}
+                      >
+                        <WhatsAppIcon size={14} color="#16a34a" />
+                        <span>WhatsApp Web</span>
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* TAB 1.5: AUDIENCE (PRIVATE GROUPS, IMPORT & CONTACT MANAGEMENT)            */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {activeTab === 'audience' && (
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            background: '#ffffff',
+            borderRadius: 14,
+            border: '1px solid #e2e8f0',
+            display: 'flex',
+            overflow: 'hidden',
+            boxShadow: '0 1px 3px rgba(15,23,42,0.04)',
+            marginBottom: 20
+          }}
+        >
+          {/* LEFT COLUMN: AUDIENCE GROUPS LIST (320px) */}
+          <div
+            style={{
+              width: '320px',
+              borderRight: '1px solid #e2e8f0',
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#f8fafc',
+              flexShrink: 0
+            }}
+          >
+            {/* Groups Header */}
+            <div
+              style={{
+                padding: '12px 14px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: '#ffffff'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <UsersIcon size={16} color="#059669" />
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>
+                  Audience Groups
+                </span>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    padding: '1px 6px',
+                    borderRadius: 8,
+                    background: '#ecfdf5',
+                    color: '#059669'
+                  }}
+                >
+                  {audienceGroups.length}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowCreateGroupModal(true)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '5px 10px',
+                  borderRadius: 6,
+                  background: '#10b981',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 2px rgba(16,185,129,0.25)'
+                }}
+              >
+                <PlusIcon size={11} color="#ffffff" />
+                <span>New Group</span>
+              </button>
+            </div>
+
+            {/* Group Search Input */}
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', background: '#ffffff' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '5px 9px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc'
+                }}
+              >
+                <SearchIcon size={12} color="#94a3b8" />
+                <input
+                  type="text"
+                  placeholder="Search groups..."
+                  value={searchGroupQuery}
+                  onChange={(e) => setSearchGroupQuery(e.target.value)}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    fontSize: '11.5px',
+                    width: '100%',
+                    outline: 'none',
+                    color: '#0f172a'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Groups Scroll List */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px' }}>
+              {loadingGroups ? (
+                <div style={{ textAlign: 'center', padding: '30px 10px', color: '#94a3b8', fontSize: '11.5px' }}>
+                  Loading your audience groups...
+                </div>
+              ) : audienceGroups.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '36px 14px', color: '#64748b' }}>
+                  <div style={{ width: 42, height: 42, borderRadius: '50%', background: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 8px', color: '#059669' }}>
+                    <UsersIcon size={20} color="#059669" />
+                  </div>
+                  <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#1e293b' }}>
+                    No Audience Groups
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: 3 }}>
+                    Create private groups to import and segment contacts for WhatsApp outreach.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateGroupModal(true)}
+                    style={{
+                      marginTop: 10,
                       padding: '5px 12px',
                       borderRadius: 6,
                       background: '#10b981',
                       color: '#ffffff',
                       border: 'none',
-                      fontSize: '11.5px',
-                      fontWeight: 700,
-                      cursor: sendingChat ? 'not-allowed' : 'pointer',
-                      boxShadow: '0 1px 2px rgba(16,185,129,0.3)'
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer'
                     }}
-                    title="Send this pre-approved WhatsApp template"
                   >
-                    <SendIcon size={11} color="#ffffff" />
-                    <span>{sendingChat ? 'Sending...' : `Send Template to ${activeContact.name || 'Lead'}`}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowTemplatePreviewBar(false)}
-                    title="Hide Banner"
-                    style={{ border: 'none', background: 'transparent', color: '#166534', cursor: 'pointer', fontSize: '12px' }}
-                  >
-                    ✕
+                    + Create First Group
                   </button>
                 </div>
-              </div>
-            )}
+              ) : (
+                audienceGroups
+                  .filter((g) => !searchGroupQuery || (g.name || '').toLowerCase().includes(searchGroupQuery.toLowerCase()))
+                  .map((g) => {
+                    const isSelected = selectedGroup?._id === g._id;
+                    return (
+                      <div
+                        key={g._id}
+                        onClick={() => setSelectedGroup(g)}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          marginBottom: 6,
+                          cursor: 'pointer',
+                          background: isSelected ? '#ecfdf5' : '#ffffff',
+                          border: isSelected ? '1.5px solid #10b981' : '1px solid #e2e8f0',
+                          transition: 'all 0.15s ease',
+                          boxShadow: isSelected ? '0 1px 3px rgba(16,185,129,0.1)' : '0 1px 2px rgba(0,0,0,0.02)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ flex: 1, minWidth: 0, paddingRight: 6 }}>
+                            <div style={{ fontSize: '12.5px', fontWeight: 700, color: isSelected ? '#047857' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {g.name}
+                            </div>
+                            {g.description && (
+                              <div style={{ fontSize: '11px', color: '#64748b', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {g.description}
+                              </div>
+                            )}
+                          </div>
 
-            {/* If template banner hidden, give quick re-open toggle */}
-            {selectedTemplate && !showTemplatePreviewBar && (
-              <div style={{ padding: '3px 14px', background: '#f8fafc', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
-                <button
-                  type="button"
-                  onClick={() => setShowTemplatePreviewBar(true)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    color: '#059669',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3
-                  }}
-                >
-                  <TemplateIcon size={10} color="#059669" /> Show Template Quick-Send ({selectedTemplate.name})
-                </button>
-              </div>
-            )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: 10,
+                                background: isSelected ? '#dcfce7' : '#f1f5f9',
+                                color: isSelected ? '#15803d' : '#475569'
+                              }}
+                            >
+                              {g.contactCount || 0}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteGroup(g._id, g.name);
+                              }}
+                              title="Delete Group"
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                color: '#ef4444'
+                              }}
+                            >
+                              <TrashIcon size={12} color="#ef4444" />
+                            </button>
+                          </div>
+                        </div>
 
-            {/* Quick Templates Chips (Fixed above input) */}
-            <div
-              style={{
-                padding: '5px 14px',
-                background: '#ffffff',
-                borderTop: '1px solid #f1f5f9',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                overflowX: 'auto',
-                whiteSpace: 'nowrap',
-                flexShrink: 0
-              }}
-            >
-              <span style={{ fontSize: '10px', fontWeight: 600, color: '#94a3b8' }}>Quick:</span>
-              {[
-                "Hi! Following up on your inquiry with Bhoomi TechZone.",
-                "Here is our business proposal and service catalog.",
-                "Are you available for a quick 5-min discovery call?",
-                "Thank you for contacting us! How can our CRM team assist you?"
-              ].map((template, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => setNewMessageText(template)}
-                  style={{
-                    padding: '2px 7px',
-                    borderRadius: 10,
-                    background: '#f8fafc',
-                    border: '1px solid #e2e8f0',
-                    fontSize: '10px',
-                    color: '#475569',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {template.slice(0, 30)}...
-                </button>
-              ))}
+                        {Array.isArray(g.tags) && g.tags.length > 0 && (
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
+                            {g.tags.map((t, tidx) => (
+                              <span
+                                key={tidx}
+                                style={{
+                                  fontSize: '9px',
+                                  padding: '1px 5px',
+                                  borderRadius: 4,
+                                  background: '#f1f5f9',
+                                  color: '#64748b'
+                                }}
+                              >
+                                #{t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+              )}
             </div>
 
-            {/* Optional Media Drawer */}
-            {showMediaInput && (
-              <div
-                style={{
-                  padding: '6px 14px',
-                  background: '#f8fafc',
-                  borderTop: '1px solid #e2e8f0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  flexShrink: 0
-                }}
-              >
-                <input
-                  type="text"
-                  placeholder="Paste image or media URL..."
-                  value={newChatMediaUrl}
-                  onChange={(e) => setNewChatMediaUrl(e.target.value)}
-                  style={{
-                    flex: 1,
-                    padding: '4px 8px',
-                    borderRadius: 5,
-                    border: '1px solid #cbd5e1',
-                    fontSize: '11px'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setNewChatMediaUrl(DEFAULT_MEDIA_URL)}
-                  style={{
-                    padding: '3px 7px',
-                    background: '#ffffff',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 5,
-                    fontSize: '10.5px',
-                    color: '#475569',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Sample Media
-                </button>
-              </div>
-            )}
+            {/* Bottom info badge */}
+            <div style={{ padding: '8px 12px', background: '#f1f5f9', borderTop: '1px solid #e2e8f0', fontSize: '10.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <ShieldIcon size={12} color="#059669" />
+              <span>Private to your account (user-isolated)</span>
+            </div>
+          </div>
 
-            {/* Chat Input Bar (Pinned firmly at bottom) */}
-            <form
-              onSubmit={handleSendMessage}
-              style={{
-                padding: '8px 14px',
-                background: '#ffffff',
-                borderTop: '1px solid #e2e8f0',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                flexShrink: 0
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setShowMediaInput(!showMediaInput)}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: '50%',
-                  background: showMediaInput ? '#ecfdf5' : '#f8fafc',
-                  color: showMediaInput ? '#059669' : '#64748b',
-                  border: '1px solid #e2e8f0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer'
-                }}
-                title="Attach Media URL"
-              >
-                <PaperclipIcon size={14} color={showMediaInput ? '#059669' : '#64748b'} />
-              </button>
-
-              <input
-                type="text"
-                placeholder={`Type a WhatsApp message to ${activeContact.name || formatPhone(selectedDest)}...`}
-                value={newMessageText}
-                onChange={(e) => setNewMessageText(e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: '8px 12px',
-                  borderRadius: 18,
-                  border: '1px solid #cbd5e1',
-                  outline: 'none',
-                  fontSize: '12.5px',
-                  color: '#0f172a',
-                  background: '#f8fafc'
-                }}
-              />
-
-              {/* Direct WhatsApp Web Sender with typed custom message */}
-              {newMessageText.trim() && (
-                <a
-                  href={`https://wa.me/${selectedDest}?text=${encodeURIComponent(newMessageText)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Send this custom text directly via WhatsApp Web"
+          {/* RIGHT COLUMN: CONTACT TABLE & ACTIONS (FLEX: 1) */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#ffffff' }}>
+            {selectedGroup ? (
+              <>
+                {/* Group Details Header */}
+                <div
                   style={{
-                    display: 'inline-flex',
+                    padding: '14px 18px',
+                    borderBottom: '1px solid #e2e8f0',
+                    display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 34,
-                    height: 34,
-                    borderRadius: '50%',
-                    background: '#25D366',
-                    color: '#ffffff',
-                    textDecoration: 'none',
-                    boxShadow: '0 1px 3px rgba(37,211,102,0.35)',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    background: '#ffffff',
                     flexShrink: 0
                   }}
                 >
-                  <WhatsAppIcon size={16} color="#ffffff" />
-                </a>
-              )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                        {selectedGroup.name}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 12,
+                          background: '#ecfdf5',
+                          color: '#059669',
+                          border: '1px solid #a7f3d0'
+                        }}
+                      >
+                        {groupContacts.length} Contacts
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '9.5px',
+                          fontWeight: 600,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          background: '#f1f5f9',
+                          color: '#64748b'
+                        }}
+                      >
+                        🔒 Private to you
+                      </span>
+                    </div>
+                    {selectedGroup.description && (
+                      <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: 2 }}>
+                        {selectedGroup.description}
+                      </div>
+                    )}
+                  </div>
 
-              <button
-                type="submit"
-                disabled={sendingChat || (!newMessageText.trim() && !newChatMediaUrl.trim())}
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: '50%',
-                  background: (!newMessageText.trim() && !newChatMediaUrl.trim()) ? '#cbd5e1' : '#10b981',
-                  border: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: (!newMessageText.trim() && !newChatMediaUrl.trim()) ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 1px 3px rgba(16,185,129,0.25)',
-                  transition: 'background 0.15s ease'
-                }}
-                title="Send via AiSensy & Save to CRM"
-              >
-                {sendingChat ? <RefreshIcon size={13} className="spin" /> : <SendIcon size={14} color="#fff" />}
-              </button>
-            </form>
+                  {/* Actions */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddContactModal(true)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        background: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        color: '#334155',
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <PlusIcon size={12} color="#059669" />
+                      <span>Add Contact</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowImportModal(true);
+                        setImportTab('csv');
+                        fetchMyCrmLeads();
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        background: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        color: '#334155',
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <UploadCloudIcon size={13} color="#059669" />
+                      <span>Import Contacts</span>
+                    </button>
+
+                    {selectedTemplate && (
+                      <button
+                        type="button"
+                        disabled={groupContacts.length === 0}
+                        onClick={handleBroadcastToGroup}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '6px 14px',
+                          borderRadius: 6,
+                          background: groupContacts.length === 0 ? '#cbd5e1' : '#10b981',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontSize: '11.5px',
+                          fontWeight: 700,
+                          cursor: groupContacts.length === 0 ? 'not-allowed' : 'pointer',
+                          boxShadow: groupContacts.length === 0 ? 'none' : '0 1px 3px rgba(16,185,129,0.3)'
+                        }}
+                        title={`Send approved template "${selectedTemplate.name}" to all contacts in this group`}
+                      >
+                        <SendIcon size={12} color="#ffffff" />
+                        <span>Send Template to Group</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sub-toolbar: Search within group */}
+                <div
+                  style={{
+                    padding: '8px 18px',
+                    background: '#f8fafc',
+                    borderBottom: '1px solid #e2e8f0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    flexShrink: 0
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      width: '260px'
+                    }}
+                  >
+                    <SearchIcon size={12} color="#94a3b8" />
+                    <input
+                      type="text"
+                      placeholder="Search contacts by name or phone..."
+                      value={searchContactQuery}
+                      onChange={(e) => setSearchContactQuery(e.target.value)}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        fontSize: '11.5px',
+                        outline: 'none',
+                        width: '100%',
+                        color: '#0f172a'
+                      }}
+                    />
+                  </div>
+
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    Showing {
+                      groupContacts.filter(
+                        (c) =>
+                          !searchContactQuery ||
+                          (c.name || '').toLowerCase().includes(searchContactQuery.toLowerCase()) ||
+                          (c.phone || '').includes(searchContactQuery)
+                      ).length
+                    } of {groupContacts.length} contacts
+                  </span>
+                </div>
+
+                {/* Contacts Table View */}
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                  {loadingContacts ? (
+                    <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '12px' }}>
+                      Loading group contacts...
+                    </div>
+                  ) : groupContacts.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '60px 20px', color: '#64748b' }}>
+                      <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: '#059669' }}>
+                        <UsersIcon size={24} color="#059669" />
+                      </div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                        No Contacts in this Group Yet
+                      </div>
+                      <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: 4, maxWidth: '360px', margin: '4px auto 14px' }}>
+                        Add contacts manually or import leads from your CSV/Excel spreadsheet or CRM pipeline.
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowAddContactModal(true)}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: 6,
+                            background: '#10b981',
+                            color: '#ffffff',
+                            border: 'none',
+                            fontSize: '11.5px',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          + Add Contact
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowImportModal(true);
+                            setImportTab('csv');
+                            fetchMyCrmLeads();
+                          }}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: 6,
+                            background: '#ffffff',
+                            border: '1px solid #cbd5e1',
+                            color: '#334155',
+                            fontSize: '11.5px',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          📥 Import Contacts
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
+                      <thead>
+                        <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontSize: '11px', fontWeight: 700 }}>
+                          <th style={{ padding: '10px 14px' }}>CONTACT</th>
+                          <th style={{ padding: '10px 14px' }}>PHONE</th>
+                          <th style={{ padding: '10px 14px' }}>COMPANY</th>
+                          <th style={{ padding: '10px 14px' }}>SOURCE</th>
+                          <th style={{ padding: '10px 14px' }}>ADDED</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'right' }}>ACTIONS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groupContacts
+                          .filter(
+                            (c) =>
+                              !searchContactQuery ||
+                              (c.name || '').toLowerCase().includes(searchContactQuery.toLowerCase()) ||
+                              (c.phone || '').includes(searchContactQuery)
+                          )
+                          .map((contact) => (
+                            <tr
+                              key={contact._id}
+                              style={{
+                                borderBottom: '1px solid #f1f5f9',
+                                transition: 'background 0.15s'
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              <td style={{ padding: '10px 14px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <div
+                                    style={{
+                                      width: 28,
+                                      height: 28,
+                                      borderRadius: '50%',
+                                      background: '#ecfdf5',
+                                      color: '#047857',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontWeight: 700,
+                                      fontSize: '11px',
+                                      flexShrink: 0
+                                    }}
+                                  >
+                                    {(contact.name || 'C').charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 600, color: '#0f172a' }}>{contact.name}</div>
+                                    {contact.email && (
+                                      <div style={{ fontSize: '10.5px', color: '#64748b' }}>{contact.email}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontWeight: 600, color: '#0f172a' }}>
+                                +{contact.phone}
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#475569' }}>
+                                {contact.company || '—'}
+                              </td>
+                              <td style={{ padding: '10px 14px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '9.5px',
+                                    fontWeight: 600,
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    background: contact.source === 'crm_lead' ? '#e0f2fe' : contact.source === 'csv_import' ? '#fef3c7' : '#f1f5f9',
+                                    color: contact.source === 'crm_lead' ? '#0369a1' : contact.source === 'csv_import' ? '#92400e' : '#475569'
+                                  }}
+                                >
+                                  {contact.source === 'crm_lead' ? 'CRM Lead' : contact.source === 'csv_import' ? 'CSV Import' : 'Manual'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#64748b', fontSize: '11px' }}>
+                                {contact.createdAt ? new Date(contact.createdAt).toLocaleDateString() : '—'}
+                              </td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedDest(contact.phone);
+                                      setActiveTab('messages');
+                                    }}
+                                    title="Open 1-on-1 WhatsApp Chat with this contact"
+                                    style={{
+                                      padding: '3px 8px',
+                                      borderRadius: 5,
+                                      background: '#f0fdf4',
+                                      border: '1px solid #bbf7d0',
+                                      color: '#16a34a',
+                                      fontSize: '11px',
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 3
+                                    }}
+                                  >
+                                    <WhatsAppIcon size={12} color="#16a34a" />
+                                    <span>Chat</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteContact(contact._id)}
+                                    title="Remove from group"
+                                    style={{
+                                      border: 'none',
+                                      background: 'transparent',
+                                      cursor: 'pointer',
+                                      padding: '2px 4px',
+                                      color: '#ef4444'
+                                    }}
+                                  >
+                                    <TrashIcon size={12} color="#ef4444" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: '#64748b' }}>
+                <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                  <UsersIcon size={24} color="#94a3b8" />
+                </div>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b' }}>
+                  No Group Selected
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: 4 }}>
+                  Select an audience group on the left or create a new group to manage its contacts.
+                </div>
+              </div>
+            )}
           </div>
         </div>
-        )
       )}
 
       {/* ────────────────────────────────────────────────────────────────────────── */}
@@ -2405,434 +3307,87 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
             </p>
           </div>
         ) : (
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px' }}>
-          {/* ASSIGNMENT SUCCESS NOTIFICATION TOAST */}
-          {assignSuccessMsg && (
-            <div
-              style={{
-                padding: '9px 14px',
-                marginBottom: 12,
-                borderRadius: 8,
-                background: '#ecfdf5',
-                border: '1px solid #a7f3d0',
-                color: '#065f46',
-                fontSize: '12px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                boxShadow: '0 2px 4px rgba(16,185,129,0.1)'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <UserCheckIcon size={15} color="#059669" />
-                <span>{assignSuccessMsg}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAssignSuccessMsg(null)}
-                style={{ background: 'none', border: 'none', color: '#065f46', cursor: 'pointer', fontSize: '13px', padding: 0 }}
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
-          {/* ──────────────────────────────────────────────────────────────────────── */}
-          {/* CAMPAIGN DIRECTORY & SALES ROLE ASSIGNMENT HUB                            */}
-          {/* ──────────────────────────────────────────────────────────────────────── */}
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: 12,
-              border: '1px solid #e2e8f0',
-              padding: '16px 18px',
-              marginBottom: 14,
-              boxShadow: '0 1px 3px rgba(15,23,42,0.03)'
-            }}
-          >
-            {/* Header: Title & Primary Actions */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: 12,
-                marginBottom: 14
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 9,
-                    background: '#ecfdf5',
-                    color: '#059669',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: '1px solid #d1fae5',
-                    flexShrink: 0
-                  }}
-                >
-                  <CampaignsTabIcon size={18} />
-                </div>
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
-                    Campaigns & Sales Team Assignment
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: 1 }}>
-                    Select a campaign to inspect conversations, or assign dedicated sales roles (Executives, Telecallers, Managers) to handle outreach.
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAssignModal(selectedCampaignFilter !== 'ALL' ? selectedCampaignFilter : (availableCampaigns[0]?.campaignName || 'CRM'))}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '7px 14px',
-                      borderRadius: 7,
-                      background: '#10b981',
-                      color: '#ffffff',
-                      border: 'none',
-                      fontSize: '11.5px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      boxShadow: '0 1px 3px rgba(16,185,129,0.28)',
-                      transition: 'all 0.15s ease'
-                    }}
-                    title="Assign any campaign to sales team members"
-                  >
-                    <UserPlusIcon size={14} color="#ffffff" />
-                    <span>Assign Campaign to Sales Team</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    fetchLogs();
-                    fetchTemplates();
-                    if (isAdmin) fetchSalesEmployees();
-                  }}
-                  style={{
-                    padding: '7px 12px',
-                    borderRadius: 7,
-                    border: '1px solid #e2e8f0',
-                    background: '#ffffff',
-                    fontSize: '11.5px',
-                    fontWeight: 600,
-                    color: '#334155',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5
-                  }}
-                >
-                  <RefreshIcon size={12} className={logsLoading ? 'spin' : ''} />
-                  <span>{logsLoading ? 'Syncing...' : 'Refresh'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Campaign Cards Grid */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
-                gap: 10
-              }}
-            >
-              {/* Card 1: All Campaigns */}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px' }}>
+            {/* ASSIGNMENT SUCCESS NOTIFICATION TOAST */}
+            {assignSuccessMsg && (
               <div
-                onClick={() => setSelectedCampaignFilter('ALL')}
                 style={{
-                  padding: '11px 13px',
-                  borderRadius: 10,
-                  border: selectedCampaignFilter === 'ALL' ? '2px solid #10b981' : '1px solid #e2e8f0',
-                  background: selectedCampaignFilter === 'ALL' ? '#f0fdf4' : '#fafafa',
-                  cursor: 'pointer',
-                  transition: 'all 0.12s ease',
+                  padding: '9px 14px',
+                  marginBottom: 12,
+                  borderRadius: 8,
+                  background: '#ecfdf5',
+                  border: '1px solid #a7f3d0',
+                  color: '#065f46',
+                  fontSize: '12px',
+                  fontWeight: 600,
                   display: 'flex',
-                  flexDirection: 'column',
+                  alignItems: 'center',
                   justifyContent: 'space-between',
-                  boxShadow: selectedCampaignFilter === 'ALL' ? '0 2px 6px rgba(16,185,129,0.12)' : '0 1px 2px rgba(15,23,42,0.02)'
+                  boxShadow: '0 2px 4px rgba(16,185,129,0.1)'
                 }}
               >
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f172a' }}>
-                      All Campaigns
-                    </span>
-                    <span
-                      style={{
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        padding: '1px 6px',
-                        borderRadius: 10,
-                        background: selectedCampaignFilter === 'ALL' ? '#dcfce7' : '#f1f5f9',
-                        color: selectedCampaignFilter === 'ALL' ? '#15803d' : '#64748b'
-                      }}
-                    >
-                      {logs.length} chats
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.35, marginBottom: 8 }}>
-                    Full CRM view across all registered campaign templates
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <UserCheckIcon size={15} color="#059669" />
+                  <span>{assignSuccessMsg}</span>
                 </div>
-
-                <div style={{ paddingTop: 6, borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '10.5px', color: '#059669', fontWeight: 600 }}>
-                    {availableCampaigns.length} campaigns
-                  </span>
-                  {selectedCampaignFilter === 'ALL' && (
-                    <span style={{ fontSize: '10px', fontWeight: 700, color: '#059669' }}>
-                      ● Active Filter
-                    </span>
-                  )}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setAssignSuccessMsg(null)}
+                  style={{ background: 'none', border: 'none', color: '#065f46', cursor: 'pointer', fontSize: '13px', padding: 0 }}
+                >
+                  ✕
+                </button>
               </div>
+            )}
 
-              {/* Individual Campaign Cards */}
-              {availableCampaigns.map((c) => {
-                const count = logs.filter((l) => (l.campaignName || 'CRM').trim().toLowerCase() === c.campaignName.trim().toLowerCase()).length;
-                const assignees = getCampaignAssignees(c.campaignName);
-                const isSelected = selectedCampaignFilter === c.campaignName;
-                const isAssignedToMe = user && assignees.some((a) => {
-                  const aId = typeof a === 'object' && a ? String(a._id || a.id) : String(a);
-                  return aId === String(user._id || user.id);
-                });
-
-                return (
-                  <div
-                    key={c.campaignName}
-                    onClick={() => setSelectedCampaignFilter(c.campaignName)}
-                    style={{
-                      padding: '11px 13px',
-                      borderRadius: 10,
-                      border: isSelected ? '2px solid #10b981' : '1px solid #e2e8f0',
-                      background: isSelected ? '#f0fdf4' : '#ffffff',
-                      cursor: 'pointer',
-                      transition: 'all 0.12s ease',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      boxShadow: isSelected ? '0 2px 6px rgba(16,185,129,0.12)' : '0 1px 2px rgba(15,23,42,0.02)'
-                    }}
-                  >
-                    <div>
-                      {/* Top: Name & Count */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                        <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f172a' }}>
-                          {c.campaignName}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: '10px',
-                            fontWeight: 700,
-                            padding: '1px 6px',
-                            borderRadius: 10,
-                            background: count > 0 ? '#eff6ff' : '#f8fafc',
-                            color: count > 0 ? '#1d4ed8' : '#94a3b8',
-                            border: count > 0 ? '1px solid #bfdbfe' : '1px solid #e2e8f0'
-                          }}
-                        >
-                          {count} chats
-                        </span>
-                      </div>
-
-                      {/* Display name */}
-                      {c.displayName && c.displayName !== c.campaignName && (
-                        <div
-                          style={{
-                            fontSize: '11px',
-                            color: '#64748b',
-                            marginBottom: 6,
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }}
-                          title={c.displayName}
-                        >
-                          {c.displayName}
-                        </div>
-                      )}
-
-                      {/* Assigned to me pill */}
-                      {isAssignedToMe && (
-                        <div style={{ marginBottom: 6 }}>
-                          <span style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 6px', borderRadius: 10, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>
-                            ✓ Assigned to You
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Bottom: Team Avatars & 1-Click Assign */}
-                    <div
-                      style={{
-                        paddingTop: 7,
-                        borderTop: '1px solid #f1f5f9',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        {assignees.length === 0 ? (
-                          <span style={{ fontSize: '10.5px', color: '#94a3b8', fontStyle: 'italic' }}>
-                            Unassigned
-                          </span>
-                        ) : (
-                          <div style={{ display: 'flex', alignItems: 'center' }}>
-                            <div style={{ display: 'flex', alignItems: 'center' }}>
-                              {assignees.slice(0, 3).map((assignee, idx) => {
-                                const aName = typeof assignee === 'object' && assignee ? `${assignee.firstName || ''} ${assignee.lastName || ''}`.trim() || assignee.email || 'Sales Rep' : 'Sales Rep';
-                                const aRole = typeof assignee === 'object' && assignee ? assignee.designation || assignee.role?.name || 'Sales' : 'Sales';
-                                const aColor = getAvatarColor(aName);
-                                return (
-                                  <div
-                                    key={idx}
-                                    title={`${aName} (${aRole})`}
-                                    style={{
-                                      width: 20,
-                                      height: 20,
-                                      borderRadius: '50%',
-                                      background: aColor,
-                                      color: '#ffffff',
-                                      fontSize: '9px',
-                                      fontWeight: 700,
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      border: '1.5px solid #ffffff',
-                                      marginLeft: idx === 0 ? 0 : -5,
-                                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                    }}
-                                  >
-                                    {aName.charAt(0).toUpperCase()}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            <span style={{ fontSize: '10px', fontWeight: 700, color: '#059669', marginLeft: 4 }}>
-                              {assignees.length} {assignees.length === 1 ? 'rep' : 'reps'}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Quick Assign Button */}
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenAssignModal(c.campaignName);
-                          }}
-                          style={{
-                            padding: '3px 7px',
-                            borderRadius: 5,
-                            background: '#f8fafc',
-                            border: '1px solid #cbd5e1',
-                            color: '#334155',
-                            fontSize: '10.5px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 3
-                          }}
-                          title={`Assign or manage sales employees for ${c.campaignName}`}
-                        >
-                          <UserPlusIcon size={11} color="#059669" />
-                          <span>Assign</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Expanded Active Campaign & Assigned Sales Reps Banner */}
-            {selectedCampaignFilter !== 'ALL' && (
+            {/* ──────────────────────────────────────────────────────────────────────── */}
+            {/* CAMPAIGN DIRECTORY & SALES ROLE ASSIGNMENT HUB                            */}
+            {/* ──────────────────────────────────────────────────────────────────────── */}
+            <div
+              style={{
+                background: '#ffffff',
+                borderRadius: 12,
+                border: '1px solid #e2e8f0',
+                padding: '16px 18px',
+                marginBottom: 14,
+                boxShadow: '0 1px 3px rgba(15,23,42,0.03)'
+              }}
+            >
+              {/* Header: Title & Primary Actions */}
               <div
                 style={{
-                  marginTop: 12,
-                  padding: '10px 14px',
-                  borderRadius: 8,
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   flexWrap: 'wrap',
-                  gap: 10
+                  gap: 12,
+                  marginBottom: 14
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Active Campaign:</span>
-                    <span
-                      style={{
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        background: '#ecfdf5',
-                        color: '#059669',
-                        padding: '2px 8px',
-                        borderRadius: 6,
-                        border: '1px solid #a7f3d0'
-                      }}
-                    >
-                      {selectedCampaignFilter}
-                    </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 9,
+                      background: '#ecfdf5',
+                      color: '#059669',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: '1px solid #d1fae5',
+                      flexShrink: 0
+                    }}
+                  >
+                    <CampaignsTabIcon size={18} />
                   </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Assigned Team:</span>
-                    {getCampaignAssignees(selectedCampaignFilter).length === 0 ? (
-                      <span style={{ fontSize: '11px', color: '#f59e0b', fontWeight: 600 }}>
-                        ⚠️ No sales employees assigned yet
-                      </span>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                        {getCampaignAssignees(selectedCampaignFilter).map((assignee, idx) => {
-                          const aName = typeof assignee === 'object' && assignee ? `${assignee.firstName || ''} ${assignee.lastName || ''}`.trim() || assignee.email || 'Sales Rep' : 'Sales Rep';
-                          const aRole = typeof assignee === 'object' && assignee ? assignee.designation || assignee.role?.name || 'Sales' : 'Sales';
-                          return (
-                            <span
-                              key={idx}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4,
-                                fontSize: '11px',
-                                fontWeight: 600,
-                                padding: '2px 8px',
-                                borderRadius: 12,
-                                background: '#ffffff',
-                                border: '1px solid #cbd5e1',
-                                color: '#1e293b'
-                              }}
-                            >
-                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} />
-                              <span>{aName}</span>
-                              <span style={{ color: '#64748b', fontSize: '10px' }}>({aRole})</span>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.01em' }}>
+                      Campaigns & Sales Team Assignment
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: 1 }}>
+                      Select a campaign to inspect conversations, or assign dedicated sales roles (Executives, Telecallers, Managers) to handle outreach.
+                    </div>
                   </div>
                 </div>
 
@@ -2840,286 +3395,633 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
                   {isAdmin && (
                     <button
                       type="button"
-                      onClick={() => handleOpenAssignModal(selectedCampaignFilter)}
+                      onClick={() => handleOpenAssignModal(selectedCampaignFilter !== 'ALL' ? selectedCampaignFilter : (availableCampaigns[0]?.campaignName || 'CRM'))}
                       style={{
-                        padding: '4px 10px',
-                        borderRadius: 6,
-                        background: '#059669',
-                        color: '#ffffff',
-                        border: 'none',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: 4
+                        gap: 6,
+                        padding: '7px 14px',
+                        borderRadius: 7,
+                        background: '#10b981',
+                        color: '#ffffff',
+                        border: 'none',
+                        fontSize: '11.5px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        boxShadow: '0 1px 3px rgba(16,185,129,0.28)',
+                        transition: 'all 0.15s ease'
                       }}
+                      title="Assign any campaign to sales team members"
                     >
-                      <UserPlusIcon size={12} color="#ffffff" />
-                      <span>Manage Team</span>
+                      <UserPlusIcon size={14} color="#ffffff" />
+                      <span>Assign Campaign to Sales Team</span>
                     </button>
                   )}
+
                   <button
                     type="button"
-                    onClick={() => setSelectedCampaignFilter('ALL')}
+                    onClick={() => {
+                      fetchLogs();
+                      fetchTemplates();
+                      if (isAdmin) fetchSalesEmployees();
+                    }}
                     style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#64748b',
-                      fontSize: '11px',
+                      padding: '7px 12px',
+                      borderRadius: 7,
+                      border: '1px solid #e2e8f0',
+                      background: '#ffffff',
+                      fontSize: '11.5px',
+                      fontWeight: 600,
+                      color: '#334155',
                       cursor: 'pointer',
-                      fontWeight: 600
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5
                     }}
                   >
-                    ✕ View All Campaigns
+                    <RefreshIcon size={12} className={logsLoading ? 'spin' : ''} />
+                    <span>{logsLoading ? 'Syncing...' : 'Refresh'}</span>
                   </button>
                 </div>
               </div>
-            )}
-          </div>
 
-          {/* CAMPAIGN CHATS & DISPATCHES SECTION */}
-          <div style={{ background: '#ffffff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(15,23,42,0.03)' }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Campaign Chats</span>
-                <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: selectedCampaignFilter === 'ALL' ? '#f1f5f9' : '#ecfdf5', color: selectedCampaignFilter === 'ALL' ? '#475569' : '#059669', border: selectedCampaignFilter === 'ALL' ? '1px solid #e2e8f0' : '1px solid #a7f3d0' }}>
-                  {selectedCampaignFilter === 'ALL' ? 'All Campaigns' : `Campaign: ${selectedCampaignFilter}`} ({filteredLogs.length})
-                </span>
-              </div>
-
-              {/* Filters & Search */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                {/* Search Box */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#f8fafc', padding: '4px 8px', borderRadius: 6, border: '1px solid #e2e8f0', width: '180px' }}>
-                  <SearchIcon size={12} color="#94a3b8" />
-                  <input
-                    type="text"
-                    placeholder="Search chats or phone..."
-                    value={campaignSearchText}
-                    onChange={(e) => setCampaignSearchText(e.target.value)}
-                    style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '11px', width: '100%', color: '#0f172a' }}
-                  />
-                  {campaignSearchText && (
-                    <button type="button" onClick={() => setCampaignSearchText('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '10px', padding: 0 }}>✕</button>
-                  )}
-                </div>
-
-                {/* Campaign Dropdown Filter (in table header) */}
-                <select
-                  value={selectedCampaignFilter}
-                  onChange={(e) => setSelectedCampaignFilter(e.target.value)}
+              {/* Campaign Cards Grid */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+                  gap: 10
+                }}
+              >
+                {/* Card 1: All Campaigns */}
+                <div
+                  onClick={() => setSelectedCampaignFilter('ALL')}
                   style={{
-                    padding: '4px 8px',
-                    borderRadius: 6,
-                    border: '1px solid #cbd5e1',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    color: '#0f172a',
-                    background: '#ffffff',
-                    cursor: 'pointer'
+                    padding: '11px 13px',
+                    borderRadius: 10,
+                    border: selectedCampaignFilter === 'ALL' ? '2px solid #10b981' : '1px solid #e2e8f0',
+                    background: selectedCampaignFilter === 'ALL' ? '#f0fdf4' : '#fafafa',
+                    cursor: 'pointer',
+                    transition: 'all 0.12s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    boxShadow: selectedCampaignFilter === 'ALL' ? '0 2px 6px rgba(16,185,129,0.12)' : '0 1px 2px rgba(15,23,42,0.02)'
                   }}
                 >
-                  <option value="ALL">All Campaigns ({logs.length})</option>
-                  {availableCampaigns.map((c) => {
-                    const count = logs.filter((l) => (l.campaignName || 'CRM').trim().toLowerCase() === c.campaignName.trim().toLowerCase()).length;
-                    return (
-                      <option key={c.campaignName} value={c.campaignName}>
-                        {c.campaignName} ({count})
-                      </option>
-                    );
-                  })}
-                </select>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f172a' }}>
+                        All Campaigns
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: 10,
+                          background: selectedCampaignFilter === 'ALL' ? '#dcfce7' : '#f1f5f9',
+                          color: selectedCampaignFilter === 'ALL' ? '#15803d' : '#64748b'
+                        }}
+                      >
+                        {logs.length} chats
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.35, marginBottom: 8 }}>
+                      Full CRM view across all registered campaign templates
+                    </div>
+                  </div>
 
-                {/* Status Filter */}
-                <div style={{ display: 'flex', gap: 3 }}>
-                  {['ALL', 'SUCCESS', 'FAILED'].map((st) => (
-                    <button
-                      key={st}
-                      type="button"
-                      onClick={() => setLogFilter(st)}
+                  <div style={{ paddingTop: 6, borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '10.5px', color: '#059669', fontWeight: 600 }}>
+                      {availableCampaigns.length} campaigns
+                    </span>
+                    {selectedCampaignFilter === 'ALL' && (
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#059669' }}>
+                        ● Active Filter
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Individual Campaign Cards */}
+                {availableCampaigns.map((c) => {
+                  const count = logs.filter((l) => (l.campaignName || 'CRM').trim().toLowerCase() === c.campaignName.trim().toLowerCase()).length;
+                  const assignees = getCampaignAssignees(c.campaignName);
+                  const isSelected = selectedCampaignFilter === c.campaignName;
+                  const isAssignedToMe = user && assignees.some((a) => {
+                    const aId = typeof a === 'object' && a ? String(a._id || a.id) : String(a);
+                    return aId === String(user._id || user.id);
+                  });
+
+                  return (
+                    <div
+                      key={c.campaignName}
+                      onClick={() => setSelectedCampaignFilter(c.campaignName)}
                       style={{
-                        padding: '3px 8px',
-                        borderRadius: 4,
-                        fontSize: '10.5px',
-                        fontWeight: 600,
+                        padding: '11px 13px',
+                        borderRadius: 10,
+                        border: isSelected ? '2px solid #10b981' : '1px solid #e2e8f0',
+                        background: isSelected ? '#f0fdf4' : '#ffffff',
                         cursor: 'pointer',
-                        border: 'none',
-                        background: logFilter === st ? '#0f172a' : '#f1f5f9',
-                        color: logFilter === st ? '#ffffff' : '#64748b'
+                        transition: 'all 0.12s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        boxShadow: isSelected ? '0 2px 6px rgba(16,185,129,0.12)' : '0 1px 2px rgba(15,23,42,0.02)'
                       }}
                     >
-                      {st}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Chats Table */}
-            {filteredLogs.length === 0 ? (
-              <div style={{ padding: '36px 20px', textAlign: 'center', color: '#64748b' }}>
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
-                  <MessagesTabIcon size={26} color="#cbd5e1" />
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
-                  No chats found for campaign "{selectedCampaignFilter === 'ALL' ? 'All Campaigns' : selectedCampaignFilter}"
-                </div>
-                <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: 4 }}>
-                  Dispatches sent with this campaign name will appear here automatically.
-                </div>
-              </div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
-                    <th style={{ padding: '9px 12px', width: '90px' }}>Status</th>
-                    <th style={{ padding: '9px 12px', width: '170px' }}>Recipient & Phone</th>
-                    <th style={{ padding: '9px 12px', width: '130px' }}>Campaign</th>
-                    <th style={{ padding: '9px 12px' }}>WhatsApp Chat Message</th>
-                    <th style={{ padding: '9px 12px', width: '120px' }}>Sent Time</th>
-                    <th style={{ padding: '9px 12px', width: '130px', textAlign: 'center' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredLogs.map((log) => {
-                    const recipientName = log.paramsFallbackValue?.FirstName || log.userName || 'Lead';
-                    const messageContent = log.responseMessage || log.text || (log.templateParams ? `Params: [${log.templateParams.join(', ')}]` : 'WhatsApp Campaign Message');
-                    const isSuccess = log.status === 'SUCCESS';
-                    const hasMedia = Boolean(log.media?.url);
-                    const timeFormatted = log.createdAt ? formatTime(log.createdAt) : '';
-                    const dateFormatted = log.createdAt ? new Date(log.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
-
-                    return (
-                      <tr key={log._id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.1s ease' }}>
-                        <td style={{ padding: '9px 12px' }}>
+                      <div>
+                        {/* Top: Name & Count */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                          <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f172a' }}>
+                            {c.campaignName}
+                          </span>
                           <span
                             style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              fontSize: '10.5px',
+                              fontSize: '10px',
                               fontWeight: 700,
-                              padding: '2px 7px',
-                              borderRadius: 4,
-                              background: isSuccess ? '#ecfdf5' : '#fef2f2',
-                              color: isSuccess ? '#059669' : '#dc2626',
-                              border: isSuccess ? '1px solid #a7f3d0' : '1px solid #fecaca'
+                              padding: '1px 6px',
+                              borderRadius: 10,
+                              background: count > 0 ? '#eff6ff' : '#f8fafc',
+                              color: count > 0 ? '#1d4ed8' : '#94a3b8',
+                              border: count > 0 ? '1px solid #bfdbfe' : '1px solid #e2e8f0'
                             }}
                           >
-                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: isSuccess ? '#10b981' : '#ef4444' }} />
-                            {isSuccess ? 'DELIVERED' : 'FAILED'}
+                            {count} chats
                           </span>
-                        </td>
-                        <td style={{ padding: '9px 12px' }}>
-                          <div style={{ fontWeight: 600, color: '#0f172a' }}>{recipientName}</div>
-                          <div style={{ fontFamily: 'monospace', color: '#64748b', fontSize: '10.5px', marginTop: 1 }}>
-                            {formatPhone(log.destination)}
-                          </div>
-                        </td>
-                        <td style={{ padding: '9px 12px' }}>
-                          <span
+                        </div>
+
+                        {/* Display name */}
+                        {c.displayName && c.displayName !== c.campaignName && (
+                          <div
                             style={{
+                              fontSize: '11px',
+                              color: '#64748b',
+                              marginBottom: 6,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}
+                            title={c.displayName}
+                          >
+                            {c.displayName}
+                          </div>
+                        )}
+
+                        {/* Assigned to me pill */}
+                        {isAssignedToMe && (
+                          <div style={{ marginBottom: 6 }}>
+                            <span style={{ fontSize: '9.5px', fontWeight: 700, padding: '1px 6px', borderRadius: 10, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>
+                              ✓ Assigned to You
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Bottom: Team Avatars & 1-Click Assign */}
+                      <div
+                        style={{
+                          paddingTop: 7,
+                          borderTop: '1px solid #f1f5f9',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          {assignees.length === 0 ? (
+                            <span style={{ fontSize: '10.5px', color: '#94a3b8', fontStyle: 'italic' }}>
+                              Unassigned
+                            </span>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'center' }}>
+                                {assignees.slice(0, 3).map((assignee, idx) => {
+                                  const aName = typeof assignee === 'object' && assignee ? `${assignee.firstName || ''} ${assignee.lastName || ''}`.trim() || assignee.email || 'Sales Rep' : 'Sales Rep';
+                                  const aRole = typeof assignee === 'object' && assignee ? assignee.designation || assignee.role?.name || 'Sales' : 'Sales';
+                                  const aColor = getAvatarColor(aName);
+                                  return (
+                                    <div
+                                      key={idx}
+                                      title={`${aName} (${aRole})`}
+                                      style={{
+                                        width: 20,
+                                        height: 20,
+                                        borderRadius: '50%',
+                                        background: aColor,
+                                        color: '#ffffff',
+                                        fontSize: '9px',
+                                        fontWeight: 700,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        border: '1.5px solid #ffffff',
+                                        marginLeft: idx === 0 ? 0 : -5,
+                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                      }}
+                                    >
+                                      {aName.charAt(0).toUpperCase()}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <span style={{ fontSize: '10px', fontWeight: 700, color: '#059669', marginLeft: 4 }}>
+                                {assignees.length} {assignees.length === 1 ? 'rep' : 'reps'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Quick Assign Button */}
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenAssignModal(c.campaignName);
+                            }}
+                            style={{
+                              padding: '3px 7px',
+                              borderRadius: 5,
+                              background: '#f8fafc',
+                              border: '1px solid #cbd5e1',
+                              color: '#334155',
                               fontSize: '10.5px',
                               fontWeight: 600,
-                              padding: '2px 7px',
-                              borderRadius: 4,
-                              background: '#eff6ff',
-                              color: '#1d4ed8',
-                              border: '1px solid #bfdbfe',
-                              display: 'inline-block'
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 3
                             }}
+                            title={`Assign or manage sales employees for ${c.campaignName}`}
                           >
-                            {log.campaignName || 'CRM'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '9px 12px', maxWidth: '320px' }}>
-                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                            {hasMedia && (
-                              <span style={{ fontSize: '9.5px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '1px 5px', borderRadius: 3, flexShrink: 0, fontWeight: 700 }}>
-                                Media
+                            <UserPlusIcon size={11} color="#059669" />
+                            <span>Assign</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Expanded Active Campaign & Assigned Sales Reps Banner */}
+              {selectedCampaignFilter !== 'ALL' && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 10
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Active Campaign:</span>
+                      <span
+                        style={{
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          background: '#ecfdf5',
+                          color: '#059669',
+                          padding: '2px 8px',
+                          borderRadius: 6,
+                          border: '1px solid #a7f3d0'
+                        }}
+                      >
+                        {selectedCampaignFilter}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Assigned Team:</span>
+                      {getCampaignAssignees(selectedCampaignFilter).length === 0 ? (
+                        <span style={{ fontSize: '11px', color: '#f59e0b', fontWeight: 600 }}>
+                          ⚠️ No sales employees assigned yet
+                        </span>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                          {getCampaignAssignees(selectedCampaignFilter).map((assignee, idx) => {
+                            const aName = typeof assignee === 'object' && assignee ? `${assignee.firstName || ''} ${assignee.lastName || ''}`.trim() || assignee.email || 'Sales Rep' : 'Sales Rep';
+                            const aRole = typeof assignee === 'object' && assignee ? assignee.designation || assignee.role?.name || 'Sales' : 'Sales';
+                            return (
+                              <span
+                                key={idx}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  padding: '2px 8px',
+                                  borderRadius: 12,
+                                  background: '#ffffff',
+                                  border: '1px solid #cbd5e1',
+                                  color: '#1e293b'
+                                }}
+                              >
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} />
+                                <span>{aName}</span>
+                                <span style={{ color: '#64748b', fontSize: '10px' }}>({aRole})</span>
                               </span>
-                            )}
-                            <div
-                              onClick={() => setPreviewChatLog(log)}
-                              title="Click to view full message"
-                              style={{
-                                color: '#334155',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                cursor: 'pointer',
-                                textDecoration: 'underline',
-                                textDecorationStyle: 'dotted'
-                              }}
-                            >
-                              {messageContent}
-                            </div>
-                          </div>
-                        </td>
-                        <td style={{ padding: '9px 12px', color: '#64748b', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
-                          <div>{dateFormatted}</div>
-                          <div style={{ color: '#94a3b8' }}>{timeFormatted}</div>
-                        </td>
-                        <td style={{ padding: '9px 12px', textAlign: 'center' }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedDest(log.destination);
-                                setActiveTab('messages');
-                              }}
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAssignModal(selectedCampaignFilter)}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: 6,
+                          background: '#059669',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                      >
+                        <UserPlusIcon size={12} color="#ffffff" />
+                        <span>Manage Team</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCampaignFilter('ALL')}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#64748b',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                    >
+                      ✕ View All Campaigns
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* CAMPAIGN CHATS & DISPATCHES SECTION */}
+            <div style={{ background: '#ffffff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(15,23,42,0.03)' }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>Campaign Chats</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: selectedCampaignFilter === 'ALL' ? '#f1f5f9' : '#ecfdf5', color: selectedCampaignFilter === 'ALL' ? '#475569' : '#059669', border: selectedCampaignFilter === 'ALL' ? '1px solid #e2e8f0' : '1px solid #a7f3d0' }}>
+                    {selectedCampaignFilter === 'ALL' ? 'All Campaigns' : `Campaign: ${selectedCampaignFilter}`} ({filteredLogs.length})
+                  </span>
+                </div>
+
+                {/* Filters & Search */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {/* Search Box */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#f8fafc', padding: '4px 8px', borderRadius: 6, border: '1px solid #e2e8f0', width: '180px' }}>
+                    <SearchIcon size={12} color="#94a3b8" />
+                    <input
+                      type="text"
+                      placeholder="Search chats or phone..."
+                      value={campaignSearchText}
+                      onChange={(e) => setCampaignSearchText(e.target.value)}
+                      style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '11px', width: '100%', color: '#0f172a' }}
+                    />
+                    {campaignSearchText && (
+                      <button type="button" onClick={() => setCampaignSearchText('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '10px', padding: 0 }}>✕</button>
+                    )}
+                  </div>
+
+                  {/* Campaign Dropdown Filter (in table header) */}
+                  <select
+                    value={selectedCampaignFilter}
+                    onChange={(e) => setSelectedCampaignFilter(e.target.value)}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      color: '#0f172a',
+                      background: '#ffffff',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="ALL">All Campaigns ({logs.length})</option>
+                    {availableCampaigns.map((c) => {
+                      const count = logs.filter((l) => (l.campaignName || 'CRM').trim().toLowerCase() === c.campaignName.trim().toLowerCase()).length;
+                      return (
+                        <option key={c.campaignName} value={c.campaignName}>
+                          {c.campaignName} ({count})
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  {/* Status Filter */}
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    {['ALL', 'SUCCESS', 'FAILED'].map((st) => (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => setLogFilter(st)}
+                        style={{
+                          padding: '3px 8px',
+                          borderRadius: 4,
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          border: 'none',
+                          background: logFilter === st ? '#0f172a' : '#f1f5f9',
+                          color: logFilter === st ? '#ffffff' : '#64748b'
+                        }}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Chats Table */}
+              {filteredLogs.length === 0 ? (
+                <div style={{ padding: '36px 20px', textAlign: 'center', color: '#64748b' }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+                    <MessagesTabIcon size={26} color="#cbd5e1" />
+                  </div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                    No chats found for campaign "{selectedCampaignFilter === 'ALL' ? 'All Campaigns' : selectedCampaignFilter}"
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: 4 }}>
+                    Dispatches sent with this campaign name will appear here automatically.
+                  </div>
+                </div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
+                      <th style={{ padding: '9px 12px', width: '90px' }}>Status</th>
+                      <th style={{ padding: '9px 12px', width: '170px' }}>Recipient & Phone</th>
+                      <th style={{ padding: '9px 12px', width: '130px' }}>Campaign</th>
+                      <th style={{ padding: '9px 12px' }}>WhatsApp Chat Message</th>
+                      <th style={{ padding: '9px 12px', width: '120px' }}>Sent Time</th>
+                      <th style={{ padding: '9px 12px', width: '130px', textAlign: 'center' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredLogs.map((log) => {
+                      const recipientName = log.paramsFallbackValue?.FirstName || log.userName || 'Lead';
+                      const messageContent = log.responseMessage || log.text || (log.templateParams ? `Params: [${log.templateParams.join(', ')}]` : 'WhatsApp Campaign Message');
+                      const isSuccess = log.status === 'SUCCESS';
+                      const hasMedia = Boolean(log.media?.url);
+                      const timeFormatted = log.createdAt ? formatTime(log.createdAt) : '';
+                      const dateFormatted = log.createdAt ? new Date(log.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+
+                      return (
+                        <tr key={log._id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.1s ease' }}>
+                          <td style={{ padding: '9px 12px' }}>
+                            <span
                               style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: 3,
-                                padding: '3px 8px',
-                                borderRadius: 5,
-                                background: '#10b981',
-                                color: '#ffffff',
-                                border: 'none',
+                                gap: 4,
                                 fontSize: '10.5px',
                                 fontWeight: 700,
-                                cursor: 'pointer',
-                                boxShadow: '0 1px 2px rgba(16,185,129,0.2)'
+                                padding: '2px 7px',
+                                borderRadius: 4,
+                                background: isSuccess ? '#ecfdf5' : '#fef2f2',
+                                color: isSuccess ? '#059669' : '#dc2626',
+                                border: isSuccess ? '1px solid #a7f3d0' : '1px solid #fecaca'
                               }}
-                              title="Open 2-way conversation in Messages workbench"
                             >
-                              <WhatsAppIcon size={11} color="#ffffff" />
-                              <span>Chat</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => setPreviewChatLog(log)}
+                              <span style={{ width: 5, height: 5, borderRadius: '50%', background: isSuccess ? '#10b981' : '#ef4444' }} />
+                              {isSuccess ? 'DELIVERED' : 'FAILED'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '9px 12px' }}>
+                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{recipientName}</div>
+                            <div style={{ fontFamily: 'monospace', color: '#64748b', fontSize: '10.5px', marginTop: 1 }}>
+                              {formatPhone(log.destination)}
+                            </div>
+                          </td>
+                          <td style={{ padding: '9px 12px' }}>
+                            <span
                               style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 3,
-                                padding: '3px 7px',
-                                borderRadius: 5,
-                                background: '#f8fafc',
-                                color: '#475569',
-                                border: '1px solid #cbd5e1',
                                 fontSize: '10.5px',
                                 fontWeight: 600,
-                                cursor: 'pointer'
+                                padding: '2px 7px',
+                                borderRadius: 4,
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                display: 'inline-block'
                               }}
-                              title="Preview full message & delivery details"
                             >
-                              <EyeIcon size={11} color="#64748b" />
-                              <span>View</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
+                              {log.campaignName || 'CRM'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '9px 12px', maxWidth: '320px' }}>
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                              {hasMedia && (
+                                <span style={{ fontSize: '9.5px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '1px 5px', borderRadius: 3, flexShrink: 0, fontWeight: 700 }}>
+                                  Media
+                                </span>
+                              )}
+                              <div
+                                onClick={() => setPreviewChatLog(log)}
+                                title="Click to view full message"
+                                style={{
+                                  color: '#334155',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  cursor: 'pointer',
+                                  textDecoration: 'underline',
+                                  textDecorationStyle: 'dotted'
+                                }}
+                              >
+                                {messageContent}
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '9px 12px', color: '#64748b', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
+                            <div>{dateFormatted}</div>
+                            <div style={{ color: '#94a3b8' }}>{timeFormatted}</div>
+                          </td>
+                          <td style={{ padding: '9px 12px', textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedDest(log.destination);
+                                  setActiveTab('messages');
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 3,
+                                  padding: '3px 8px',
+                                  borderRadius: 5,
+                                  background: '#10b981',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  fontSize: '10.5px',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  boxShadow: '0 1px 2px rgba(16,185,129,0.2)'
+                                }}
+                                title="Open 2-way conversation in Messages workbench"
+                              >
+                                <WhatsAppIcon size={11} color="#ffffff" />
+                                <span>Chat</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setPreviewChatLog(log)}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 3,
+                                  padding: '3px 7px',
+                                  borderRadius: 5,
+                                  background: '#f8fafc',
+                                  color: '#475569',
+                                  border: '1px solid #cbd5e1',
+                                  fontSize: '10.5px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer'
+                                }}
+                                title="Preview full message & delivery details"
+                              >
+                                <EyeIcon size={11} color="#64748b" />
+                                <span>View</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
-        </div>
         )
       )}
 
@@ -3786,13 +4688,13 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
           <div
             style={{
               width: '100%',
-              maxWidth: '680px',
-              maxHeight: '85vh',
+              maxWidth: '880px',
+              maxHeight: '90vh',
               background: '#ffffff',
-              borderRadius: 12,
+              borderRadius: 14,
               display: 'flex',
               flexDirection: 'column',
-              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.15)',
+              boxShadow: '0 25px 50px -12px rgba(15,23,42,0.25)',
               overflow: 'hidden'
             }}
           >
@@ -3808,309 +4710,988 @@ export default function AiSensyCampaign({ embedded = true, isAdmin: propIsAdmin 
                 flexShrink: 0
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <TemplateIcon size={16} color="#059669" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #a7f3d0' }}>
+                  <TemplateIcon size={18} color="#059669" />
+                </div>
                 <div>
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
-                    {templateModalMode === 'create'
-                      ? 'Create New WhatsApp Template'
-                      : templateModalMode === 'edit'
-                        ? 'Edit WhatsApp Template'
-                        : 'Manage WhatsApp Templates'}
-                  </span>
-                  <div style={{ fontSize: '10.5px', color: '#64748b' }}>
-                    {templateModalMode === 'list'
-                      ? 'Choose, preview or add pre-approved Meta/AiSensy templates'
-                      : 'Campaign name must match the approved campaign in your AiSensy dashboard'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                      Approved WhatsApp Templates
+                    </span>
+                    <span style={{ fontSize: '9.5px', fontWeight: 700, background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: 12, border: '1px solid #86efac' }}>
+                      ✓ Meta & AiSensy Approved
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: 2 }}>
+                    Select an approved WhatsApp template to dispatch instantly to this client
                   </div>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {templateModalMode === 'list' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingTemplate({
-                        name: '',
-                        campaignName: 'CRM',
-                        category: 'MARKETING',
-                        headerType: 'IMAGE',
-                        headerMediaUrl: DEFAULT_MEDIA_URL,
-                        body: 'Hello {FirstName} !\n\n'
-                      });
-                      setTemplateModalMode('create');
-                    }}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      padding: '5px 11px',
-                      borderRadius: 6,
-                      background: '#10b981',
-                      color: '#ffffff',
-                      border: 'none',
-                      fontSize: '11.5px',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <PlusIcon size={11} color="#ffffff" />
-                    <span>New Template</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setShowTemplateModal(false)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '16px' }}
-                >
-                  ✕
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowTemplateModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '18px', padding: '2px 6px' }}
+                title="Close"
+              >
+                ✕
+              </button>
             </div>
 
             {/* Modal Body */}
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 18px' }}>
-              {/* ── LIST VIEW ── */}
-              {templateModalMode === 'list' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {templates.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '30px', color: '#94a3b8', fontSize: '12.5px' }}>
-                      No templates found. Click "New Template" to add one.
-                    </div>
-                  ) : (
-                    templates.map((tpl) => {
-                      const isSelected = selectedTemplate?._id === tpl._id;
-                      return (
-                        <div
-                          key={tpl._id}
-                          style={{
-                            border: isSelected ? '1.5px solid #10b981' : '1px solid #e2e8f0',
-                            borderRadius: 8,
-                            padding: '12px',
-                            background: isSelected ? '#f0fdf4' : '#ffffff',
-                            display: 'flex',
-                            gap: 12,
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
-                          }}
-                        >
-                          {/* Image preview */}
-                          {tpl.headerMediaUrl && (
-                            <img
-                              src={tpl.headerMediaUrl}
-                              alt="Header Preview"
-                              style={{
-                                width: 70,
-                                height: 70,
-                                objectFit: 'cover',
-                                borderRadius: 6,
-                                border: '1px solid #cbd5e1',
-                                flexShrink: 0
-                              }}
-                            />
-                          )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {templates.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '36px', color: '#94a3b8', fontSize: '12.5px' }}>
+                    No approved templates found.
+                  </div>
+                ) : (
+                  templates.map((tpl) => {
+                    const isSelected = selectedTemplate?._id === tpl._id;
+                    return (
+                      <div
+                        key={tpl._id}
+                        style={{
+                          border: isSelected ? '1.5px solid #10b981' : '1px solid #e2e8f0',
+                          borderRadius: 8,
+                          padding: '14px',
+                          background: isSelected ? '#f0fdf4' : '#ffffff',
+                          display: 'flex',
+                          gap: 14,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+                        }}
+                      >
+                        {/* Image preview */}
+                        {tpl.headerMediaUrl && (
+                          <img
+                            src={tpl.headerMediaUrl}
+                            alt="Header Preview"
+                            style={{
+                              width: 80,
+                              height: 80,
+                              objectFit: 'cover',
+                              borderRadius: 6,
+                              border: '1px solid #cbd5e1',
+                              flexShrink: 0
+                            }}
+                          />
+                        )}
 
-                          {/* Content */}
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <div>
-                                <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>
-                                  {tpl.name}
+                        {/* Content */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <span style={{ fontSize: '13.5px', fontWeight: 700, color: '#0f172a' }}>
+                                {tpl.name}
+                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                                <span style={{ fontSize: '9.5px', fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#e0f2fe', color: '#0369a1' }}>
+                                  Campaign: {tpl.campaignName}
                                 </span>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
-                                  <span style={{ fontSize: '9.5px', fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#e0f2fe', color: '#0369a1' }}>
-                                    Campaign: {tpl.campaignName}
+                                <span style={{ fontSize: '9.5px', fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#f1f5f9', color: '#475569' }}>
+                                  {tpl.category}
+                                </span>
+                                {tpl.isDefault && (
+                                  <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 4px', borderRadius: 3, background: '#dcfce7', color: '#166534' }}>
+                                    DEFAULT
                                   </span>
-                                  <span style={{ fontSize: '9.5px', fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: '#f1f5f9', color: '#475569' }}>
-                                    {tpl.category}
-                                  </span>
-                                  {tpl.isDefault && (
-                                    <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 4px', borderRadius: 3, background: '#dcfce7', color: '#166534' }}>
-                                      DEFAULT
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Card Actions */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingTemplate(tpl);
-                                    setTemplateModalMode('edit');
-                                  }}
-                                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}
-                                  title="Edit Template"
-                                >
-                                  <EditIcon size={12} color="#64748b" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteTemplate(tpl._id)}
-                                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}
-                                  title="Delete Template"
-                                >
-                                  <TrashIcon size={12} color="#ef4444" />
-                                </button>
+                                )}
                               </div>
                             </div>
 
-                            {/* Body snippet */}
-                            <div
+                            {/* Status tag */}
+                            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#dcfce7', color: '#166534', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              ✓ Approved & Live
+                            </span>
+                          </div>
+
+                          {/* Body snippet */}
+                          <div
+                            style={{
+                              fontSize: '11.5px',
+                              color: '#334155',
+                              background: '#f8fafc',
+                              padding: '10px 12px',
+                              borderRadius: 6,
+                              marginTop: 8,
+                              whiteSpace: 'pre-line',
+                              lineHeight: 1.45,
+                              border: '1px solid #f1f5f9'
+                            }}
+                          >
+                            {(tpl.body || '').replace(/\{FirstName\}|\$FirstName|\{\{1\}\}/g, activeContact.name || 'Rahul')}
+                          </div>
+
+                          {/* Select / Use button */}
+                          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTemplate(tpl);
+                                setChatCampaignName(tpl.campaignName || 'CRM');
+                                setShowTemplatePreviewBar(true);
+                                setShowTemplateModal(false);
+                              }}
                               style={{
-                                fontSize: '11.5px',
-                                color: '#334155',
-                                background: '#f8fafc',
-                                padding: '8px',
+                                padding: '6px 16px',
                                 borderRadius: 6,
-                                marginTop: 8,
-                                whiteSpace: 'pre-line',
-                                lineHeight: 1.45,
-                                border: '1px solid #f1f5f9'
+                                background: isSelected ? '#047857' : '#10b981',
+                                color: '#ffffff',
+                                border: 'none',
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                boxShadow: isSelected ? 'none' : '0 1px 3px rgba(16,185,129,0.3)'
                               }}
                             >
-                              {(tpl.body || '').replace(/\{FirstName\}|\$FirstName|\{\{1\}\}/g, activeContact.name || 'Rahul')}
-                            </div>
-
-                            {/* Select / Use button */}
-                            <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedTemplate(tpl);
-                                  setChatCampaignName(tpl.campaignName || 'CRM');
-                                  setShowTemplatePreviewBar(true);
-                                  setShowTemplateModal(false);
-                                }}
-                                style={{
-                                  padding: '4px 12px',
-                                  borderRadius: 5,
-                                  background: isSelected ? '#047857' : '#10b981',
-                                  color: '#ffffff',
-                                  border: 'none',
-                                  fontSize: '11px',
-                                  fontWeight: 600,
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                {isSelected ? '✓ Selected Active' : 'Use This Template'}
-                              </button>
-                            </div>
+                              {isSelected ? '✓ Selected Active Template' : 'Use This Template'}
+                            </button>
                           </div>
                         </div>
-                      );
-                    })
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Informational Guidance */}
+              <div style={{ marginTop: 16, padding: '10px 14px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '14px' }}>💡</span>
+                <div style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
+                  Only templates registered and approved by Meta via your AiSensy dashboard can be delivered. To submit new campaign templates, create them directly in your AiSensy account. Once verified by Meta, they will appear here automatically for one-click sending.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CREATE AUDIENCE GROUP MODAL ── */}
+      {showCreateGroupModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.55)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '24px'
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '620px',
+              background: '#ffffff',
+              borderRadius: 16,
+              padding: '28px 32px',
+              boxShadow: '0 25px 60px -15px rgba(15,23,42,0.25), 0 0 0 1px rgba(226, 232, 240, 0.8)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    background: '#ecfdf5',
+                    color: '#059669',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #d1fae5',
+                    flexShrink: 0
+                  }}
+                >
+                  <UsersIcon size={22} color="#059669" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
+                    Create Audience Group
+                  </h3>
+                  <p style={{ margin: '3px 0 0', fontSize: '13px', color: '#64748b', letterSpacing: '-0.01em' }}>
+                    Organize contacts into a dedicated segment for targeted WhatsApp broadcasts
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateGroupModal(false)}
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  width: 32,
+                  height: 32,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  fontSize: '14px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateGroup}>
+              {/* Group Name */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: 6, letterSpacing: '-0.01em' }}>
+                  Group Name <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter group name (e.g. High-Intent Tech Leads, Q4 Enterprise)"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '11px 14px',
+                    borderRadius: 8,
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '13.5px',
+                    color: '#0f172a',
+                    background: '#ffffff',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                  required
+                />
+              </div>
+
+              {/* Description */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: 6, letterSpacing: '-0.01em' }}>
+                  Description <span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>(Optional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Enter a brief description for this audience group (e.g. Inbound leads from website enquiry form)..."
+                  value={newGroupDesc}
+                  onChange={(e) => setNewGroupDesc(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '11px 14px',
+                    borderRadius: 8,
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '13.5px',
+                    color: '#0f172a',
+                    background: '#ffffff',
+                    outline: 'none',
+                    resize: 'vertical',
+                    lineHeight: 1.5,
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Tags */}
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: 6, letterSpacing: '-0.01em' }}>
+                  Audience Tags <span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>(Optional, comma-separated)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter tags (e.g. VIP, Priority, Inbound, Festive)"
+                  value={newGroupTags}
+                  onChange={(e) => setNewGroupTags(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '11px 14px',
+                    borderRadius: 8,
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '13.5px',
+                    color: '#0f172a',
+                    background: '#ffffff',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Account Isolation Notice */}
+              <div
+                style={{
+                  padding: '12px 14px',
+                  background: '#f8fafc',
+                  borderRadius: 8,
+                  border: '1px solid #e2e8f0',
+                  fontSize: '12px',
+                  color: '#475569',
+                  marginBottom: 22,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10
+                }}
+              >
+                <div
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: '50%',
+                    background: '#ecfdf5',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}
+                >
+                  <ShieldIcon size={14} color="#059669" />
+                </div>
+                <span>
+                  <strong>Strict Privacy:</strong> This audience group and all its imported contacts are private to your user account.
+                </span>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 6, borderTop: '1px solid #f1f5f9' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateGroupModal(false)}
+                  style={{
+                    padding: '10px 22px',
+                    borderRadius: 8,
+                    background: '#f8fafc',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#475569',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingGroup || !newGroupName.trim()}
+                  style={{
+                    padding: '10px 26px',
+                    borderRadius: 8,
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: creatingGroup || !newGroupName.trim() ? 'not-allowed' : 'pointer',
+                    opacity: creatingGroup || !newGroupName.trim() ? 0.6 : 1,
+                    boxShadow: '0 2px 8px rgba(16, 185, 129, 0.35)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  {creatingGroup ? (
+                    <>
+                      <RefreshIcon size={14} className="spin" />
+                      <span>Creating Group...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UsersIcon size={15} color="#ffffff" />
+                      <span>Create Group</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── ADD CONTACT MODAL ── */}
+      {showAddContactModal && selectedGroup && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.55)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '24px'
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '620px',
+              background: '#ffffff',
+              borderRadius: 16,
+              padding: '28px 32px',
+              boxShadow: '0 25px 60px -15px rgba(15,23,42,0.25), 0 0 0 1px rgba(226, 232, 240, 0.8)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    background: '#ecfdf5',
+                    color: '#059669',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #d1fae5',
+                    flexShrink: 0
+                  }}
+                >
+                  <UserPlusIcon size={22} color="#059669" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
+                    Add Contact to Group
+                  </h3>
+                  <p style={{ margin: '3px 0 0', fontSize: '13px', color: '#64748b', letterSpacing: '-0.01em' }}>
+                    Adding to: <strong style={{ color: '#0f172a' }}>{selectedGroup.name}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddContactModal(false)}
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  width: 32,
+                  height: 32,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  fontSize: '14px'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAddContact}>
+              {/* Full Name */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: 6, letterSpacing: '-0.01em' }}>
+                  Full Name <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter contact full name (e.g. Rahul Sharma)"
+                  value={newContactName}
+                  onChange={(e) => setNewContactName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '11px 14px',
+                    borderRadius: 8,
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '13.5px',
+                    color: '#0f172a',
+                    background: '#ffffff',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                  required
+                />
+              </div>
+
+              {/* Phone */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: 6, letterSpacing: '-0.01em' }}>
+                  WhatsApp Phone Number <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter phone number with country code (e.g. +91 98765 43210)"
+                  value={newContactPhone}
+                  onChange={(e) => setNewContactPhone(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '11px 14px',
+                    borderRadius: 8,
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '13.5px',
+                    color: '#0f172a',
+                    background: '#ffffff',
+                    outline: 'none',
+                    fontFamily: 'monospace',
+                    boxSizing: 'border-box'
+                  }}
+                  required
+                />
+                <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: 4 }}>
+                  Include country code (e.g. +91 for India, +1 for US) or standard 10-digit number.
+                </div>
+              </div>
+
+              {/* Two-column layout for Email and Company */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 22 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: 6, letterSpacing: '-0.01em' }}>
+                    Email Address <span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>(Optional)</span>
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="Enter email address (e.g. name@company.com)"
+                    value={newContactEmail}
+                    onChange={(e) => setNewContactEmail(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '11px 14px',
+                      borderRadius: 8,
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13.5px',
+                      color: '#0f172a',
+                      background: '#ffffff',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: 6, letterSpacing: '-0.01em' }}>
+                    Company / Organization <span style={{ fontSize: '12px', fontWeight: 400, color: '#94a3b8' }}>(Optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter company name (e.g. Bhoomi TechZone)"
+                    value={newContactCompany}
+                    onChange={(e) => setNewContactCompany(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '11px 14px',
+                      borderRadius: 8,
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13.5px',
+                      color: '#0f172a',
+                      background: '#ffffff',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 6, borderTop: '1px solid #f1f5f9' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAddContactModal(false)}
+                  style={{
+                    padding: '10px 22px',
+                    borderRadius: 8,
+                    background: '#f8fafc',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#475569',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={addingContact || !newContactName.trim() || !newContactPhone.trim()}
+                  style={{
+                    padding: '10px 26px',
+                    borderRadius: 8,
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: addingContact || !newContactName.trim() || !newContactPhone.trim() ? 'not-allowed' : 'pointer',
+                    opacity: addingContact || !newContactName.trim() || !newContactPhone.trim() ? 0.6 : 1,
+                    boxShadow: '0 2px 8px rgba(16, 185, 129, 0.35)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  {addingContact ? (
+                    <>
+                      <RefreshIcon size={14} className="spin" />
+                      <span>Adding Contact...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlusIcon size={15} color="#ffffff" />
+                      <span>Add Contact</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── IMPORT CONTACTS MODAL ── */}
+      {showImportModal && selectedGroup && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.55)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '24px'
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '740px',
+              maxHeight: '90vh',
+              background: '#ffffff',
+              borderRadius: 16,
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 60px -15px rgba(15,23,42,0.25), 0 0 0 1px rgba(226, 232, 240, 0.8)',
+              overflow: 'hidden',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ padding: '18px 26px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc' }}>
+              <div>
+                <div style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
+                  Import Contacts into "{selectedGroup.name}"
+                </div>
+                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: 3 }}>
+                  Import external contacts via CSV spreadsheet or select from your assigned CRM leads
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 8,
+                  width: 32,
+                  height: 32,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  fontSize: '14px'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Tabs */}
+            <div style={{ display: 'flex', padding: '0 26px', borderBottom: '1px solid #e2e8f0', background: '#ffffff', gap: 20 }}>
+              <button
+                type="button"
+                onClick={() => setImportTab('csv')}
+                style={{
+                  padding: '12px 6px',
+                  border: 'none',
+                  background: 'transparent',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: importTab === 'csv' ? '#059669' : '#64748b',
+                  borderBottom: importTab === 'csv' ? '2.5px solid #059669' : '2.5px solid transparent'
+                }}
+              >
+                📄 Upload CSV / Excel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setImportTab('crm_leads');
+                  fetchMyCrmLeads();
+                }}
+                style={{
+                  padding: '12px 6px',
+                  border: 'none',
+                  background: 'transparent',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: importTab === 'crm_leads' ? '#059669' : '#64748b',
+                  borderBottom: importTab === 'crm_leads' ? '2.5px solid #059669' : '2.5px solid transparent'
+                }}
+              >
+                👥 From My CRM Leads ({myCrmLeads.length})
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 26px' }}>
+              {importResultMsg && (
+                <div style={{ padding: '12px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 8, color: '#065f46', fontSize: '13px', marginBottom: 14, fontWeight: 600 }}>
+                  ✓ {importResultMsg}
+                </div>
+              )}
+
+              {importTab === 'csv' ? (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <label style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                      Choose CSV File or Paste Contact List:
+                    </label>
+                    <a
+                      href="data:text/csv;charset=utf-8,Name,Phone,Email,Company%0ARahul%20Sharma,9548961117,rahul@company.com,Bhoomi%20TechZone%0AAmit%20Verma,7985440421,amit@company.com,TechZone"
+                      download="sample_contacts.csv"
+                      style={{ fontSize: '12px', color: '#059669', textDecoration: 'none', fontWeight: 600 }}
+                    >
+                      ⬇ Download Sample CSV
+                    </a>
+                  </div>
+
+                  {/* File picker */}
+                  <div style={{ marginBottom: 14 }}>
+                    <input
+                      type="file"
+                      accept=".csv, .txt"
+                      onChange={handleCsvFileSelect}
+                      style={{ fontSize: '12.5px', padding: '10px 12px', border: '1.5px dashed #cbd5e1', borderRadius: 8, width: '100%', background: '#f8fafc', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginBottom: 6 }}>
+                      Or paste lines (format: <code>Full Name, WhatsApp Phone, Email, Company</code>):
+                    </div>
+                    <textarea
+                      rows={5}
+                      placeholder="Rahul Sharma, +91 95489 61117, rahul@company.com, Bhoomi TechZone&#10;Amit Verma, +91 79854 40421, amit@company.com, TechZone"
+                      value={importCsvText}
+                      onChange={(e) => {
+                        setImportCsvText(e.target.value);
+                        setParsedImportContacts(parseCsvText(e.target.value));
+                      }}
+                      style={{ width: '100%', padding: '11px 14px', borderRadius: 8, border: '1.5px solid #cbd5e1', fontSize: '12.5px', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  {/* Live preview table if contacts parsed */}
+                  {parsedImportContacts.length > 0 && (
+                    <div style={{ marginTop: 12, border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+                      <div style={{ padding: '8px 12px', background: '#ecfdf5', borderBottom: '1px solid #bbf7d0', fontSize: '12px', fontWeight: 700, color: '#166534', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>✓ Ready to Import: {parsedImportContacts.length} Contacts Detected</span>
+                        <span>Showing first {Math.min(parsedImportContacts.length, 5)}</span>
+                      </div>
+                      <div style={{ maxHeight: '140px', overflowY: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                          <tbody>
+                            {parsedImportContacts.slice(0, 5).map((c, i) => (
+                              <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '6px 12px', fontWeight: 600 }}>{c.name}</td>
+                                <td style={{ padding: '6px 12px', fontFamily: 'monospace' }}>{c.phone}</td>
+                                <td style={{ padding: '6px 12px', color: '#64748b' }}>{c.email || '—'}</td>
+                                <td style={{ padding: '6px 12px', color: '#64748b' }}>{c.company || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Tab 2: CRM Leads */
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div style={{ fontSize: '12.5px', color: '#334155', fontWeight: 500 }}>
+                      Select leads assigned to you to import into this group:
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedLeadIds.size === myCrmLeads.length) {
+                          setSelectedLeadIds(new Set());
+                        } else {
+                          setSelectedLeadIds(new Set(myCrmLeads.map((l) => String(l._id || l.id))));
+                        }
+                      }}
+                      style={{ background: 'none', border: 'none', color: '#059669', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      {selectedLeadIds.size === myCrmLeads.length ? 'Deselect All' : 'Select All Leads'}
+                    </button>
+                  </div>
+
+                  {loadingLeads ? (
+                    <div style={{ textAlign: 'center', padding: '36px', color: '#94a3b8', fontSize: '13px' }}>
+                      Loading your CRM leads...
+                    </div>
+                  ) : myCrmLeads.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '36px', color: '#94a3b8', fontSize: '13px' }}>
+                      No leads with phone numbers currently assigned to your account.
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: '260px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                      {myCrmLeads.map((lead) => {
+                        const idStr = String(lead._id || lead.id);
+                        const isChecked = selectedLeadIds.has(idStr);
+                        return (
+                          <div
+                            key={idStr}
+                            onClick={() => {
+                              setSelectedLeadIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(idStr)) next.delete(idStr);
+                                else next.add(idStr);
+                                return next;
+                              });
+                            }}
+                            style={{
+                              padding: '10px 14px',
+                              borderBottom: '1px solid #f1f5f9',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 12,
+                              cursor: 'pointer',
+                              background: isChecked ? '#f0fdf4' : '#ffffff'
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => { }} // handled by parent div
+                              style={{ cursor: 'pointer', width: 16, height: 16, accentColor: '#10b981' }}
+                            />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>{lead.name}</span>
+                                <span style={{ fontSize: '12px', fontFamily: 'monospace', color: '#059669', fontWeight: 600 }}>{lead.phone}</span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#64748b', marginTop: 2 }}>
+                                {lead.company ? `${lead.company} • ` : ''}{lead.email || 'No email'}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               )}
-
-              {/* ── CREATE / EDIT VIEW ── */}
-              {(templateModalMode === 'create' || templateModalMode === 'edit') && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: 3 }}>
-                      Template Display Name *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Diwali Special Business Offer"
-                      value={editingTemplate?.name || ''}
-                      onChange={(e) => setEditingTemplate({ ...editingTemplate, name: e.target.value })}
-                      style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '12px' }}
-                    />
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: 3 }}>
-                        AiSensy Campaign Name *
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. CRM"
-                        value={editingTemplate?.campaignName || ''}
-                        onChange={(e) => setEditingTemplate({ ...editingTemplate, campaignName: e.target.value })}
-                        style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '12px', fontFamily: 'monospace' }}
-                      />
-                      <span style={{ fontSize: '9.5px', color: '#64748b' }}>Must match registered campaign name in AiSensy</span>
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: 3 }}>
-                        Category
-                      </label>
-                      <select
-                        value={editingTemplate?.category || 'MARKETING'}
-                        onChange={(e) => setEditingTemplate({ ...editingTemplate, category: e.target.value })}
-                        style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '12px', background: '#fff' }}
-                      >
-                        <option value="MARKETING">MARKETING</option>
-                        <option value="UTILITY">UTILITY</option>
-                        <option value="SERVICE">SERVICE</option>
-                        <option value="AUTHENTICATION">AUTHENTICATION</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                      <label style={{ fontSize: '11px', fontWeight: 600, color: '#334155' }}>
-                        Header Media URL (Optional Image)
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setEditingTemplate({ ...editingTemplate, headerMediaUrl: DEFAULT_MEDIA_URL })}
-                        style={{ background: 'none', border: 'none', color: '#059669', fontSize: '10px', fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        Use Default Image
-                      </button>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="https://...image.jpg"
-                      value={editingTemplate?.headerMediaUrl || ''}
-                      onChange={(e) => setEditingTemplate({ ...editingTemplate, headerMediaUrl: e.target.value })}
-                      style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '12px' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#334155', marginBottom: 3 }}>
-                      Template Body Text *
-                    </label>
-                    <textarea
-                      rows={6}
-                      placeholder="Type template body... Use {FirstName} for dynamic lead personalization"
-                      value={editingTemplate?.body || ''}
-                      onChange={(e) => setEditingTemplate({ ...editingTemplate, body: e.target.value })}
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '12px', lineHeight: 1.45, fontFamily: 'inherit' }}
-                    />
-                    <div style={{ fontSize: '10px', color: '#059669', marginTop: 2 }}>
-                      💡 Tip: Use <code>&#123;FirstName&#125;</code> to dynamically greet the customer (e.g. <em>Hello Rahul ! 🪔</em>)
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
-                    <button
-                      type="button"
-                      onClick={() => setTemplateModalMode('list')}
-                      style={{ padding: '7px 14px', borderRadius: 6, background: '#f1f5f9', border: '1px solid #cbd5e1', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}
-                    >
-                      Back to List
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSaveTemplate(editingTemplate)}
-                      style={{ padding: '7px 16px', borderRadius: 6, background: '#10b981', color: '#ffffff', border: 'none', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer' }}
-                    >
-                      Save Template
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '16px 26px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', color: '#64748b' }}>
+                {importTab === 'csv'
+                  ? `${parsedImportContacts.length} contacts ready to import`
+                  : `${selectedLeadIds.size} leads selected`}
+              </span>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  style={{ padding: '9px 18px', borderRadius: 8, background: '#ffffff', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#475569' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    importingContacts ||
+                    (importTab === 'csv' && parsedImportContacts.length === 0 && !importCsvText.trim()) ||
+                    (importTab === 'crm_leads' && selectedLeadIds.size === 0)
+                  }
+                  onClick={handleImportSubmit}
+                  style={{
+                    padding: '9px 22px',
+                    borderRadius: 8,
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: importingContacts ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 2px 6px rgba(16, 185, 129, 0.3)'
+                  }}
+                >
+                  {importingContacts ? 'Importing...' : 'Start Import'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── BROADCAST PROGRESS MODAL ── */}
+      {showBroadcastModal && selectedGroup && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,23,42,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px'
+          }}
+        >
+          <div style={{ width: '100%', maxWidth: '420px', background: '#ffffff', borderRadius: 14, padding: '24px', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+              <SendIcon size={20} color="#059669" />
+            </div>
+
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
+              {broadcasting ? 'Dispatching Template to Group...' : 'Group Broadcast Complete!'}
+            </div>
+
+            <div style={{ fontSize: '12px', color: '#64748b', marginBottom: 16 }}>
+              Target: <strong>{selectedGroup.name}</strong> • Template: <strong>{selectedTemplate?.name || 'Approved Template'}</strong>
+            </div>
+
+            {/* Progress bar */}
+            <div style={{ width: '100%', background: '#f1f5f9', borderRadius: 10, height: 10, overflow: 'hidden', marginBottom: 8 }}>
+              <div
+                style={{
+                  height: '100%',
+                  background: '#10b981',
+                  width: `${broadcastProgress.total ? (broadcastProgress.sent / broadcastProgress.total) * 100 : 0}%`,
+                  transition: 'width 0.2s ease'
+                }}
+              />
+            </div>
+
+            <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#0f172a', marginBottom: 16 }}>
+              {broadcastProgress.sent} of {broadcastProgress.total} messages dispatched
+            </div>
+
+            {!broadcasting && (
+              <button
+                type="button"
+                onClick={() => setShowBroadcastModal(false)}
+                style={{ padding: '7px 20px', borderRadius: 6, background: '#10b981', color: '#ffffff', border: 'none', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+              >
+                Close
+              </button>
+            )}
           </div>
         </div>
       )}

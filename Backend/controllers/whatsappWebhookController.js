@@ -1,5 +1,8 @@
 const crypto = require('crypto');
 const WhatsAppMessage = require('../models/WhatsAppMessage');
+const WhatsAppConnection = require('../models/WhatsAppConnection');
+const WhatsAppConversation = require('../models/WhatsAppConversation');
+const WhatsAppWebhookEvent = require('../models/WhatsAppWebhookEvent');
 const PipelineContact = require('../models/PipelineContact');
 const Lead = require('../models/Lead');
 const Deal = require('../models/Deal');
@@ -285,6 +288,30 @@ async function processIncomingMessage(msg, metadata, contactMap, wabaId, io) {
   // Find CRM Associations
   const crm = await findCrmAssociations(senderWaId);
 
+  // Look up mapped WhatsAppConnection by phoneNumberId
+  let connection = null;
+  if (phoneNumberId) {
+    connection = await WhatsAppConnection.findOne({ phoneNumberId });
+  }
+
+  // Find or update WhatsAppConversation for this Deal / phone
+  let conversation = null;
+  if (crm.dealId) {
+    conversation = await WhatsAppConversation.findOne({ dealId: crm.dealId });
+  }
+  if (!conversation && senderWaId) {
+    conversation = await WhatsAppConversation.findOne({ contactPhone: new RegExp(`${senderWaId.slice(-10)}$`) });
+  }
+
+  if (conversation) {
+    conversation.lastMessage = messageText;
+    conversation.lastMessageAt = timestamp;
+    conversation.lastMessageDirection = 'inbound';
+    conversation.lastMessageStatus = 'received';
+    conversation.unreadCount = (conversation.unreadCount || 0) + 1;
+    await conversation.save();
+  }
+
   // Construct WhatsAppMessage document
   const newMessage = new WhatsAppMessage({
     wamid,
@@ -316,6 +343,9 @@ async function processIncomingMessage(msg, metadata, contactMap, wabaId, io) {
     associatedContact: crm.contactId,
     associatedLead: crm.leadId,
     associatedDeal: crm.dealId,
+    conversationId: conversation?._id || null,
+    connectionId: connection?._id || null,
+    dealOwner: conversation?.dealOwner || connection?.employeeName || '',
     rawPayload: msg
   });
 
@@ -436,6 +466,20 @@ exports.handleWebhookEvent = async (req, res) => {
         return;
       }
 
+      // Record Raw Webhook Event in Audit Collection
+      try {
+        await WhatsAppWebhookEvent.create({
+          eventId: `evt_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          eventType: body.entry?.[0]?.changes?.[0]?.value?.messages ? 'message' : 'status',
+          wabaId: body.entry?.[0]?.id || '',
+          phoneNumberId: body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id || '',
+          payload: body,
+          processed: true
+        });
+      } catch (logErr) {
+        console.warn('[WhatsApp Webhook] Could not save raw webhook event:', logErr.message);
+      }
+
       const io = req.app.get('socketio');
 
       for (const entry of body.entry || []) {
@@ -530,5 +574,71 @@ exports.getMessages = async (req, res) => {
   } catch (err) {
     console.error('[WhatsApp Webhook] getMessages error:', err);
     return res.status(500).json({ success: false, message: 'Failed to retrieve messages' });
+  }
+};
+
+/**
+ * 6. GET /api/webhooks/whatsapp/config
+ * Return current configuration & webhook registration details for the UI
+ */
+exports.getConfig = (req, res) => {
+  try {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.get('host') || '127.0.0.1:5000';
+    const baseUrl = `${protocol}://${host}`;
+
+    const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || '';
+    const hasAppSecret = Boolean(process.env.META_APP_SECRET && process.env.META_APP_SECRET !== 'your_meta_app_secret');
+    const hasAccessToken = Boolean(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_ACCESS_TOKEN !== 'your_meta_system_user_access_token');
+    const apiVersion = process.env.WHATSAPP_API_VERSION || 'v20.0';
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        callbackUrl: `${baseUrl}/api/webhooks/whatsapp/integration`,
+        verifyToken,
+        hasAppSecret,
+        hasAccessToken,
+        apiVersion,
+        status: 'Active',
+        subscribedFields: ['messages', 'message_deliveries', 'message_reads', 'message_echoes'],
+        routes: {
+          whatsappWebhook: '/api/webhooks/whatsapp/integration',
+          whatsappMessages: '/api/webhooks/whatsapp/messages',
+          instagramWebhook: '/api/webhooks/instagram',
+          aiSensyWebhook: '/api/aisensy/webhook',
+          aiChatWebhook: '/api/ai-chats/webhook'
+        }
+      }
+    });
+  } catch (err) {
+    console.error('[WhatsApp Webhook] getConfig error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve webhook config' });
+  }
+};
+
+/**
+ * 7. POST /api/webhooks/whatsapp/test-handshake
+ * Simulate Meta's GET verification handshake to verify token configuration
+ */
+exports.testHandshake = (req, res) => {
+  try {
+    const { token, challenge = 'test_challenge_' + Math.floor(Math.random() * 100000) } = req.body;
+    const expectedToken = process.env.WHATSAPP_VERIFY_TOKEN;
+
+    if (token && expectedToken && token === expectedToken) {
+      return res.status(200).json({
+        success: true,
+        message: 'Verification handshake SUCCESSFUL! Meta will receive HTTP 200 with challenge.',
+        challenge
+      });
+    } else {
+      return res.status(403).json({
+        success: false,
+        message: 'Verification FAILED: Token mismatch. Provided token does not match WHATSAPP_VERIFY_TOKEN.'
+      });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 };

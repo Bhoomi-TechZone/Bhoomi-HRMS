@@ -299,6 +299,7 @@ app.use("/api/meta-leads", require("./routes/meta-leads"));
 app.use("/api/website-leads", require("./routes/website-leads"));
 app.use("/api/ai-chats", require("./routes/ai-chats").router);
 app.use("/api/aisensy", require("./routes/aisensy"));
+app.use("/api/whatsapp", require("./routes/whatsapp"));
 app.use("/api/recruitment", require("./routes/recruitment"));
 app.use("/api/agent", require("./routes/agent"));
 app.use("/api/notifications", require("./routes/notifications"));

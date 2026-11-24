@@ -189,4 +189,10 @@ router.post('/whatsapp/integration', whatsappWebhookController.handleWebhookEven
 // GET: Stored WhatsApp Messages with CRM Filters
 router.get('/whatsapp/messages', whatsappWebhookController.getMessages);
 
+// GET: Webhook Configuration & Credentials Status for CRM UI
+router.get('/whatsapp/config', whatsappWebhookController.getConfig);
+
+// POST: Test Webhook Handshake Verification
+router.post('/whatsapp/test-handshake', whatsappWebhookController.testHandshake);
+
 module.exports = router;

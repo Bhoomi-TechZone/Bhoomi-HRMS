@@ -3466,14 +3466,47 @@ body.sidebar-expanded .pipeline-page-wrapper {
   border-bottom: 1px solid #f1f5f9;
   padding-bottom: 12px;
   margin-bottom: 16px;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 10px;
+  flex-wrap: nowrap;
 }
 
 .pipeline-activity-tab-btns {
   display: flex;
   align-items: center;
   gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pipeline-activity-tab-btns::-webkit-scrollbar {
+  height: 4px;
+}
+
+.pipeline-activity-tab-btns::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pipeline-activity-tab-btns::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.pipeline-activity-tab-btns::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.pipeline-activity-quick-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .pipeline-act-tab-btn {
@@ -3489,6 +3522,8 @@ body.sidebar-expanded .pipeline-page-wrapper {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .pipeline-act-tab-btn:hover {

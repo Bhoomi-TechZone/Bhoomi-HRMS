@@ -159,6 +159,32 @@ const whatsAppMessageSchema = new mongoose.Schema(
       default: null,
       index: true
     },
+    // Reference to Multi-User WhatsApp Conversation
+    conversationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'WhatsAppConversation',
+      default: null,
+      index: true
+    },
+    // Reference to Salesperson's WhatsApp Connection
+    connectionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'WhatsAppConnection',
+      default: null,
+      index: true
+    },
+    // Deal Owner (Salesperson) name
+    dealOwner: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    // Sales Employee who sent or handles this message
+    senderEmployee: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    },
     // Read status in HRMS CRM inbox
     isReadByAdmin: {
       type: Boolean,

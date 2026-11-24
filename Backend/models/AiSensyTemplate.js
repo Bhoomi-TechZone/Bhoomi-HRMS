@@ -57,6 +57,15 @@ const aiSensyTemplateSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    isApproved: {
+      type: Boolean,
+      default: true
+    },
+    status: {
+      type: String,
+      enum: ['APPROVED', 'PENDING', 'REJECTED'],
+      default: 'APPROVED'
+    },
     tags: [String],
     assignedTo: [
       {

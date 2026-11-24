@@ -53,21 +53,25 @@ import {
     AlertCircle,
     Check,
     Bell,
-    Loader2
+    Loader2,
+    Webhook
 } from 'lucide-react';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from './NotificationBell';
 import AiSensyCampaign from './AiSensyCampaign';
+import PipelineIntegrations from './PipelineIntegrations';
+import DealWhatsAppChat from './DealWhatsAppChat';
 import './Pipeline.css';
 
-// Navigation Tabs for Left Sub-Sidebar (Deals, Contacts, Companies, Tasks, Reminders, AI Sensy Campaign)
+// Navigation Tabs for Left Sub-Sidebar (Deals, Contacts, Companies, Tasks, Reminders, Integration, AI Sensy Campaign)
 const SIDEBAR_TABS = [
     { id: 'deals', label: 'Deals', icon: Briefcase },
     { id: 'contacts', label: 'Contacts', icon: Users },
     { id: 'companies', label: 'Companies', icon: Building2 },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
     { id: 'reminders', label: 'Reminders', icon: Bell },
+    { id: 'integration', label: 'Integration', icon: Webhook },
     { id: 'ai-sensy', label: 'AI Sensy', icon: MessageSquare }
 ];
 
@@ -3272,6 +3276,22 @@ function Pipeline() {
             .catch(() => {});
         return () => { isMounted = false; };
     }, [activeTab]);
+
+    // Live WhatsApp Webhook / Integration count
+    const [integrationCount, setIntegrationCount] = useState(0);
+
+    useEffect(() => {
+        if (!isAdmin) return;
+        let isMounted = true;
+        api.get('/webhooks/whatsapp/messages?limit=1')
+            .then(res => {
+                if (isMounted && res.data?.total !== undefined) {
+                    setIntegrationCount(res.data.total);
+                }
+            })
+            .catch(() => {});
+        return () => { isMounted = false; };
+    }, [isAdmin, activeTab]);
 
     // Live currency exchange rates to INR from official Frankfurter v2 API
     const [exchangeRatesToINR, setExchangeRatesToINR] = useState({ INR: 1 });
@@ -12084,6 +12104,9 @@ function Pipeline() {
                                     {!isSidebarCollapsed && tab.id === 'reminders' && (
                                         <span className="pipeline-sub-sidebar-count">{activeRemindersCount}</span>
                                     )}
+                                    {!isSidebarCollapsed && tab.id === 'integration' && isAdmin && (
+                                        <span className="pipeline-sub-sidebar-count">{integrationCount}</span>
+                                    )}
                                     {!isSidebarCollapsed && tab.id === 'ai-sensy' && (
                                         <span className="pipeline-sub-sidebar-count">{aiSensyCount}</span>
                                     )}
@@ -13250,6 +13273,17 @@ function Pipeline() {
                                                 </button>
                                                 <button
                                                     type="button"
+                                                    className={`pipeline-act-tab-btn ${detailActiveTab === 'whatsapp' ? 'active' : ''}`}
+                                                    onClick={() => setDetailActiveTab('whatsapp')}
+                                                >
+                                                    <MessageSquare size={14} style={{ color: detailActiveTab === 'whatsapp' ? '#16a34a' : 'inherit' }} />
+                                                    <span>WhatsApp</span>
+                                                    {isAdmin && (
+                                                        <span className="pipeline-act-tab-badge">{currentDealActivities.filter(a => a.type === 'message' || a.type === 'whatsapp' || (a.title && a.title.toLowerCase().includes('whatsapp')) || (a.channel && a.channel.toLowerCase() === 'whatsapp')).length}</span>
+                                                    )}
+                                                </button>
+                                                <button
+                                                    type="button"
                                                     className={`pipeline-act-tab-btn ${detailActiveTab === 'emails' ? 'active' : ''}`}
                                                     onClick={() => setDetailActiveTab('emails')}
                                                 >
@@ -13295,6 +13329,7 @@ function Pipeline() {
                                                         <span>Add Follow-up</span>
                                                     </button>
                                                 )}
+                                                {detailActiveTab === 'whatsapp' && null}
                                                 {detailActiveTab === 'emails' && (
                                                     <button
                                                         type="button"
@@ -13871,6 +13906,13 @@ function Pipeline() {
                                                         <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
                                                         <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Email integration and logging will be available soon.</p>
                                                     </div>
+                                                ) : detailActiveTab === 'whatsapp' ? (
+                                                    <DealWhatsAppChat
+                                                        deal={detailedDeal}
+                                                        contact={detailedContact}
+                                                        currentUser={user}
+                                                        isAdmin={isAdmin}
+                                                    />
                                                 ) : currentDealActivities.filter(act => {
                                                     if (detailActiveTab === 'all') return true;
                                                     if (detailActiveTab === 'notes') return act.type === 'note' && !isSystemActivityText(act.content, act.title);
@@ -16577,6 +16619,17 @@ function Pipeline() {
                                                 </button>
                                                 <button
                                                     type="button"
+                                                    className={`pipeline-act-tab-btn ${detailActiveTab === 'whatsapp' ? 'active' : ''}`}
+                                                    onClick={() => setDetailActiveTab('whatsapp')}
+                                                >
+                                                    <MessageSquare size={14} style={{ color: detailActiveTab === 'whatsapp' ? '#16a34a' : 'inherit' }} />
+                                                    <span>WhatsApp</span>
+                                                    {isAdmin && (
+                                                        <span className="pipeline-act-tab-badge">{currentContactActivities.filter(a => a.type === 'message' || a.type === 'whatsapp' || (a.title && a.title.toLowerCase().includes('whatsapp')) || (a.channel && a.channel.toLowerCase() === 'whatsapp')).length}</span>
+                                                    )}
+                                                </button>
+                                                <button
+                                                    type="button"
                                                     className={`pipeline-act-tab-btn ${detailActiveTab === 'emails' ? 'active' : ''}`}
                                                     onClick={() => setDetailActiveTab('emails')}
                                                 >
@@ -16622,6 +16675,7 @@ function Pipeline() {
                                                         <span>Add Follow-up</span>
                                                     </button>
                                                 )}
+                                                {detailActiveTab === 'whatsapp' && null}
                                                 {detailActiveTab === 'emails' && (
                                                     <button
                                                         type="button"
@@ -17198,6 +17252,13 @@ function Pipeline() {
                                                         <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#475569' }}>Feature not implemented yet</p>
                                                         <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>Email integration and logging will be available soon.</p>
                                                     </div>
+                                                ) : detailActiveTab === 'whatsapp' ? (
+                                                    <DealWhatsAppChat
+                                                        deal={detailedDeal || { clientName: `${detailedContact?.firstName || ''} ${detailedContact?.lastName || ''}`.trim(), phone: detailedContact?.phone }}
+                                                        contact={detailedContact}
+                                                        currentUser={user}
+                                                        isAdmin={isAdmin}
+                                                    />
                                                 ) : currentContactActivities.filter(act => {
                                                     if (detailActiveTab === 'all') return true;
                                                     if (detailActiveTab === 'notes') return act.type === 'note' && !isSystemActivityText(act.content, act.title);
@@ -20939,6 +21000,15 @@ function Pipeline() {
                                 </div>
                             )}
                         </div>
+                    </div>
+                )}
+
+                {/* ====================================================================
+                5.5. INTEGRATION TAB VIEW (WhatsApp Cloud API & Webhooks)
+                ==================================================================== */}
+                {activeTab === 'integration' && (
+                    <div className="pipeline-tab-page-view" style={{ height: '100%', flex: 1, minHeight: 0, overflow: 'hidden', background: '#f8fafc', padding: 0 }}>
+                        <PipelineIntegrations embedded={true} isAdmin={isAdmin} />
                     </div>
                 )}
 
