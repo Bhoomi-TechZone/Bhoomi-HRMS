@@ -4,6 +4,7 @@ const auth = require('../middleware/auth');
 const checkPermission = require('../middleware/checkPermission');
 const User = require('../models/User');
 const Role = require('../models/Role');
+const EmployeeAuditLog = require('../models/EmployeeAuditLog');
 const bcrypt = require('bcryptjs');
 const xlsx = require('xlsx');
 const PDFDocument = require('pdfkit');
@@ -861,6 +862,195 @@ router.get('/:id/summary', auth, async (req, res) => {
   }
 });
 
+// Field definitions for employee change tracking
+const FIELD_DEFINITIONS = {
+  firstName: { label: 'First Name' },
+  lastName: { label: 'Last Name' },
+  email: { label: 'Email' },
+  officialEmail: { label: 'Official Email' },
+  phone: { label: 'Phone' },
+  alternatePhone: { label: 'Alternate Phone' },
+  dateOfBirth: { label: 'Date of Birth (DOB)', type: 'date', short: 'DOB' },
+  joiningDate: { label: 'Joining Date', type: 'date', short: 'Joining Date' },
+  fatherName: { label: "Father's Name" },
+  highestQualification: { label: 'Highest Qualification' },
+  currentAddress: { label: 'Current Address' },
+  permanentAddress: { label: 'Permanent Address' },
+  aadharNumber: { label: 'Aadhaar Number' },
+  gender: { label: 'Gender' },
+  department: { label: 'Department' },
+  designation: { label: 'Designation' },
+  employeeId: { label: 'Employee ID' },
+  shiftType: { label: 'Shift Type' },
+  shiftStartTime: { label: 'Shift Start Time' },
+  shiftEndTime: { label: 'Shift End Time' },
+  isManager: { label: 'Manager Status', type: 'boolean' },
+  assignedManager: { label: 'Assigned Manager', type: 'ref' },
+  role: { label: 'Role', type: 'role' },
+  bankName: { label: 'Bank Name' },
+  accountNumber: { label: 'Account Number' },
+  ifscCode: { label: 'IFSC Code' },
+  accountHolderName: { label: 'Account Holder Name' },
+  panNumber: { label: 'PAN Number' },
+  upiId: { label: 'UPI ID' },
+  bankDetailsStatus: { label: 'Bank Verification Status' }
+};
+
+function computeEmployeeChanges(oldEmp, updateData) {
+  const changes = [];
+
+  for (const [key, def] of Object.entries(FIELD_DEFINITIONS)) {
+    if (updateData[key] === undefined) continue;
+
+    let oldVal = oldEmp[key];
+    let newVal = updateData[key];
+
+    if (def.type === 'date') {
+      const oldD = oldVal ? new Date(oldVal).toISOString().split('T')[0] : '';
+      const newD = newVal ? new Date(newVal).toISOString().split('T')[0] : '';
+      if (oldD !== newD) {
+        const oldFormatted = oldVal ? new Date(oldVal).toLocaleDateString('en-IN') : 'None';
+        const newFormatted = newVal ? new Date(newVal).toLocaleDateString('en-IN') : 'None';
+        changes.push({
+          field: key,
+          fieldLabel: def.label,
+          oldValue: oldFormatted,
+          newValue: newFormatted,
+          description: `${def.short || def.label} edited from "${oldFormatted}" to "${newFormatted}"`
+        });
+      }
+    } else if (def.type === 'boolean') {
+      const oldB = Boolean(oldVal);
+      const newB = Boolean(newVal);
+      if (oldB !== newB) {
+        changes.push({
+          field: key,
+          fieldLabel: def.label,
+          oldValue: oldB ? 'Yes' : 'No',
+          newValue: newB ? 'Yes' : 'No',
+          description: `${def.label} changed to ${newB ? 'Yes' : 'No'}`
+        });
+      }
+    } else if (def.type === 'role') {
+      const oldRoleId = String(oldEmp.role?._id || oldEmp.role || '');
+      const newRoleId = String(newVal?._id || newVal || '');
+      if (oldRoleId && newRoleId && oldRoleId !== newRoleId) {
+        const oldName = oldEmp.role?.name || oldRoleId;
+        changes.push({
+          field: key,
+          fieldLabel: def.label,
+          oldValue: oldName,
+          newValue: newRoleId,
+          description: `Role changed`
+        });
+      }
+    } else if (def.type === 'ref') {
+      const oldRefId = String(oldVal?._id || oldVal || '');
+      const newRefId = String(newVal?._id || newVal || '');
+      if (oldRefId !== newRefId) {
+        changes.push({
+          field: key,
+          fieldLabel: def.label,
+          oldValue: oldVal ? (oldVal.firstName ? `${oldVal.firstName} ${oldVal.lastName || ''}`.trim() : String(oldVal)) : 'None',
+          newValue: newRefId ? 'Updated' : 'None',
+          description: `${def.label} updated`
+        });
+      }
+    } else {
+      const oldStr = (oldVal !== null && oldVal !== undefined ? String(oldVal) : '').trim();
+      const newStr = (newVal !== null && newVal !== undefined ? String(newVal) : '').trim();
+      if (oldStr !== newStr) {
+        changes.push({
+          field: key,
+          fieldLabel: def.label,
+          oldValue: oldStr || 'None',
+          newValue: newStr || 'None',
+          description: `${def.label} edited from "${oldStr || 'None'}" to "${newStr || 'None'}"`
+        });
+      }
+    }
+  }
+
+  return changes;
+}
+
+async function logEmployeeAudit({
+  employee,
+  action,
+  actionTitle,
+  performedBy,
+  changes = [],
+  summary = '',
+  timezone = 'Asia/Kolkata (IST)',
+  ipAddress = '',
+  metadata = {}
+}) {
+  try {
+    const empName = `${employee.firstName || ''} ${employee.lastName || ''}`.trim() || employee.name || 'Employee';
+    const performerName = performedBy
+      ? (performedBy.name || `${performedBy.firstName || ''} ${performedBy.lastName || ''}`.trim() || 'Admin')
+      : 'Admin';
+    const performerEmail = performedBy?.email || '';
+    const performerRole = performedBy?.role?.name || (typeof performedBy?.role === 'string' ? performedBy.role : '') || 'User';
+
+    await EmployeeAuditLog.create({
+      employee: employee._id,
+      employeeName: empName,
+      employeeId: employee.employeeId || '',
+      action,
+      actionTitle,
+      performedBy: performedBy?._id || null,
+      performedByName: performerName,
+      performedByEmail: performerEmail,
+      performedByRole: performerRole,
+      changes,
+      summary: summary || actionTitle,
+      timezone,
+      ipAddress,
+      metadata
+    });
+  } catch (err) {
+    console.error('Failed to write employee audit log:', err.message);
+  }
+}
+
+// Get activity / audit logs for a specific employee
+router.get('/:id/logs', auth, checkPermission('employees', 'read'), async (req, res) => {
+  try {
+    const logs = await EmployeeAuditLog.find({ employee: req.params.id })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+
+    // If no explicit audit logs exist yet, but employee has deactivationDetails, synthesise a log entry for backwards compatibility
+    if (logs.length === 0) {
+      const emp = await User.findById(req.params.id).lean();
+      if (emp && emp.isActive === false && emp.deactivationDetails) {
+        logs.push({
+          _id: 'legacy-deactivate-' + emp._id,
+          employee: emp._id,
+          employeeName: `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'Employee',
+          employeeId: emp.employeeId || '',
+          action: 'DEACTIVATED',
+          actionTitle: `Employee Deactivated`,
+          performedByName: emp.deactivationDetails.addedBy || 'Admin',
+          performedByRole: 'Administrator',
+          summary: `Employee deactivated by ${emp.deactivationDetails.addedBy || 'Admin'}`,
+          timezone: 'Asia/Kolkata (IST)',
+          changes: [],
+          metadata: emp.deactivationDetails,
+          createdAt: emp.deactivationDetails.lastWorkingDay ? new Date(emp.deactivationDetails.lastWorkingDay) : (emp.updatedAt || new Date())
+        });
+      }
+    }
+
+    res.json({ success: true, logs });
+  } catch (error) {
+    console.error('Error fetching employee logs:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch employee logs' });
+  }
+});
+
 // Get single employee
 router.get('/:id', auth, checkPermission('employees', 'read'), async (req, res) => {
   try {
@@ -952,6 +1142,16 @@ router.post('/', auth, checkPermission('employees', 'create'), (req, res) => {
         .select('-password')
         .populate('role');
 
+      logEmployeeAudit({
+        employee: employeeData,
+        action: 'CREATED',
+        actionTitle: `Employee Created`,
+        performedBy: req.user,
+        summary: `Employee ${employeeData.firstName} ${employeeData.lastName || ''} (${employeeData.employeeId}) created by ${req.user.name || req.user.firstName || 'Admin'}`,
+        timezone: req.headers['x-timezone'] || 'Asia/Kolkata (IST)',
+        ipAddress: req.ip || ''
+      });
+
       res.status(201).json(employeeData);
     } catch (error) {
       if (error.code === 11000) {
@@ -1004,10 +1204,27 @@ router.put('/bulk/gender', auth, checkPermission('employees', 'update'), async (
         updateData.assignedManager = null;
       }
   
-      const existingEmployee = await User.findById(req.params.id);
+      const existingEmployee = await User.findById(req.params.id)
+        .populate('role')
+        .populate('assignedManager');
       if (!existingEmployee) {
         return res.status(404).json({ message: 'Employee not found' });
       }
+
+      // Pre-compute changes and audit events
+      const clientTz = req.headers['x-timezone'] || req.body?.clientTimezone || 'Asia/Kolkata (IST)';
+      const clientIp = req.ip || req.connection?.remoteAddress || '';
+      const performerName = req.user
+        ? (req.user.name || `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'Admin')
+        : 'Admin';
+      const performerRole = req.user?.role?.name || (typeof req.user?.role === 'string' ? req.user.role : '') || 'User';
+      const empName = `${existingEmployee.firstName || ''} ${existingEmployee.lastName || ''}`.trim() || 'Employee';
+
+      const statusChanged = updateData.isActive !== undefined && Boolean(updateData.isActive) !== Boolean(existingEmployee.isActive);
+      const isDeactivating = statusChanged && updateData.isActive === false;
+      const isActivating = statusChanged && updateData.isActive === true;
+      const accessModulesChanged = updateData.accessModules !== undefined && Array.isArray(updateData.accessModules);
+      const profileChanges = computeEmployeeChanges(existingEmployee, updateData);
 
       if (updateData.shiftType !== undefined && updateData.shiftType !== existingEmployee.shiftType) {
         if (!updateData.shiftType) {
@@ -1073,6 +1290,66 @@ router.put('/bulk/gender', auth, checkPermission('employees', 'update'), async (
         updateData,
         { new: true, runValidators: true }
       ).select('-password').populate('role');
+
+      // Async write audit logs
+      if (isDeactivating) {
+        const details = updateData.deactivationDetails || {};
+        let reasonSummary = '';
+        if (details.reason) reasonSummary = ` (Reason: ${details.reason})`;
+        else if (details.leavingType) reasonSummary = ` (${details.leavingType})`;
+
+        await logEmployeeAudit({
+          employee: existingEmployee,
+          action: 'DEACTIVATED',
+          actionTitle: `Employee Deactivated`,
+          performedBy: req.user,
+          summary: `Employee ${empName} deactivated by ${performerName}${reasonSummary}`,
+          timezone: clientTz,
+          ipAddress: clientIp,
+          metadata: details
+        });
+      } else if (isActivating) {
+        await logEmployeeAudit({
+          employee: existingEmployee,
+          action: 'ACTIVATED',
+          actionTitle: `Employee Activated`,
+          performedBy: req.user,
+          summary: `Employee ${empName} activated by ${performerName}`,
+          timezone: clientTz,
+          ipAddress: clientIp
+        });
+      }
+
+      if (accessModulesChanged) {
+        await logEmployeeAudit({
+          employee: existingEmployee,
+          action: 'ACCESS_CONTROL_UPDATED',
+          actionTitle: `Access Control Updated`,
+          performedBy: req.user,
+          summary: `Access control modules updated by ${performerName} (${updateData.accessModules.length} module(s) granted)`,
+          timezone: clientTz,
+          ipAddress: clientIp,
+          metadata: { accessModules: updateData.accessModules }
+        });
+      }
+
+      if (profileChanges.length > 0) {
+        const fieldSummaries = profileChanges.map(c => c.field === 'dateOfBirth' ? 'DOB' : (c.fieldLabel || c.field));
+        const summaryText = fieldSummaries.length <= 3
+          ? `${fieldSummaries.join(', ')} edited by ${performerName}`
+          : `${fieldSummaries.slice(0, 3).join(', ')} and ${fieldSummaries.length - 3} other field(s) edited by ${performerName}`;
+
+        await logEmployeeAudit({
+          employee: existingEmployee,
+          action: 'EDITED',
+          actionTitle: `Employee Profile Edited`,
+          performedBy: req.user,
+          changes: profileChanges,
+          summary: summaryText,
+          timezone: clientTz,
+          ipAddress: clientIp
+        });
+      }
   
       res.json(employee);
     } catch (error) {
@@ -1103,6 +1380,16 @@ router.put('/:id/change-password', auth, checkPermission('employees', 'update'),
     // Update password (will be hashed by the pre-save middleware)
     employee.password = newPassword;
     await employee.save();
+
+    logEmployeeAudit({
+      employee,
+      action: 'PASSWORD_CHANGED',
+      actionTitle: `Password Changed`,
+      performedBy: req.user,
+      summary: `Password changed for employee ${employee.firstName} ${employee.lastName || ''} by ${req.user.name || req.user.firstName || 'Admin'}`,
+      timezone: req.headers['x-timezone'] || 'Asia/Kolkata (IST)',
+      ipAddress: req.ip || ''
+    });
 
     res.json({ message: 'Password changed successfully' });
   } catch (error) {

@@ -54,7 +54,8 @@ import {
     Check,
     Bell,
     Loader2,
-    Webhook
+    Webhook,
+    UserCheck
 } from 'lucide-react';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
@@ -3252,12 +3253,19 @@ function Pipeline() {
     const [dragOverColumnId, setDragOverColumnId] = useState(null);
     const [selectedKanbanDealIds, setSelectedKanbanDealIds] = useState([]);
     const [isBulkMoveDropdownOpen, setIsBulkMoveDropdownOpen] = useState(false);
+    const [isBulkOwnerDropdownOpen, setIsBulkOwnerDropdownOpen] = useState(false);
+    const [isTopDealBulkOwnerDropdownOpen, setIsTopDealBulkOwnerDropdownOpen] = useState(false);
     const cardClickTimerRef = useRef(null);
 
     // Clear kanban multi-selection when tab or view mode changes
     useEffect(() => {
         setSelectedKanbanDealIds([]);
         setIsBulkMoveDropdownOpen(false);
+        setIsBulkOwnerDropdownOpen(false);
+        setIsTopDealBulkMoveDropdownOpen(false);
+            setIsBulkOwnerDropdownOpen(false);
+            setIsTopDealBulkOwnerDropdownOpen(false);
+        setIsTopDealBulkOwnerDropdownOpen(false);
     }, [activeTab, viewMode]);
 
     // Live AI Sensy count
@@ -3366,6 +3374,123 @@ function Pipeline() {
             setDetailedContactId(queryContactId);
         }
     }, [queryContactId]);
+
+    // Retain scroll positions for deals kanban board & columns
+    const dealsKanbanScrollRef = useRef({
+        boardLeft: 0,
+        stages: {},
+        tableTop: 0,
+        lastOpenedDealId: null
+    });
+    const prevDetailedDealIdRef = useRef(null);
+    const dealsKanbanBoardRef = useRef(null);
+    const [recentlyReturnedDealId, setRecentlyReturnedDealId] = useState(null);
+
+    const captureDealsKanbanScroll = (dealId = null) => {
+        try {
+            if (dealId) {
+                dealsKanbanScrollRef.current.lastOpenedDealId = dealId;
+            }
+            const boardEl = dealsKanbanBoardRef.current || document.querySelector('.pipeline-kanban-board');
+            if (boardEl) {
+                dealsKanbanScrollRef.current.boardLeft = boardEl.scrollLeft;
+            }
+            const listEls = document.querySelectorAll('.pipeline-cards-list[data-stage-name]');
+            listEls.forEach(el => {
+                const stage = el.getAttribute('data-stage-name');
+                if (stage) {
+                    dealsKanbanScrollRef.current.stages[stage] = el.scrollTop;
+                }
+            });
+            const tableCardEl = document.querySelector('.pipeline-table-card');
+            if (tableCardEl) {
+                dealsKanbanScrollRef.current.tableTop = tableCardEl.scrollTop;
+            }
+        } catch (err) {
+            // ignore
+        }
+    };
+
+    // Reset deals kanban scroll positions ONLY when user switches away from the Deals pipeline tab
+    useEffect(() => {
+        if (activeTab !== 'deals') {
+            dealsKanbanScrollRef.current = {
+                boardLeft: 0,
+                stages: {},
+                tableTop: 0,
+                lastOpenedDealId: null
+            };
+            setRecentlyReturnedDealId(null);
+        }
+    }, [activeTab]);
+
+    // Restore scroll positions when navigating back from detailed deal view to kanban board
+    useEffect(() => {
+        const wasDetailed = prevDetailedDealIdRef.current;
+        prevDetailedDealIdRef.current = detailedDealId;
+
+        if (wasDetailed && !detailedDealId && activeTab === 'deals') {
+            const targetDealId = dealsKanbanScrollRef.current.lastOpenedDealId;
+            if (targetDealId) {
+                setRecentlyReturnedDealId(targetDealId);
+                const timer = setTimeout(() => {
+                    setRecentlyReturnedDealId(null);
+                }, 3000);
+            }
+
+            const restoreScrollPositions = () => {
+                // 1. Board horizontal scroll
+                const boardEl = dealsKanbanBoardRef.current || document.querySelector('.pipeline-kanban-board');
+                if (boardEl && typeof dealsKanbanScrollRef.current.boardLeft === 'number' && dealsKanbanScrollRef.current.boardLeft > 0) {
+                    boardEl.scrollLeft = dealsKanbanScrollRef.current.boardLeft;
+                }
+
+                // 2. Column vertical scrolls
+                const listEls = document.querySelectorAll('.pipeline-cards-list[data-stage-name]');
+                listEls.forEach(el => {
+                    const stage = el.getAttribute('data-stage-name');
+                    const savedTop = dealsKanbanScrollRef.current.stages[stage];
+                    if (typeof savedTop === 'number' && savedTop > 0) {
+                        el.scrollTop = savedTop;
+                    }
+                });
+
+                // 3. Table scroll if in table view
+                const tableCardEl = document.querySelector('.pipeline-table-card');
+                if (tableCardEl && typeof dealsKanbanScrollRef.current.tableTop === 'number' && dealsKanbanScrollRef.current.tableTop > 0) {
+                    tableCardEl.scrollTop = dealsKanbanScrollRef.current.tableTop;
+                }
+
+                // 4. Ensure target deal card is visible in its column if slightly shifted
+                if (targetDealId) {
+                    const cardEl = document.querySelector(`.pipeline-card[data-deal-id="${targetDealId}"]`);
+                    if (cardEl) {
+                        const parent = cardEl.closest('.pipeline-cards-list');
+                        if (parent) {
+                            const pRect = parent.getBoundingClientRect();
+                            const cRect = cardEl.getBoundingClientRect();
+                            if (cRect.top < pRect.top || cRect.bottom > pRect.bottom) {
+                                cardEl.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+                            }
+                        }
+                    }
+                }
+            };
+
+            restoreScrollPositions();
+            const rafId = requestAnimationFrame(restoreScrollPositions);
+            const t1 = setTimeout(restoreScrollPositions, 30);
+            const t2 = setTimeout(restoreScrollPositions, 100);
+            const t3 = setTimeout(restoreScrollPositions, 250);
+
+            return () => {
+                cancelAnimationFrame(rafId);
+                clearTimeout(t1);
+                clearTimeout(t2);
+                clearTimeout(t3);
+            };
+        }
+    }, [detailedDealId, activeTab]);
     const [dealActivities, setDealActivities] = useState({});
 
     const [newActivityType, setNewActivityType] = useState('note'); // 'note' | 'email' | 'message' | 'call'
@@ -9876,6 +10001,7 @@ function Pipeline() {
     // Debounced single click on card to avoid conflict with double-click
     const handleDealCardClick = (dealId, e) => {
         if (e) e.stopPropagation();
+        captureDealsKanbanScroll(dealId);
         if (cardClickTimerRef.current) {
             clearTimeout(cardClickTimerRef.current);
             cardClickTimerRef.current = null;
@@ -9912,6 +10038,49 @@ function Pipeline() {
                 type: 'deal',
                 title: 'Stage Moved',
                 content: `Moved deal to "${targetStage}" via bulk action.`,
+                author: authorName
+            });
+        }
+    };
+
+    // Bulk assign all selected deals to a new deal owner
+    const handleBulkAssignOwner = async (newOwner, customIds = null) => {
+        const targetIds = Array.isArray(customIds) && customIds.length > 0 ? customIds : selectedKanbanDealIds;
+        if (!newOwner || targetIds.length === 0) return;
+        const dealIdsToAssign = [...targetIds];
+        const updateData = { salesOwner: newOwner };
+        const authorName = (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : '') || 'Admin System';
+
+        setDeals(prev =>
+            prev.map(d => dealIdsToAssign.includes(d._id) ? { ...d, ...updateData } : d)
+        );
+        setIsBulkOwnerDropdownOpen(false);
+        setIsTopDealBulkOwnerDropdownOpen(false);
+        setSelectedKanbanDealIds([]);
+
+        try {
+            await api.post('/deals/bulk-assign-owner', {
+                dealIds: dealIdsToAssign,
+                salesOwner: newOwner
+            });
+        } catch (bulkErr) {
+            console.warn('Bulk assign API endpoint error, falling back to PUT:', bulkErr.message);
+            for (const id of dealIdsToAssign) {
+                try {
+                    if (id && !id.toString().startsWith('deal-')) {
+                        await api.put(`/deals/${id}`, updateData);
+                    }
+                } catch (err) {
+                    console.warn(`Bulk assign deal ${id} API error:`, err.message);
+                }
+            }
+        }
+
+        for (const id of dealIdsToAssign) {
+            logActivity(id, {
+                type: 'deal',
+                title: 'Deal Owner Assigned',
+                content: `Reassigned deal owner to "${newOwner}" via bulk action.`,
                 author: authorName
             });
         }
@@ -14398,6 +14567,79 @@ function Pipeline() {
                                                 </div>
                                             )}
 
+                                            {canUpdate && (
+                                                <div style={{ position: 'relative' }}>
+                                                    <button
+                                                        type="button"
+                                                        style={{
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '5px',
+                                                            padding: '5px 11px',
+                                                            borderRadius: '6px',
+                                                            background: '#f0fdf4',
+                                                            color: '#15803d',
+                                                            border: '1px solid #bbf7d0',
+                                                            fontSize: '12px',
+                                                            fontWeight: 600,
+                                                            cursor: 'pointer'
+                                                        }}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setIsTopDealBulkOwnerDropdownOpen(prev => !prev);
+                                                            setIsTopDealBulkMoveDropdownOpen(false);
+                                                        }}
+                                                        title="Bulk assign selected deals to another deal owner"
+                                                    >
+                                                        <UserCheck size={12} />
+                                                        <span>Deal Owner</span>
+                                                        <ChevronDown size={11} style={{ transform: isTopDealBulkOwnerDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                                                    </button>
+
+                                                    {isTopDealBulkOwnerDropdownOpen && (
+                                                        <div
+                                                            className="pipeline-card-dropdown-menu"
+                                                            style={{ top: 'calc(100% + 4px)', left: 0, minWidth: '220px', maxHeight: '280px', overflowY: 'auto', zIndex: 120, boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}
+                                                            onClick={e => e.stopPropagation()}
+                                                        >
+                                                            <div className="pipeline-submenu-header">
+                                                                <span className="pipeline-submenu-title">Assign {selectedKanbanDealIds.length} deals to:</span>
+                                                            </div>
+                                                            {allDealOwners.map(ownerName => (
+                                                                <button
+                                                                    key={ownerName}
+                                                                    type="button"
+                                                                    className="pipeline-card-menu-item"
+                                                                    onClick={() => {
+                                                                        setIsTopDealBulkOwnerDropdownOpen(false);
+                                                                        handleBulkAssignOwner(ownerName);
+                                                                    }}
+                                                                >
+                                                                    <div
+                                                                        style={{
+                                                                            width: 18,
+                                                                            height: 18,
+                                                                            borderRadius: '50%',
+                                                                            background: '#dcfce7',
+                                                                            color: '#15803d',
+                                                                            fontSize: '10px',
+                                                                            fontWeight: 700,
+                                                                            display: 'flex',
+                                                                            alignItems: 'center',
+                                                                            justifyContent: 'center',
+                                                                            flexShrink: 0
+                                                                        }}
+                                                                    >
+                                                                        {ownerName.charAt(0).toUpperCase()}
+                                                                    </div>
+                                                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ownerName}</span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
                                             {canDelete && (
                                                 <button
                                                     type="button"
@@ -14980,7 +15222,13 @@ function Pipeline() {
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="pipeline-kanban-board">
+                                    <div
+                                        className="pipeline-kanban-board"
+                                        ref={dealsKanbanBoardRef}
+                                        onScroll={e => {
+                                            dealsKanbanScrollRef.current.boardLeft = e.currentTarget.scrollLeft;
+                                        }}
+                                    >
                                         {visiblePipelines.map((pipeline, pIndex) => {
                                             const pipelineDeals = filteredDeals.filter(d => {
                                                 const targetStage = getDealStageName(d, visiblePipelines);
@@ -15302,6 +15550,18 @@ function Pipeline() {
                                                     {/* Deal Cards Scroll Container */}
                                                     <div
                                                         className="pipeline-cards-list"
+                                                        data-stage-name={pipeline.name}
+                                                        ref={el => {
+                                                            if (el) {
+                                                                const savedTop = dealsKanbanScrollRef.current.stages[pipeline.name];
+                                                                if (typeof savedTop === 'number' && savedTop > 0 && el.scrollTop === 0) {
+                                                                    el.scrollTop = savedTop;
+                                                                }
+                                                            }
+                                                        }}
+                                                        onScroll={e => {
+                                                            dealsKanbanScrollRef.current.stages[pipeline.name] = e.currentTarget.scrollTop;
+                                                        }}
                                                         onDragOver={e => handleDragOver(e, colKey)}
                                                         onDrop={e => handleDrop(e, pipeline.name)}
                                                     >
@@ -15310,7 +15570,8 @@ function Pipeline() {
                                                             return (
                                                                 <div
                                                                     key={deal._id}
-                                                                    className={`pipeline-card ${isSelected ? 'selected' : ''} ${activeMenuId === deal._id ? 'menu-active' : ''} ${hoveredActivityDealId === deal._id ? 'activity-hovered' : ''} ${draggedDealId === deal._id ? 'dragging' : ''}`}
+                                                                    data-deal-id={deal._id}
+                                                                    className={`pipeline-card ${isSelected ? 'selected' : ''} ${activeMenuId === deal._id ? 'menu-active' : ''} ${hoveredActivityDealId === deal._id ? 'activity-hovered' : ''} ${draggedDealId === deal._id ? 'dragging' : ''} ${recentlyReturnedDealId === deal._id ? 'returned-active' : ''}`}
                                                                     draggable={canUpdate}
                                                                     onDragStart={e => handleDragStart(e, deal._id)}
                                                                     onDragEnd={handleDragEnd}
@@ -15589,6 +15850,7 @@ function Pipeline() {
                                                                             onMouseEnter={(e) => handleActivityMouseEnter(deal._id, 'deal', e)}
                                                                             onMouseLeave={handleActivityMouseLeave}
                                                                             onClick={() => {
+                                                                                captureDealsKanbanScroll(deal._id);
                                                                                 setHoveredActivityDealId(null);
                                                                                 setHoveredActivityContactId(null);
                                                                                 setDetailedDealId(deal._id);
@@ -15672,7 +15934,10 @@ function Pipeline() {
                                                                     <button
                                                                         type="button"
                                                                         className="pipeline-card-client-name-link"
-                                                                        onClick={() => setDetailedDealId(deal._id)}
+                                                                        onClick={() => {
+                                                                            captureDealsKanbanScroll(deal._id);
+                                                                            setDetailedDealId(deal._id);
+                                                                        }}
                                                                         title="View deal activity and details"
                                                                     >
                                                                         {deal.clientName}
@@ -15683,7 +15948,10 @@ function Pipeline() {
                                                                 <button
                                                                     type="button"
                                                                     className="pipeline-card-client-name-link"
-                                                                    onClick={() => setDetailedDealId(deal._id)}
+                                                                    onClick={() => {
+                                                                        captureDealsKanbanScroll(deal._id);
+                                                                        setDetailedDealId(deal._id);
+                                                                    }}
                                                                     title="View deal activity and details"
                                                                 >
                                                                     {deal.dealName || deal.clientName}
@@ -15782,6 +16050,69 @@ function Pipeline() {
                                                             >
                                                                 <span className={`pipeline-menu-indicator ${p.badgeClass || 'new'}`} />
                                                                 <span>{p.name}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Bulk Assign Deal Owner Dropdown */}
+                                        {canUpdate && (
+                                            <div style={{ position: 'relative' }}>
+                                                <button
+                                                    type="button"
+                                                    className="pipeline-kanban-bulk-btn"
+                                                    style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(74, 222, 128, 0.35)' }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setIsBulkOwnerDropdownOpen(prev => !prev);
+                                                        setIsBulkMoveDropdownOpen(false);
+                                                    }}
+                                                    title="Bulk assign selected deals to another deal owner"
+                                                >
+                                                    <UserCheck size={13} />
+                                                    <span>Deal Owner</span>
+                                                    <ChevronDown size={12} style={{ transform: isBulkOwnerDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                                                </button>
+
+                                                {isBulkOwnerDropdownOpen && (
+                                                    <div
+                                                        className="pipeline-card-dropdown-menu pipeline-bulk-move-menu"
+                                                        style={{ bottom: 'calc(100% + 8px)', top: 'auto', minWidth: '220px', maxHeight: '280px', overflowY: 'auto' }}
+                                                        onClick={e => e.stopPropagation()}
+                                                    >
+                                                        <div className="pipeline-submenu-header">
+                                                            <span className="pipeline-submenu-title">Assign to Deal Owner:</span>
+                                                        </div>
+                                                        {allDealOwners.map(ownerName => (
+                                                            <button
+                                                                key={ownerName}
+                                                                type="button"
+                                                                className="pipeline-card-menu-item"
+                                                                onClick={() => {
+                                                                    setIsBulkOwnerDropdownOpen(false);
+                                                                    handleBulkAssignOwner(ownerName);
+                                                                }}
+                                                            >
+                                                                <div
+                                                                    style={{
+                                                                        width: 18,
+                                                                        height: 18,
+                                                                        borderRadius: '50%',
+                                                                        background: '#dcfce7',
+                                                                        color: '#15803d',
+                                                                        fontSize: '10px',
+                                                                        fontWeight: 700,
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        justifyContent: 'center',
+                                                                        flexShrink: 0
+                                                                    }}
+                                                                >
+                                                                    {ownerName.charAt(0).toUpperCase()}
+                                                                </div>
+                                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ownerName}</span>
                                                             </button>
                                                         ))}
                                                     </div>
@@ -21099,6 +21430,7 @@ function Pipeline() {
                                                             setHoveredActivityDealId(null);
                                                             setHoveredActivityContactId(null);
                                                             if (isDeal) {
+                                                                captureDealsKanbanScroll(hoveredDeal._id);
                                                                 setDetailedDealId(hoveredDeal._id);
                                                             } else {
                                                                 setDetailedContactId(hoveredContact._id);

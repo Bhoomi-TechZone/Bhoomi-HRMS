@@ -744,6 +744,83 @@ router.post('/bulk-delete', auth, async (req, res) => {
   }
 });
 
+// Bulk assign deals to a new salesOwner
+router.post('/bulk-assign-owner', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id || req.user._id).populate('role');
+    if (!user) return res.status(401).json({ message: 'User not found' });
+    const { hasUpdate, hasFullAccess, isAdmin } = checkAccess(user);
+    if (!hasUpdate && !isAdmin) return res.status(403).json({ message: 'Access denied. Update permission required.' });
+
+    const { dealIds, salesOwner } = req.body;
+    if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
+      return res.status(400).json({ message: 'dealIds array is required' });
+    }
+    if (!salesOwner || !salesOwner.trim()) {
+      return res.status(400).json({ message: 'salesOwner is required' });
+    }
+
+    const trimmedOwner = salesOwner.trim();
+    const validIds = dealIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      return res.json({ success: true, count: 0, salesOwner: trimmedOwner });
+    }
+
+    let resolvedAssignedTo = null;
+    try {
+      const foundUser = await User.findOne({
+        $or: [
+          { $expr: { $eq: [{ $concat: ['$firstName', ' ', '$lastName'] }, trimmedOwner] } },
+          { email: trimmedOwner.toLowerCase() },
+          { officialEmail: trimmedOwner.toLowerCase() }
+        ]
+      });
+      if (foundUser) resolvedAssignedTo = foundUser._id;
+    } catch (e) { }
+
+    let filter = { _id: { $in: validIds } };
+    if (!isAdmin && !hasFullAccess) {
+      const userFullName = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+      const userEmail = (user.email || '').trim().toLowerCase();
+      filter.$or = [
+        { assignedTo: user._id },
+        { createdBy: user._id }
+      ];
+      if (userFullName) {
+        filter.$or.push({ salesOwner: new RegExp(`^${userFullName}$`, 'i') });
+        filter.$or.push({ addedBy: new RegExp(`^${userFullName}$`, 'i') });
+      }
+      if (userEmail) {
+        filter.$or.push({ email: userEmail });
+      }
+    }
+
+    const updateDoc = { salesOwner: trimmedOwner };
+    if (resolvedAssignedTo) {
+      updateDoc.assignedTo = resolvedAssignedTo;
+    }
+
+    const result = await Deal.updateMany(filter, { $set: updateDoc });
+
+    // Trigger CRM notification
+    try {
+      const io = req.app.get('socketio');
+      sendCrmNotification(io, {
+        actorUser: user,
+        entityType: 'Deal',
+        action: 'update',
+        entityName: `${result.modifiedCount} Deal(s) reassigned to ${trimmedOwner}`,
+        link: '/pipeline?tab=deals'
+      });
+    } catch (notifErr) { }
+
+    res.json({ success: true, count: result.modifiedCount, salesOwner: trimmedOwner });
+  } catch (error) {
+    console.error('Bulk assign deal owner error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 // Delete deal
 router.delete('/:id', auth, async (req, res) => {
   try {

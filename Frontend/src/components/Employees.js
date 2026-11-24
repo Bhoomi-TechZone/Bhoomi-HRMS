@@ -177,6 +177,8 @@ function Employees() {
     handoverReason: ''
   });
   const [viewModalTab, setViewModalTab] = useState("info");
+  const [employeeLogs, setEmployeeLogs] = useState([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
   const [showClosureSide, setShowClosureSide] = useState(false);
   const [showAccessControl, setShowAccessControl] = useState(false);
   const [accessModules, setAccessModules] = useState([]);
@@ -890,16 +892,39 @@ function Employees() {
     }
   };
 
+  // Fetch employee audit / activity logs
+  const fetchEmployeeLogs = useCallback(async (employeeId) => {
+    if (!employeeId) return;
+    try {
+      setLoadingLogs(true);
+      const res = await api.get(`/employees/${employeeId}/logs`);
+      if (res.data?.success) {
+        setEmployeeLogs(res.data.logs || []);
+      } else {
+        setEmployeeLogs([]);
+      }
+    } catch (err) {
+      console.error("Failed to fetch employee logs:", err);
+      setEmployeeLogs([]);
+    } finally {
+      setLoadingLogs(false);
+    }
+  }, []);
+
   // View employee details
   const handleViewEmployee = (employee) => {
     setSelectedEmployee(employee);
     setViewModalTab("info");
+    setEmployeeLogs([]);
     setShowClosureSide(false);
     setShowAccessControl(false);
     setAccessModules(employee.accessModules || []);
     setIsAddingModule(false);
     setEditingModuleId(null);
     setShowViewModal(true);
+    if (employee?._id) {
+      fetchEmployeeLogs(employee._id);
+    }
   };
 
   // Open edit modal
@@ -4981,8 +5006,8 @@ function Employees() {
             className="emp-detail-scroll emp-flip-container"
             style={{
               fontFamily: "'Inter', 'Segoe UI', sans-serif",
-              width: "100%", maxWidth: showAccessControl ? "1180px" : "860px",
-              maxHeight: "90vh", overflowY: "auto",
+              width: "100%", maxWidth: showAccessControl ? "1420px" : "1100px",
+              maxHeight: "92vh", overflowY: "auto",
               transition: "max-width 0.4s cubic-bezier(0.16, 1, 0.3, 1)"
             }}
           >
@@ -4990,19 +5015,20 @@ function Employees() {
 
               {/* ── Left card ── */}
               <div className="emp-card-left" style={{
-                flex: "0 0 230px", minWidth: "210px",
-                background: "#fff", borderRadius: "14px",
-                border: "1px solid #e5e7eb", padding: "16px",
-                display: "flex", flexDirection: "column", gap: "10px"
+                flex: "0 0 270px", minWidth: "240px",
+                background: "#fff", borderRadius: "16px",
+                border: "1px solid #e5e7eb", padding: "20px",
+                display: "flex", flexDirection: "column", gap: "12px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.03)"
               }}>
                 {/* Avatar */}
                 <div style={{
-                  height: "160px", borderRadius: "11px", overflow: "hidden",
+                  height: "175px", borderRadius: "12px", overflow: "hidden",
                   background: "#f0fdf4",
                   display: "flex", alignItems: "center", justifyContent: "center"
                 }}>
                   <div style={{
-                    width: "80px", height: "80px", borderRadius: "50%",
+                    width: "88px", height: "88px", borderRadius: "50%",
                     background: "#166534",
                     display: "flex", alignItems: "center", justifyContent: "center"
                   }}>
@@ -5013,8 +5039,8 @@ function Employees() {
                 </div>
 
                 {/* Name + verified */}
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{ fontSize: "14px", fontWeight: 700, color: "#111827", lineHeight: 1.2 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div style={{ fontSize: "16px", fontWeight: 700, color: "#111827", lineHeight: 1.2 }}>
                     {selectedEmployee.firstName} {selectedEmployee.lastName}
                   </div>
                   <div style={{
@@ -5081,26 +5107,27 @@ function Employees() {
               </div>
 
               {/* ── Right card (Flip Container) ── */}
-              <div className="emp-card-right" style={{ flex: "1 1 340px", minWidth: "260px", perspective: "1000px" }}>
+              <div className="emp-card-right" style={{ flex: "1 1 540px", minWidth: "360px", perspective: "1000px" }}>
                 <div style={{
-                  position: "relative", width: "100%", height: "100%", minHeight: "460px",
+                  position: "relative", width: "100%", height: "100%", minHeight: "540px",
                   transition: "transform 0.6s", transformStyle: "preserve-3d",
                   transform: showClosureSide ? "rotateY(180deg)" : "rotateY(0deg)"
                 }}>
                   {/* Front Side */}
                   <div style={{
                     position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-                    backfaceVisibility: "hidden", background: "#fff", borderRadius: "14px",
-                    border: "1px solid #e5e7eb", padding: "14px",
-                    display: "flex", flexDirection: "column", gap: "10px"
+                    backfaceVisibility: "hidden", background: "#fff", borderRadius: "16px",
+                    border: "1px solid #e5e7eb", padding: "20px",
+                    display: "flex", flexDirection: "column", gap: "12px",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.03)"
                   }}>
                     {/* Header row */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div>
-                        <div style={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>
+                        <div style={{ fontSize: "20px", fontWeight: 700, color: "#111827" }}>
                           Employee Details
                         </div>
-                        <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>
+                        <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "3px" }}>
                           Personal, contact & banking information
                         </div>
                       </div>
@@ -5143,22 +5170,34 @@ function Employees() {
                     {/* Tabs */}
                     <div style={{
                       display: "flex", background: "#f3f4f6",
-                      borderRadius: "999px", padding: "3px"
+                      borderRadius: "999px", padding: "4px"
                     }}>
                       {[
                         ["info", "Information"],
-                        ["banking", "Banking"]
+                        ["banking", "Banking"],
+                        ["logs", "Logs"]
                       ].map(([id, label]) => (
-                        <button key={id} onClick={() => setViewModalTab(id)} style={{
-                          flex: 1, border: "none", borderRadius: "999px",
-                          background: viewModalTab === id ? "#a3e635" : "transparent",
-                          padding: "6px 10px", fontSize: "11px", fontWeight: 600,
-                          color: viewModalTab === id ? "#365314" : "#374151", cursor: "pointer", transition: "background 0.2s"
-                        }}>{label}</button>
+                        <button
+                          key={id}
+                          onClick={() => {
+                            setViewModalTab(id);
+                            if (id === 'logs' && selectedEmployee?._id) {
+                              fetchEmployeeLogs(selectedEmployee._id);
+                            }
+                          }}
+                          style={{
+                            flex: 1, border: "none", borderRadius: "999px",
+                            background: viewModalTab === id ? "#a3e635" : "transparent",
+                            padding: "6px 10px", fontSize: "11px", fontWeight: 600,
+                            color: viewModalTab === id ? "#365314" : "#374151", cursor: "pointer", transition: "background 0.2s"
+                          }}
+                        >
+                          {label}
+                        </button>
                       ))}
                     </div>
 
-                    <div className="custom-scroll" style={{ height: "350px", overflowY: "auto", paddingRight: "8px" }}>
+                    <div className="custom-scroll" style={{ height: "440px", overflowY: "auto", paddingRight: "8px" }}>
 
                       {viewModalTab === "info" && (
                         <>
@@ -5246,16 +5285,302 @@ function Employees() {
                           ))}
                         </div>
                       )}
+
+                      {viewModalTab === "logs" && (
+                        <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: "10px" }}>
+                          <style>{`
+                            @keyframes empSpin {
+                              0% { transform: rotate(0deg); }
+                              100% { transform: rotate(360deg); }
+                            }
+                          `}</style>
+
+                          {/* Header row: Title and record count (Refresh button removed) */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '13px', fontWeight: 700, color: '#111827' }}>
+                                Activity & Audit Logs
+                              </span>
+                              <span style={{ fontSize: '10.5px', fontWeight: 600, background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: '999px', border: '1px solid #e2e8f0' }}>
+                                {employeeLogs.length} {employeeLogs.length === 1 ? 'record' : 'records'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Professional Loading Spinner */}
+                          {loadingLogs ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '52px 16px', color: '#64748b' }}>
+                              <div style={{ position: 'relative', width: '38px', height: '38px', marginBottom: '12px' }}>
+                                <svg
+                                  style={{
+                                    animation: 'empSpin 0.8s linear infinite',
+                                    width: '100%',
+                                    height: '100%'
+                                  }}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                >
+                                  <circle
+                                    cx="12"
+                                    cy="12"
+                                    r="9"
+                                    stroke="#e2e8f0"
+                                    strokeWidth="2.8"
+                                  />
+                                  <path
+                                    d="M12 3a9 9 0 0 1 9 9"
+                                    stroke="#84cc16"
+                                    strokeWidth="2.8"
+                                    strokeLinecap="round"
+                                  />
+                                </svg>
+                              </div>
+                              <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                                Loading activity logs...
+                              </span>
+                              <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '3px' }}>
+                                Fetching audit trail and updates
+                              </span>
+                            </div>
+                          ) : employeeLogs.length === 0 ? (
+                            /* Professional Empty State with clean SVG icon */
+                            <div style={{ textAlign: 'center', padding: '44px 16px', color: '#64748b' }}>
+                              <div
+                                style={{
+                                  width: '52px',
+                                  height: '52px',
+                                  borderRadius: '50%',
+                                  background: '#f8fafc',
+                                  border: '1px solid #e2e8f0',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  margin: '0 auto 12px',
+                                  color: '#94a3b8',
+                                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+                                }}
+                              >
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                                  <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+                                  <path d="M12 11h4" />
+                                  <path d="M12 16h4" />
+                                  <path d="M8 11h.01" />
+                                  <path d="M8 16h.01" />
+                                </svg>
+                              </div>
+                              <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>
+                                No activity logs yet
+                              </div>
+                              <div style={{ fontSize: '11.5px', color: '#64748b', maxWidth: '340px', margin: '0 auto', lineHeight: 1.55 }}>
+                                When this employee is edited, deactivated, activated or updated, activities with user, date and timezone will be recorded here.
+                              </div>
+                            </div>
+                          ) : (
+                            /* Activity list with crisp SVG icons */
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                              {employeeLogs.map((log, lIdx) => {
+                                const isDeactivated = log.action === 'DEACTIVATED';
+                                const isActivated = log.action === 'ACTIVATED';
+                                const isEdited = log.action === 'EDITED';
+                                const isPassword = log.action === 'PASSWORD_CHANGED';
+                                const isAccess = log.action === 'ACCESS_CONTROL_UPDATED';
+
+                                const badgeBg = isDeactivated ? '#fee2e2' : isActivated ? '#dcfce7' : isEdited ? '#e0e7ff' : isPassword ? '#fef3c7' : isAccess ? '#f3e8ff' : '#f1f5f9';
+                                const badgeColor = isDeactivated ? '#991b1b' : isActivated ? '#166534' : isEdited ? '#3730a3' : isPassword ? '#92400e' : isAccess ? '#6b21a8' : '#334155';
+                                const badgeBorder = isDeactivated ? '#fecaca' : isActivated ? '#bbf7d0' : isEdited ? '#c7d2fe' : isPassword ? '#fde68a' : isAccess ? '#e9d5ff' : '#e2e8f0';
+
+                                const formattedDate = log.createdAt ? new Date(log.createdAt).toLocaleString('en-IN', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  hour12: true
+                                }) : '—';
+
+                                return (
+                                  <div
+                                    key={log._id || lIdx}
+                                    style={{
+                                      background: '#ffffff',
+                                      border: '1px solid #e5e7eb',
+                                      borderRadius: '10px',
+                                      padding: '10px 12px',
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                                    }}
+                                  >
+                                    {/* Action & Date Row */}
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', flexWrap: 'wrap' }}>
+                                      <span
+                                        style={{
+                                          fontSize: '10px',
+                                          fontWeight: 700,
+                                          padding: '2px 8px',
+                                          borderRadius: '999px',
+                                          background: badgeBg,
+                                          color: badgeColor,
+                                          border: `1px solid ${badgeBorder}`,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px'
+                                        }}
+                                      >
+                                        {isDeactivated && (
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                            <circle cx="12" cy="12" r="10" />
+                                            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                                          </svg>
+                                        )}
+                                        {isActivated && (
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                                            <polyline points="22 4 12 14.01 9 11.01" />
+                                          </svg>
+                                        )}
+                                        {isEdited && (
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                          </svg>
+                                        )}
+                                        {isPassword && (
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                          </svg>
+                                        )}
+                                        {isAccess && (
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                                          </svg>
+                                        )}
+                                        <span>{log.actionTitle || log.action}</span>
+                                      </span>
+
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 500 }}>
+                                          {formattedDate}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: '9.5px',
+                                            fontWeight: 600,
+                                            color: '#475569',
+                                            background: '#f1f5f9',
+                                            padding: '1px 5px',
+                                            borderRadius: '4px',
+                                            border: '1px solid #e2e8f0'
+                                          }}
+                                          title="Action Timezone"
+                                        >
+                                          {log.timezone || 'Asia/Kolkata (IST)'}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Performed By Row */}
+                                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                        <circle cx="12" cy="7" r="4" />
+                                      </svg>
+                                      <span>
+                                        Performed by: <strong style={{ color: '#0f172a' }}>{log.performedByName || 'Admin'}</strong>
+                                        {log.performedByRole ? (
+                                          <span style={{ color: '#64748b', marginLeft: '4px' }}>({log.performedByRole})</span>
+                                        ) : null}
+                                      </span>
+                                    </div>
+
+                                    {/* Summary */}
+                                    {log.summary && (
+                                      <div style={{ fontSize: '11.5px', color: '#1e293b', fontWeight: 600, marginTop: '3px' }}>
+                                        {log.summary}
+                                      </div>
+                                    )}
+
+                                    {/* Field Changes Diffs (e.g. DOB edited, etc.) */}
+                                    {Array.isArray(log.changes) && log.changes.length > 0 && (
+                                      <div style={{ marginTop: '8px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #f1f5f9', padding: '6px 8px' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '4px' }}>
+                                          Modified Details:
+                                        </div>
+                                        {log.changes.map((ch, idx) => (
+                                          <div
+                                            key={idx}
+                                            style={{
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'space-between',
+                                              padding: '3px 0',
+                                              borderBottom: idx < log.changes.length - 1 ? '1px dashed #e2e8f0' : 'none',
+                                              fontSize: '11px',
+                                              gap: '8px'
+                                            }}
+                                          >
+                                            <span style={{ fontWeight: 600, color: '#334155' }}>
+                                              {ch.fieldLabel || ch.field}:
+                                            </span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                              <span
+                                                style={{
+                                                  color: '#dc2626',
+                                                  background: '#fef2f2',
+                                                  padding: '1px 5px',
+                                                  borderRadius: '4px',
+                                                  textDecoration: 'line-through',
+                                                  fontSize: '10.5px'
+                                                }}
+                                              >
+                                                {String(ch.oldValue || 'None')}
+                                              </span>
+                                              <span style={{ color: '#94a3b8', fontSize: '10px' }}>→</span>
+                                              <span
+                                                style={{
+                                                  color: '#16a34a',
+                                                  fontWeight: 600,
+                                                  background: '#f0fdf4',
+                                                  padding: '1px 5px',
+                                                  borderRadius: '4px',
+                                                  fontSize: '10.5px'
+                                                }}
+                                              >
+                                                {String(ch.newValue || 'None')}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {/* Deactivation Details */}
+                                    {log.metadata && (log.metadata.reason || log.metadata.leavingType || log.metadata.handoverTo) && (
+                                      <div style={{ marginTop: '6px', background: '#fff1f2', borderRadius: '6px', border: '1px solid #ffe4e6', padding: '6px 8px', fontSize: '11px', color: '#9f1239' }}>
+                                        {log.metadata.leavingType && <div><strong>Leaving Type:</strong> {log.metadata.leavingType}</div>}
+                                        {log.metadata.reason && <div><strong>Reason:</strong> {log.metadata.reason}</div>}
+                                        {log.metadata.lastWorkingDay && <div><strong>Last Working Day:</strong> {log.metadata.lastWorkingDay}</div>}
+                                        {log.metadata.handoverTo && <div><strong>Handover To:</strong> {log.metadata.handoverTo}</div>}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>{/* end tab content wrapper */}
                   </div>
 
                   {/* Back Side */}
                   <div style={{
                     position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-                    backfaceVisibility: "hidden", background: "#fff", borderRadius: "14px",
-                    border: "1px solid #e5e7eb", padding: "14px",
-                    display: "flex", flexDirection: "column", gap: "10px",
-                    transform: "rotateY(180deg)"
+                    backfaceVisibility: "hidden", background: "#fff", borderRadius: "16px",
+                    border: "1px solid #e5e7eb", padding: "20px",
+                    display: "flex", flexDirection: "column", gap: "12px",
+                    transform: "rotateY(180deg)",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.03)"
                   }}>
                     {/* Header row for back */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -5293,7 +5618,7 @@ function Employees() {
                         >×</button>
                       </div>
                     </div>
-                    <div className="custom-scroll" style={{ height: "390px", overflowY: "auto", paddingRight: "8px" }}>
+                    <div className="custom-scroll" style={{ height: "440px", overflowY: "auto", paddingRight: "8px" }}>
                       {selectedEmployee?.deactivationDetails ? (
                         <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: "8px" }}>
                           {[
@@ -5328,11 +5653,11 @@ function Employees() {
 
               {/* ── Access Control Card ── */}
               <div className="emp-card-right" style={{
-                flex: showAccessControl ? "0 0 300px" : "0 0 0px",
-                minWidth: showAccessControl ? "260px" : "0px",
-                width: showAccessControl ? "300px" : "0px",
-                height: "460px", /* Fixed height to match other cards */
-                background: "#fff", borderRadius: "14px",
+                flex: showAccessControl ? "0 0 340px" : "0 0 0px",
+                minWidth: showAccessControl ? "280px" : "0px",
+                width: showAccessControl ? "340px" : "0px",
+                height: "540px", /* Fixed height to match other cards */
+                background: "#fff", borderRadius: "16px",
                 border: showAccessControl ? "1px solid #e5e7eb" : "none",
                 padding: showAccessControl ? "16px" : "0px",
                 display: "flex", flexDirection: "column", gap: "10px",
