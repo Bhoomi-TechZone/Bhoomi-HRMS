@@ -13,32 +13,48 @@ import {
 
 ChartJS.register(ArcElement, ChartTooltip, ChartLegend);
 
+const DASHBOARD_CACHE_KEY = 'admin_dashboard_cache_v2';
+
+const getCachedDashboardData = () => {
+  try {
+    const raw = sessionStorage.getItem(DASHBOARD_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Date.now() - (parsed._cachedAt || 0) < 30 * 60 * 1000) {
+      return parsed;
+    }
+  } catch (e) { }
+  return null;
+};
+
 function AdminDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [stats, setStats] = useState({
+
+  // Instant SWR Cache
+  const cachedData = useRef(getCachedDashboardData()).current;
+
+  const [stats, setStats] = useState(() => cachedData?.stats || {
     presentToday: 0,
     absentToday: 0,
     activeProjects: 0,
     totalLeads: 0,
   });
-  // Previous period values for dynamic percentage calculation
-  const [prevStats, setPrevStats] = useState({
+  const [prevStats, setPrevStats] = useState(() => cachedData?.prevStats || {
     presentToday: 0,
     absentToday: 0,
     activeProjects: 0,
     totalLeads: 0,
   });
-  const [departmentData, setDepartmentData] = useState({ departments: [], counts: [], maleCounts: [], femaleCounts: [] });
   const [leadsTimelineData, setLeadsTimelineData] = useState({ dates: [], sources: [] });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !cachedData);
   const [chartLoading, setChartLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [projectStatusCounts, setProjectStatusCounts] = useState({ completed: 0, working: 0, canceled: 0 });
-  const [cardSparklines, setCardSparklines] = useState({ present: [], absent: [], leads: [], projects: [] });
-  const [recentActivities, setRecentActivities] = useState([]);
-  const [recentLeads, setRecentLeads] = useState([]);
+  const [projectStatusCounts, setProjectStatusCounts] = useState(() => cachedData?.projectStatusCounts || { completed: 0, working: 0, canceled: 0 });
+  const [cardSparklines, setCardSparklines] = useState(() => cachedData?.cardSparklines || { present: [], absent: [], leads: [], projects: [] });
+  const [recentActivities, setRecentActivities] = useState(() => cachedData?.recentActivities || []);
+  const [recentLeads, setRecentLeads] = useState(() => cachedData?.recentLeads || []);
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -78,17 +94,20 @@ function AdminDashboard() {
   // Lead sources — populated from meta-leads/source-stats
   const [leadSources, setLeadSources] = useState([]);
 
-  useEffect(() => { isMounted.current = true; fetchAll(); fetchLeadsTimeline(selectedMonth); }, []);
+  useEffect(() => {
+    isMounted.current = true;
+    fetchAll();
+  }, []);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
       if (isMounted.current) {
-        fetchAll();
+        fetchAll(true); // background silent refresh
       }
     }, 60000);
 
     return () => clearInterval(intervalId);
-  }, [selectedMonth]);
+  }, []);
 
   useEffect(() => {
     if (isMounted.current && selectedMonth) {
@@ -198,26 +217,7 @@ function AdminDashboard() {
     }
   };
 
-  const fetchDepartmentData = async (month) => {
-    setChartLoading(true);
-    try {
-      const genderStats = await api.get(`/employees/gender-stats?month=${month}`)
-        .catch(() => ({ data: { departments: [], overall: { total: 0, male: 0, female: 0 } } }));
-      const depts = genderStats.data?.departments || [];
-      const newData = {
-        departments: depts.map(d => d.name),
-        counts: depts.map(d => d.total),
-        maleCounts: depts.map(d => d.male),
-        femaleCounts: depts.map(d => d.female),
-      };
-      setDepartmentData(newData);
-      setChartLoading(false);
-      // Call renderChart directly with fresh data to avoid stale closure
-      setTimeout(() => renderChart(newData), 0);
-    } catch {
-      setChartLoading(false);
-    }
-  };
+
 
   // Normalize and group timeline sources into clean, standard channels
   const normalizeTimelineData = (data) => {
@@ -322,290 +322,143 @@ function AdminDashboard() {
     }
   };
 
-  const fetchAll = async () => {
-    setLoading(true);
+  const fetchAll = async (isBackground = false) => {
+    if (!isBackground && !cachedData) {
+      setLoading(true);
+    }
     setError(null);
     try {
-      // Fetch current and previous stats in parallel (adjust endpoint as needed)
-      const responses = await Promise.all([
-        api.get('/attendance/today-stats').catch(() => ({ data: { presentToday: 0, absentToday: 0 } })),
-        api.get('/projects').catch(() => ({ data: [] })),
-        api.get('/meta-leads?page=1&limit=50&sortBy=createdTime&sortOrder=desc').catch(() => ({ data: { leads: [], total: 0 } })),
-        api.get('/leads').catch(() => ({ data: [] })),
-        api.get(`/employees/gender-stats?month=${selectedMonth}`).catch(() => ({ data: { departments: [], overall: { total: 0, male: 0, female: 0 } } })),
-        api.get('/dashboard/previous-stats').catch(() => ({ data: { presentToday: 0, absentToday: 0, activeProjects: 0, totalLeads: 0 } })),
-        api.get('/activities').catch(() => ({ data: [] })),
-        api.get('/employees').catch(() => ({ data: [] }))
+      // Parallel execution of overview summary, paginated recent leads, and activities
+      const [overviewResp, metaLeadsResp, manualLeadsResp, activitiesResp] = await Promise.all([
+        api.get('/dashboard/overview-summary').catch(err => {
+          console.warn('Overview summary fallback:', err);
+          return null;
+        }),
+        api.get('/meta-leads?page=1&limit=25&sortBy=createdTime&sortOrder=desc').catch(() => ({ data: { leads: [], total: 0 } })),
+        api.get('/leads?page=1&limit=25&sortBy=newest').catch(() => ({ data: { leads: [], total: 0 } })),
+        api.get('/activities').catch(() => ({ data: [] }))
       ]);
 
-      const [
-        attendanceStats, projects, metaLeadsResp, manualLeadsResp,
-        genderStats, prevStatsResp, activitiesResp, employeesResp
-      ] = responses;
+      // Lazy load employees in background for lead assignment dropdown without blocking
+      api.get('/employees').then(res => {
+        if (res.data && isMounted.current) setEmployees(res.data);
+      }).catch(() => {});
 
-      setEmployees(employeesResp.data || []);
+      let currentStats = stats;
+      let currentPrevStats = prevStats;
+      let currentSparklines = cardSparklines;
+      let currentProjCounts = projectStatusCounts;
+      let currentLeadSources = leadSources;
 
-      // Combine meta leads and manual leads
-      const metaLeadsArr = metaLeadsResp.data?.leads || (Array.isArray(metaLeadsResp.data) ? metaLeadsResp.data : []);
-      const manualLeadsArr = Array.isArray(manualLeadsResp.data) ? manualLeadsResp.data : [];
-      const combinedLeads = [...metaLeadsArr, ...manualLeadsArr];
+      if (overviewResp && overviewResp.data?.success) {
+        const { stats: s, prevStats: ps, cardSparklines: cs, projectStatusCounts: psc, leadSources: ls } = overviewResp.data;
+        if (s) { setStats(s); currentStats = s; }
+        if (ps) { setPrevStats(ps); currentPrevStats = ps; }
+        if (cs) { setCardSparklines(cs); currentSparklines = cs; }
+        if (psc) { setProjectStatusCounts(psc); currentProjCounts = psc; }
+        if (ls) { setLeadSources(ls); currentLeadSources = ls; }
+      } else {
+        // Fallback: fetch individual endpoints if overview-summary endpoint fails
+        const [attRes, projRes, prevRes, sparkRes, srcRes] = await Promise.all([
+          api.get('/attendance/today-stats').catch(() => ({ data: { presentToday: 0, absentToday: 0 } })),
+          api.get('/projects').catch(() => ({ data: [] })),
+          api.get('/dashboard/previous-stats').catch(() => ({ data: { presentToday: 0, absentToday: 0, activeProjects: 0, totalLeads: 0 } })),
+          api.get('/dashboard/weekly-sparklines').catch(() => ({ data: null })),
+          api.get('/meta-leads/source-stats').catch(() => ({ data: { sources: [] } }))
+        ]);
 
-      // Use combined count for Total Leads (optional, depending on if you want it to reflect both)
-      const totalMetaLeads = (metaLeadsResp.data?.pagination?.total ?? metaLeadsResp.data?.total ?? metaLeadsArr.length) + manualLeadsArr.length;
-      
-      // Set recent leads for table display - always keep newest first for admin visibility
+        let completed = 0, working = 0, canceled = 0, activeProjects = 0;
+        (projRes.data || []).forEach(p => {
+          const st = (p.status || '').toLowerCase();
+          if (['completed', 'done', 'finished'].includes(st)) completed++;
+          else if (['active', 'in-progress', 'working', 'progress'].includes(st)) {
+            working++;
+            if (st === 'active') activeProjects++;
+          }
+          else if (['canceled', 'cancelled', 'aborted'].includes(st)) canceled++;
+        });
+
+        const metaArr = metaLeadsResp.data?.leads || [];
+        const manualArr = manualLeadsResp.data?.leads || [];
+        const totalLeads = (metaLeadsResp.data?.total || metaArr.length) + (manualLeadsResp.data?.total || manualArr.length);
+
+        currentStats = {
+          presentToday: attRes.data?.presentToday || 0,
+          absentToday: attRes.data?.absentToday ?? ((attRes.data?.totalActive - attRes.data?.presentToday) || 0),
+          activeProjects,
+          totalLeads
+        };
+        setStats(currentStats);
+
+        currentPrevStats = {
+          presentToday: prevRes.data?.presentToday || 0,
+          absentToday: prevRes.data?.absentToday || 0,
+          activeProjects: prevRes.data?.activeProjects || 0,
+          totalLeads: prevRes.data?.totalLeads || 0
+        };
+        setPrevStats(currentPrevStats);
+
+        currentProjCounts = { completed, working, canceled };
+        setProjectStatusCounts(currentProjCounts);
+
+        if (sparkRes.data) {
+          currentSparklines = sparkRes.data;
+          setCardSparklines(sparkRes.data);
+        }
+
+        const GAUGE_COLORS = ['#162a16', '#3b775e', '#a8e63d', '#0891b2', '#8b5cf6', '#f59e0b'];
+        const rawSources = srcRes.data?.sources || [];
+        currentLeadSources = rawSources.map((s, i) => ({
+          label: s.label,
+          color: GAUGE_COLORS[i % GAUGE_COLORS.length],
+          value: s.percent,
+          count: s.count
+        }));
+        setLeadSources(currentLeadSources);
+      }
+
+      // Process Recent Leads table
+      const metaArr = metaLeadsResp.data?.leads || (Array.isArray(metaLeadsResp.data) ? metaLeadsResp.data : []);
+      const manualArr = manualLeadsResp.data?.leads || (Array.isArray(manualLeadsResp.data) ? manualLeadsResp.data : []);
+      const combinedLeads = [...metaArr, ...manualArr];
       const sortedLeads = combinedLeads
-        .filter((lead) => lead && (lead.createdTime || lead.createdAt || lead.syncedAt))
+        .filter(lead => lead && (lead.createdTime || lead.createdAt || lead.syncedAt))
         .sort((a, b) => {
           const aTime = new Date(a.createdTime || a.createdAt || a.syncedAt || 0).getTime();
           const bTime = new Date(b.createdTime || b.createdAt || b.syncedAt || 0).getTime();
           return bTime - aTime;
         });
-      setRecentLeads(sortedLeads.slice(0, 50)); // Only keep the top 50 so UI doesn't lag
+      const topRecentLeads = sortedLeads.slice(0, 50);
+      setRecentLeads(topRecentLeads);
 
-      // Recent activity feed for admin card
+      // Process Activities
       const latestActivities = Array.isArray(activitiesResp.data) ? activitiesResp.data : [];
-      setRecentActivities(latestActivities.slice(0, 6));
+      const topActivities = latestActivities.slice(0, 6);
+      setRecentActivities(topActivities);
 
-      // Fetch lead source stats
-      const GAUGE_COLORS = ['#162a16', '#3b775e', '#a8e63d', '#0891b2', '#8b5cf6', '#f59e0b'];
-      const sourceStatsResp = await api.get('/meta-leads/source-stats').catch(() => ({ data: { sources: [] } }));
-      const rawSources = sourceStatsResp.data?.sources || [];
-      setLeadSources(rawSources.map((s, i) => ({
-        label: s.label,
-        color: GAUGE_COLORS[i % GAUGE_COLORS.length],
-        value: s.percent,
-        count: s.count,
-      })));
+      // Save to sessionStorage cache for instant render on subsequent visits
+      try {
+        sessionStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify({
+          stats: currentStats,
+          prevStats: currentPrevStats,
+          cardSparklines: currentSparklines,
+          projectStatusCounts: currentProjCounts,
+          leadSources: currentLeadSources,
+          recentLeads: topRecentLeads,
+          recentActivities: topActivities,
+          _cachedAt: Date.now()
+        }));
+      } catch (e) { }
 
-      // Count project statuses for pie chart
-      let completed = 0, working = 0, canceled = 0;
-      (projects.data || []).forEach(p => {
-        if (['completed', 'done', 'finished'].includes((p.status || '').toLowerCase())) completed++;
-        else if (['active', 'in-progress', 'working', 'progress'].includes((p.status || '').toLowerCase())) working++;
-        else if (['canceled', 'cancelled', 'aborted'].includes((p.status || '').toLowerCase())) canceled++;
-      });
-      setProjectStatusCounts({ completed, working, canceled });
-
-      const activeProjects = (projects.data || []).filter(
-        p => p.status === 'active'
-      ).length;
-
-      setStats({
-        presentToday: attendanceStats.data?.presentToday || 0,
-        absentToday: attendanceStats.data?.absentToday ?? ((attendanceStats.data?.totalActive - attendanceStats.data?.presentToday) || 0),
-        activeProjects,
-        totalLeads: totalMetaLeads,
-      });
-
-      // Set previous stats for percentage calculation
-      setPrevStats({
-        presentToday: prevStatsResp.data?.presentToday || 0,
-        absentToday: prevStatsResp.data?.absentToday || 0,
-        activeProjects: prevStatsResp.data?.activeProjects || 0,
-        totalLeads: prevStatsResp.data?.totalLeads || 0,
-      });
-
-      // Fetch weekly sparkline data for cards
-      const sparkResp = await api.get('/dashboard/weekly-sparklines').catch(() => ({ data: null }));
-      if (sparkResp.data) {
-        setCardSparklines({
-          present: sparkResp.data.present || [],
-          absent:  sparkResp.data.absent  || [],
-          leads:   sparkResp.data.leads   || [],
-          projects:sparkResp.data.projects|| [],
-        });
-      } else {
-        // Fallback: derive sparklines from already-fetched stats
-        setCardSparklines({
-          present:  Array.from({ length: 7 }, (_, i) => Math.max(0, (attendanceStats.data?.presentToday || 0) - (6 - i) * 2 + Math.floor(Math.random() * 3))),
-          absent:   Array.from({ length: 7 }, (_, i) => Math.max(0, (attendanceStats.data?.absentToday  || 0) - (6 - i) * 1 + Math.floor(Math.random() * 2))),
-          leads:    Array.from({ length: 7 }, (_, i) => Math.round((totalMetaLeads / 30) * (i + 1))),
-          projects: Array.from({ length: 7 }, (_, i) => Math.max(0, activeProjects - (6 - i))),
-        });
-      }
-
-      const depts = genderStats.data?.departments || [];
-      setDepartmentData({
-        departments: depts.map(d => d.name),
-        counts: depts.map(d => d.total),
-        maleCounts: depts.map(d => d.male),
-        femaleCounts: depts.map(d => d.female),
-      });
-      // Prevent the selectedMonth useEffect from double-fetching on initial load
-      // by setting departmentData here directly with the initial month
     } catch (err) {
+      console.error('Error fetching dashboard data:', err);
       setError('Failed to load data');
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const renderChart = (data) => {
-    const chartData = data || departmentData;
-    if (!chartRef.current || !window.Chart) return;
-    if (chartInstance.current) chartInstance.current.destroy();
-
-    const ctx = chartRef.current.getContext('2d');
-    const canvasHeight = chartRef.current.offsetHeight || 320;
-
-    // Dynamic y-axis: safely find max value without stack overflow
-    let dataMax = 1;
-    [chartData.counts, chartData.maleCounts, chartData.femaleCounts].forEach(arr => {
-      if (Array.isArray(arr)) {
-        for (let i = 0; i < arr.length; i++) {
-          const v = Number(arr[i]);
-          if (!isNaN(v) && v > dataMax) dataMax = v;
-        }
+      if (isMounted.current) {
+        setLoading(false);
+        setRefreshing(false);
       }
-    });
-    const rawStep = dataMax <= 5 ? 1 : dataMax <= 20 ? 5 : dataMax <= 50 ? 10 : dataMax <= 100 ? 20 : 50;
-    const suggestedMax = Math.ceil((dataMax * 1.6) / rawStep) * rawStep;
-
-    // Strong gradient fills — bold wave style like the reference
-    const makeGrad = (r, g, b, topAlpha, botAlpha) => {
-      const g1 = ctx.createLinearGradient(0, 0, 0, canvasHeight);
-      g1.addColorStop(0,    `rgba(${r},${g},${b},${topAlpha})`);
-      g1.addColorStop(0.45, `rgba(${r},${g},${b},${topAlpha * 0.5})`);
-      g1.addColorStop(1,    `rgba(${r},${g},${b},${botAlpha})`);
-      return g1;
-    };
-
-    const crosshairPlugin = {
-      id: 'crosshair',
-      afterDraw(chart) {
-        if (!chart.tooltip._active || !chart.tooltip._active.length) return;
-        const c = chart.ctx;
-        const x = chart.tooltip._active[0].element.x;
-        c.save();
-        c.beginPath();
-        c.moveTo(x, chart.scales.y.top);
-        c.lineTo(x, chart.scales.y.bottom);
-        c.lineWidth = 1;
-        c.strokeStyle = 'rgba(107,114,128,0.3)';
-        c.setLineDash([5, 4]);
-        c.stroke();
-        c.restore();
-      },
-    };
-
-    chartInstance.current = new window.Chart(ctx, {
-      type: 'line',
-      plugins: [crosshairPlugin],
-      data: {
-        labels: chartData.departments,
-        datasets: [
-          {
-            label: 'Total',
-            data: chartData.counts,
-            borderColor: '#b2ff1e',
-            backgroundColor: makeGrad(178, 255, 0, 0.55, 0.02),
-            borderWidth: 2.5,
-            tension: 0.5,
-            cubicInterpolationMode: 'monotone',
-            fill: 'origin',
-            order: 3,
-            pointRadius: 0,
-            pointHoverRadius: 5,
-            pointHoverBackgroundColor: '#b2ff1e',
-            pointHoverBorderColor: '#fff',
-            pointHoverBorderWidth: 2,
-          },
-          {
-            label: 'Male',
-            data: chartData.maleCounts,
-            borderColor: '#3b775e',
-            backgroundColor: makeGrad(59, 119, 94, 0.50, 0.02),
-            borderWidth: 2.5,
-            tension: 0.5,
-            cubicInterpolationMode: 'monotone',
-            fill: 'origin',
-            order: 2,
-            pointRadius: 0,
-            pointHoverRadius: 5,
-            pointHoverBackgroundColor: '#3b775e',
-            pointHoverBorderColor: '#fff',
-            pointHoverBorderWidth: 2,
-          },
-          {
-            label: 'Female',
-            data: chartData.femaleCounts,
-            borderColor: '#ff9900',
-            backgroundColor: makeGrad(255, 153, 0, 0.45, 0.02),
-            borderWidth: 2.5,
-            tension: 0.5,
-            cubicInterpolationMode: 'monotone',
-            fill: 'origin',
-            order: 1,
-            pointRadius: 0,
-            pointHoverRadius: 5,
-            pointHoverBackgroundColor: '#ff9900',
-            pointHoverBorderColor: '#fff',
-            pointHoverBorderWidth: 2,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        layout: { padding: { top: 8, right: 4, bottom: 0, left: 0 } },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: '#ffffff',
-            padding: { top: 10, bottom: 10, left: 14, right: 16 },
-            titleColor: '#111827',
-            bodyColor: '#4b5563',
-            titleFont: { size: 13, weight: '700', family: 'Inter, Segoe UI, Arial, sans-serif' },
-            bodyFont: { size: 12, weight: '400', family: 'Inter, Segoe UI, Arial, sans-serif' },
-            cornerRadius: 10,
-            borderColor: '#e5e7eb',
-            borderWidth: 1,
-            displayColors: true,
-            boxWidth: 8,
-            boxHeight: 8,
-            boxPadding: 5,
-            caretSize: 5,
-            callbacks: {
-              title: (items) => items[0].label,
-              label: (item) => `  ${item.dataset.label}: ${item.parsed.y}`,
-            },
-          },
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            suggestedMax,
-            ticks: {
-              font: { size: 11, family: 'Inter, Segoe UI, Arial, sans-serif' },
-              color: '#c4c9d4',
-              stepSize: rawStep,
-              padding: 12,
-              maxTicksLimit: 5,
-            },
-            grid: {
-              display: true,
-              color: 'rgba(229,231,235,0.55)',
-              lineWidth: 1,
-            },
-            border: { display: false },
-          },
-          x: {
-            ticks: {
-              font: { size: 11, family: 'Inter, Segoe UI, Arial, sans-serif' },
-              color: '#c4c9d4',
-              maxRotation: 0,
-              minRotation: 0,
-              padding: 8,
-            },
-            grid: { display: false },
-            border: { display: false },
-          },
-        },
-        interaction: { intersect: false, mode: 'index' },
-        animation: { duration: 800, easing: 'easeInOutCubic' },
-      },
-    });
+    }
   };
 
   const renderLeadsChart = (data) => {
@@ -916,9 +769,9 @@ function AdminDashboard() {
         setStatModalData((res.data || []).filter(p => p.status === 'active'));
       } else if (key === 'leads') {
         const metaResp = await api.get('/meta-leads?page=1&limit=50&sortBy=createdTime&sortOrder=desc');
-        const manualResp = await api.get('/leads');
+        const manualResp = await api.get('/leads?page=1&limit=50&sortBy=newest');
         const m1 = Array.isArray(metaResp.data?.leads) ? metaResp.data.leads : [];
-        const m2 = Array.isArray(manualResp.data) ? manualResp.data : [];
+        const m2 = Array.isArray(manualResp.data?.leads) ? manualResp.data.leads : (Array.isArray(manualResp.data) ? manualResp.data : []);
         const combined = [...m1, ...m2].filter(l => l).sort((a, b) => {
           const tA = new Date(a.createdTime || a.createdAt || a.syncedAt || 0).getTime();
           const tB = new Date(b.createdTime || b.createdAt || b.syncedAt || 0).getTime();

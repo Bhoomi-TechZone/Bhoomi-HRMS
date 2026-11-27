@@ -1,0 +1,33 @@
+# ==============================================================================
+# Bhoomi HRMS - Server Configuration (.htaccess)
+# ==============================================================================
+
+# 1. CRITICAL: Disable directory listing under all circumstances (Never show "Index of build/")
+Options -Indexes
+
+# 2. Directory Index Priority: look for index.html first; if missing during build, fallback to update.html
+DirectoryIndex index.html update.html
+
+# 3. If directory access is ever triggered or forbidden, route to update.html
+ErrorDocument 403 /update.html
+
+# 4. SPA URL Rewrite Rules (Enables client-side routing on page refresh)
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Allow existing static files, directories, and symlinks to load directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # If index.html exists, serve index.html for all frontend routes
+  RewriteCond %{DOCUMENT_ROOT}/index.html -f
+  RewriteRule ^ index.html [L]
+
+  # If index.html does not exist (during build/deployment), serve update.html
+  RewriteCond %{DOCUMENT_ROOT}/update.html -f
+  RewriteRule ^ update.html [L]
+
+  RewriteRule . /index.html [L]
+</IfModule>
